@@ -1,0 +1,39 @@
+server:
+  port: ${SERVER_PORT:8080}
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
+spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+  application:
+    name: monitor-backend
+  datasource:
+    hikari:
+      # 核心配置：主动、提前回收连接，避免被中间层先断
+      max-lifetime: 300000
+      # 辅助配置：定期探活，尽量早发现坏连接
+      keepalive-time: 60000     # 5分钟
+      validation-timeout: 3000    # 3秒，探活超时时间
+      # 前提条件：必须有常驻连接，keepalive 才会生效
+      minimum-idle: 2             # 确保池中始终有连接可被探活[citation:8]
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/monitor}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD}
+  flyway:
+    enabled: true
+
+mybatis-plus:
+  type-handlers-package: com.monitor.platform.infrastructure.mybatis.uuid
+  configuration:
+    map-underscore-to-camel-case: true
+    cache-enabled: false
+  global-config:
+    banner: false
