@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 账号 Mapper。
  */
-public interface AccountMapper  {
+public interface AccountMapper {
 
     int insertAccount(AccountEntity entity);
 
@@ -20,6 +20,7 @@ public interface AccountMapper  {
     AccountEntity selectAccountByPlatformIdAndEmail(@Param("platformId") Integer platformId,
                                                     @Param("email") String email);
 
-    List<AccountEntity> selectDueAccounts(@Param("now") OffsetDateTime now,
-                                          @Param("limit") int limit);
+    List<AccountEntity> selectDueAccountsByPlatform(@Param("platformId") Integer platformId,
+                                                    @Param("now") OffsetDateTime now,
+                                                    @Param("limit") int limit);
 }

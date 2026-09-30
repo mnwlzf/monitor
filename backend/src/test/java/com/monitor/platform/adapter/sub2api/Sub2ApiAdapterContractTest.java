@@ -15,15 +15,16 @@ class Sub2ApiAdapterContractTest {
 
     private static final String BASE_URL = "https://codex.trovebox.online";
     private static final String EMAIL = "2696775653@qq.com";
+    private static final String PASSWORD = "test";
 
     @Autowired
     private Sub2ApiAdapter sub2ApiAdapter;
 
     @Test
     void shouldLoginAndFetchSub2ApiData() {
-        sub2ApiAdapter.login(BASE_URL, EMAIL);
-        sub2ApiAdapter.fetchProfile(BASE_URL, EMAIL);
-        sub2ApiAdapter.fetchKeys(BASE_URL, EMAIL);
-        sub2ApiAdapter.fetchAvailableGroups(BASE_URL, EMAIL);
+        sub2ApiAdapter.login(BASE_URL, EMAIL, PASSWORD);
+        sub2ApiAdapter.fetchProfile(BASE_URL, EMAIL, PASSWORD);
+        sub2ApiAdapter.fetchKeys(BASE_URL, EMAIL, PASSWORD);
+        sub2ApiAdapter.fetchAvailableGroups(BASE_URL, EMAIL, PASSWORD);
     }
 }

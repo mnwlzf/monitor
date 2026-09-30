@@ -29,6 +29,7 @@ class Sub2ApiAdapterTest {
 
     private static final String BASE_URL = "https://codex.trovebox.online";
     private static final String EMAIL = "user@example.com";
+    private static final String PASSWORD = "test";
     private static final String TOKEN_CACHE_KEY = "sub2:token:" + BASE_URL + ":" + EMAIL;
 
     @Mock
@@ -54,7 +55,7 @@ class Sub2ApiAdapterTest {
         when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn("cached-token");
         when(sub2ApiClient.fetchAvailableGroups(BASE_URL, "cached-token")).thenReturn(response);
 
-        Sub2GroupsResponse result = adapter.fetchAvailableGroups(BASE_URL, EMAIL);
+        Sub2GroupsResponse result = adapter.fetchAvailableGroups(BASE_URL, EMAIL, PASSWORD);
 
         assertSame(response, result);
         verify(sub2ApiClient).fetchAvailableGroups(BASE_URL, "cached-token");
@@ -81,7 +82,7 @@ class Sub2ApiAdapterTest {
         when(sub2ApiClient.fetchAvailableGroups(BASE_URL, "access-token"))
                 .thenReturn(groupsResponse);
 
-        Sub2GroupsResponse result = adapter.fetchAvailableGroups(BASE_URL, EMAIL);
+        Sub2GroupsResponse result = adapter.fetchAvailableGroups(BASE_URL, EMAIL, PASSWORD);
 
         assertSame(groupsResponse, result);
         ArgumentCaptor<Sub2LoginRequest> requestCaptor = ArgumentCaptor.forClass(Sub2LoginRequest.class);

@@ -33,9 +33,6 @@ public class Sub2ApiAdapter {
     /** 登录令牌在 Redis 中的缓存时长。 */
     private static final Duration TOKEN_TTL = Duration.ofDays(1);
 
-    /** 现有登录流程使用的默认密码，后续接入账号配置时可从配置源注入。 */
-    private static final String DEFAULT_PASSWORD = "test";
-
     private final Sub2ApiClient sub2ApiClient;
     private final StringRedisTemplate stringRedisTemplate;
 
@@ -58,7 +55,15 @@ public class Sub2ApiAdapter {
      * @param baseUrl Sub2API 服务地址
      * @param email   账号邮箱
      */
-    public void login(String baseUrl, String email) {
+
+    /**
+     * 使用指定密码登录并缓存访问令牌。
+     *
+     * @param baseUrl  Sub2API 服务地址
+     * @param email    账号邮箱
+     * @param password 登录密码
+     */
+    public void login(String baseUrl, String email, String password) {
         String cacheKey = tokenKey(baseUrl, email);
 
         // 1. 优先复用缓存令牌，避免频繁登录。
@@ -71,7 +76,7 @@ public class Sub2ApiAdapter {
         log.info("{} {} 缓存的身份信息已失效，重新登录", baseUrl, email);
 
         // 2. 网络层已由拦截器重试，这里只发起一次业务登录请求。
-        Sub2LoginRequest request = new Sub2LoginRequest(email, DEFAULT_PASSWORD);
+        Sub2LoginRequest request = new Sub2LoginRequest(email, password);
         Sub2LoginResponse response = sub2ApiClient.login(baseUrl, request);
         validateLoginResponse(baseUrl, email, response);
 
@@ -87,11 +92,13 @@ public class Sub2ApiAdapter {
      * 获取个人信息。
      *
      * @param baseUrl Sub2API 服务地址
-     * @param email   账号邮箱
+     * @param email    账号邮箱
+     * @param password 登录密码
      * @return Sub2API 个人信息响应
      */
-    public Sub2ProfileResponse fetchProfile(String baseUrl, String email) {
-        String accessToken = resolveAccessToken(baseUrl, email);
+
+    public Sub2ProfileResponse fetchProfile(String baseUrl, String email, String password) {
+        String accessToken = resolveAccessToken(baseUrl, email, password);
 
         Sub2ProfileResponse response = sub2ApiClient.fetchProfile(baseUrl, accessToken);
         if (response == null) {
@@ -114,11 +121,13 @@ public class Sub2ApiAdapter {
      * 获取密钥列表。
      *
      * @param baseUrl Sub2API 服务地址
-     * @param email   账号邮箱
+     * @param email    账号邮箱
+     * @param password 登录密码
      * @return Sub2API 密钥列表响应
      */
-    public Sub2KeysResponse fetchKeys(String baseUrl, String email) {
-        String accessToken = resolveAccessToken(baseUrl, email);
+
+    public Sub2KeysResponse fetchKeys(String baseUrl, String email, String password) {
+        String accessToken = resolveAccessToken(baseUrl, email, password);
 
         Sub2KeysResponse response = sub2ApiClient.fetchKeys(baseUrl, accessToken);
         if (response == null) {
@@ -142,11 +151,13 @@ public class Sub2ApiAdapter {
      * 获取当前账号可用分组。
      *
      * @param baseUrl Sub2API 服务地址
-     * @param email   账号邮箱
+     * @param email    账号邮箱
+     * @param password 登录密码
      * @return Sub2API 可用分组响应
      */
-    public Sub2GroupsResponse fetchAvailableGroups(String baseUrl, String email) {
-        String accessToken = resolveAccessToken(baseUrl, email);
+
+    public Sub2GroupsResponse fetchAvailableGroups(String baseUrl, String email, String password) {
+        String accessToken = resolveAccessToken(baseUrl, email, password);
 
         Sub2GroupsResponse response = sub2ApiClient.fetchAvailableGroups(baseUrl, accessToken);
         if (response == null) {
@@ -189,14 +200,14 @@ public class Sub2ApiAdapter {
     /**
      * 获取访问令牌；缓存不存在时先登录，再重新读取缓存。
      */
-    private String resolveAccessToken(String baseUrl, String email) {
+    private String resolveAccessToken(String baseUrl, String email, String password) {
         String token = stringRedisTemplate.opsForValue().get(tokenKey(baseUrl, email));
         if (StrUtil.isNotEmpty(token)) {
             return token;
         }
 
         log.info("{} {} token 不存在，先执行登录", baseUrl, email);
-        login(baseUrl, email);
+        login(baseUrl, email, password);
 
         token = stringRedisTemplate.opsForValue().get(tokenKey(baseUrl, email));
         if (StrUtil.isEmpty(token)) {

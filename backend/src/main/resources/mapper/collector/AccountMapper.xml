@@ -86,10 +86,11 @@
         LIMIT 1
     </select>
 
-    <select id="selectDueAccounts" resultMap="AccountResultMap">
+    <select id="selectDueAccountsByPlatform" resultMap="AccountResultMap">
         SELECT <include refid="AccountColumns"/>
         FROM accounts
-        WHERE status = TRUE
+        WHERE platform_id = #{platformId}
+          AND status = TRUE
           AND deleted_at IS NULL
           AND (next_collect_at IS NULL OR next_collect_at &lt;= #{now})
         ORDER BY next_collect_at ASC NULLS FIRST, id ASC

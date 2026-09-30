@@ -42,8 +42,8 @@ public class AccountRepository {
         return Optional.ofNullable(accountMapper.selectAccountByPlatformIdAndEmail(platformId, email));
     }
 
-    public List<AccountEntity> findDueForCollection(OffsetDateTime now, int limit) {
+    public List<AccountEntity> findDueForCollection(Integer platformId, OffsetDateTime now, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 1000));
-        return accountMapper.selectDueAccounts(now, safeLimit);
+        return accountMapper.selectDueAccountsByPlatform(platformId, now, safeLimit);
     }
 }

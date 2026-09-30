@@ -38,7 +38,7 @@ class MapperXmlContractTest {
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.PlatformMapper.selectEnabledPlatforms"));
         assertTrue(configuration.hasStatement(
-                "com.monitor.platform.collector.repository.mapper.AccountMapper.selectDueAccounts"));
+                "com.monitor.platform.collector.repository.mapper.AccountMapper.selectDueAccountsByPlatform"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountMetricSnapshotMapper.selectLatestSnapshot"));
         assertTrue(configuration.hasStatement(
