@@ -86,6 +86,13 @@
         LIMIT 1
     </select>
 
+    <select id="selectAccountsByPlatformId" resultMap="AccountResultMap">
+        SELECT <include refid="AccountColumns"/>
+        FROM accounts
+        WHERE platform_id = #{platformId}
+          AND deleted_at IS NULL
+        ORDER BY id DESC
+    </select>
     <select id="selectDueAccountsByPlatform" resultMap="AccountResultMap">
         SELECT <include refid="AccountColumns"/>
         FROM accounts

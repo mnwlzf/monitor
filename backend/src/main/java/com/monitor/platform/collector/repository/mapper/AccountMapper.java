@@ -20,6 +20,8 @@ public interface AccountMapper {
     AccountEntity selectAccountByPlatformIdAndEmail(@Param("platformId") Integer platformId,
                                                     @Param("email") String email);
 
+    List<AccountEntity> selectAccountsByPlatformId(@Param("platformId") Integer platformId);
+
     List<AccountEntity> selectDueAccountsByPlatform(@Param("platformId") Integer platformId,
                                                     @Param("now") OffsetDateTime now,
                                                     @Param("limit") int limit);
