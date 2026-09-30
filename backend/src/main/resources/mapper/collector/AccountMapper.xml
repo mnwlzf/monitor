@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.AccountMapper">
+
+    <resultMap id="AccountResultMap" type="com.monitor.platform.collector.repository.entity.AccountEntity">
+        <id column="id" property="id"/>
+        <result column="email" property="email"/>
+        <result column="username" property="username"/>
+        <result column="platform" property="platform"/>
+        <result column="url" property="url"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="password" property="password"/>
+        <result column="platform_id" property="platformId"/>
+        <result column="display_name" property="displayName"/>
+        <result column="external_user_id" property="externalUserId"/>
+        <result column="auth_type" property="authType"/>
+        <result column="credential_status" property="credentialStatus"/>
+        <result column="settings" property="settings" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="last_collected_at" property="lastCollectedAt"/>
+        <result column="last_collect_status" property="lastCollectStatus"/>
+        <result column="last_collect_error" property="lastCollectError"/>
+        <result column="consecutive_failures" property="consecutiveFailures"/>
+        <result column="next_collect_at" property="nextCollectAt"/>
+        <result column="deleted_at" property="deletedAt"/>
+    </resultMap>
+
+    <sql id="AccountColumns">
+        id, email, username, platform, url, status, created_at, updated_at, password,
+        platform_id, display_name, external_user_id, auth_type, credential_status,
+        settings, last_collected_at, last_collect_status, last_collect_error,
+        consecutive_failures, next_collect_at, deleted_at
+    </sql>
+
+    <insert id="insertAccount" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO accounts (
+            email, username, platform, url, status, created_at, updated_at, password,
+            platform_id, display_name, external_user_id, auth_type, credential_status,
+            settings, last_collected_at, last_collect_status, last_collect_error,
+            consecutive_failures, next_collect_at, deleted_at
+        ) VALUES (
+            #{email}, #{username}, #{platform}, #{url}, #{status}, #{createdAt}, #{updatedAt}, #{password},
+            #{platformId}, #{displayName}, #{externalUserId}, #{authType}, #{credentialStatus},
+            #{settings,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}, #{lastCollectedAt}, #{lastCollectStatus}, #{lastCollectError},
+            #{consecutiveFailures}, #{nextCollectAt}, #{deletedAt}
+        )
+    </insert>
+
+    <update id="updateAccount">
+        UPDATE accounts
+        SET email = #{email},
+            username = #{username},
+            platform = #{platform},
+            url = #{url},
+            status = #{status},
+            updated_at = #{updatedAt},
+            password = #{password},
+            platform_id = #{platformId},
+            display_name = #{displayName},
+            external_user_id = #{externalUserId},
+            auth_type = #{authType},
+            credential_status = #{credentialStatus},
+            settings = #{settings,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            last_collected_at = #{lastCollectedAt},
+            last_collect_status = #{lastCollectStatus},
+            last_collect_error = #{lastCollectError},
+            consecutive_failures = #{consecutiveFailures},
+            next_collect_at = #{nextCollectAt},
+            deleted_at = #{deletedAt}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectAccountById" resultMap="AccountResultMap">
+        SELECT <include refid="AccountColumns"/>
+        FROM accounts
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectAccountByPlatformIdAndEmail" resultMap="AccountResultMap">
+        SELECT <include refid="AccountColumns"/>
+        FROM accounts
+        WHERE platform_id = #{platformId}
+          AND email = #{email}
+          AND deleted_at IS NULL
+        LIMIT 1
+    </select>
+
+    <select id="selectDueAccounts" resultMap="AccountResultMap">
+        SELECT <include refid="AccountColumns"/>
+        FROM accounts
+        WHERE status = TRUE
+          AND deleted_at IS NULL
+          AND (next_collect_at IS NULL OR next_collect_at &lt;= #{now})
+        ORDER BY next_collect_at ASC NULLS FIRST, id ASC
+        LIMIT #{limit}
+    </select>
+</mapper>

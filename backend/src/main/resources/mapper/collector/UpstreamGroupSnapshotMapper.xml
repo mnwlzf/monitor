@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.UpstreamGroupSnapshotMapper">
+
+    <resultMap id="UpstreamGroupSnapshotResultMap" type="com.monitor.platform.collector.repository.entity.UpstreamGroupSnapshotEntity">
+        <id column="id" property="id"/>
+        <result column="group_id" property="groupId"/>
+        <result column="collection_run_id" property="collectionRunId"/>
+        <result column="ratio" property="ratio"/>
+        <result column="base_ratio" property="baseRatio"/>
+        <result column="status" property="status"/>
+        <result column="is_active" property="isActive"/>
+        <result column="raw_data" property="rawData" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="content_hash" property="contentHash"/>
+        <result column="collected_at" property="collectedAt"/>
+    </resultMap>
+
+    <sql id="UpstreamGroupSnapshotColumns">
+        id, group_id, collection_run_id, ratio, base_ratio, status, is_active,
+        raw_data, content_hash, collected_at
+    </sql>
+
+    <insert id="insertSnapshot" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO upstream_group_snapshots (
+            group_id, collection_run_id, ratio, base_ratio, status, is_active,
+            raw_data, content_hash, collected_at
+        ) VALUES (
+            #{groupId}, #{collectionRunId}, #{ratio}, #{baseRatio}, #{status}, #{isActive},
+            #{rawData,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}, #{contentHash}, #{collectedAt}
+        )
+    </insert>
+
+    <select id="selectSnapshotsByGroupRange" resultMap="UpstreamGroupSnapshotResultMap">
+        SELECT <include refid="UpstreamGroupSnapshotColumns"/>
+        FROM upstream_group_snapshots
+        WHERE group_id = #{groupId}
+        <if test="from != null">
+            AND collected_at &gt;= #{from}
+        </if>
+        <if test="to != null">
+            AND collected_at &lt;= #{to}
+        </if>
+        ORDER BY collected_at ASC
+        LIMIT #{limit}
+    </select>
+</mapper>

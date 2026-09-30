@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.AccountMetricSnapshotMapper">
+
+    <resultMap id="AccountMetricSnapshotResultMap" type="com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity">
+        <id column="id" property="id"/>
+        <result column="account_id" property="accountId"/>
+        <result column="collection_run_id" property="collectionRunId"/>
+        <result column="platform_type" property="platformType"/>
+        <result column="balance" property="balance"/>
+        <result column="frozen_balance" property="frozenBalance"/>
+        <result column="quota" property="quota"/>
+        <result column="used_quota" property="usedQuota"/>
+        <result column="aff_quota" property="affQuota"/>
+        <result column="aff_history_quota" property="affHistoryQuota"/>
+        <result column="request_count" property="requestCount"/>
+        <result column="quota_unit" property="quotaUnit"/>
+        <result column="raw_data" property="rawData" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="content_hash" property="contentHash"/>
+        <result column="collected_at" property="collectedAt"/>
+    </resultMap>
+
+    <sql id="AccountMetricSnapshotColumns">
+        id, account_id, collection_run_id, platform_type, balance, frozen_balance,
+        quota, used_quota, aff_quota, aff_history_quota, request_count, quota_unit,
+        raw_data, content_hash, collected_at
+    </sql>
+
+    <insert id="insertSnapshot" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO account_metric_snapshots (
+            account_id, collection_run_id, platform_type, balance, frozen_balance,
+            quota, used_quota, aff_quota, aff_history_quota, request_count, quota_unit,
+            raw_data, content_hash, collected_at
+        ) VALUES (
+            #{accountId}, #{collectionRunId}, #{platformType}, #{balance}, #{frozenBalance},
+            #{quota}, #{usedQuota}, #{affQuota}, #{affHistoryQuota}, #{requestCount}, #{quotaUnit},
+            #{rawData,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}, #{contentHash}, #{collectedAt}
+        )
+    </insert>
+
+    <select id="selectLatestSnapshot" resultMap="AccountMetricSnapshotResultMap">
+        SELECT <include refid="AccountMetricSnapshotColumns"/>
+        FROM account_metric_snapshots
+        WHERE account_id = #{accountId}
+        ORDER BY collected_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectSnapshotsByAccountRange" resultMap="AccountMetricSnapshotResultMap">
+        SELECT <include refid="AccountMetricSnapshotColumns"/>
+        FROM account_metric_snapshots
+        WHERE account_id = #{accountId}
+        <if test="from != null">
+            AND collected_at &gt;= #{from}
+        </if>
+        <if test="to != null">
+            AND collected_at &lt;= #{to}
+        </if>
+        ORDER BY collected_at ASC
+        LIMIT #{limit}
+    </select>
+</mapper>

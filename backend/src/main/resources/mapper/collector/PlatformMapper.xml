@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.PlatformMapper">
+
+    <resultMap id="PlatformResultMap" type="com.monitor.platform.collector.repository.entity.PlatformEntity">
+        <id column="id" property="id"/>
+        <result column="platform_name" property="platformName"/>
+        <result column="url" property="url"/>
+        <result column="platform_type" property="platformType"/>
+        <result column="status" property="status"/>
+        <result column="description" property="description"/>
+        <result column="settings" property="settings" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="last_collected_at" property="lastCollectedAt"/>
+        <result column="deleted_at" property="deletedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="PlatformColumns">
+        id, platform_name, url, platform_type, status, description, settings,
+        last_collected_at, deleted_at, created_at, updated_at
+    </sql>
+
+    <insert id="insertPlatform" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO platforms (
+            platform_name, url, platform_type, status, description, settings,
+            last_collected_at, deleted_at, created_at, updated_at
+        ) VALUES (
+            #{platformName}, #{url}, #{platformType}, #{status}, #{description},
+            #{settings,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}, #{lastCollectedAt}, #{deletedAt},
+            #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updatePlatform">
+        UPDATE platforms
+        SET platform_name = #{platformName},
+            url = #{url},
+            platform_type = #{platformType},
+            status = #{status},
+            description = #{description},
+            settings = #{settings,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            last_collected_at = #{lastCollectedAt},
+            deleted_at = #{deletedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectPlatformById" resultMap="PlatformResultMap">
+        SELECT <include refid="PlatformColumns"/>
+        FROM platforms
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectPlatformByName" resultMap="PlatformResultMap">
+        SELECT <include refid="PlatformColumns"/>
+        FROM platforms
+        WHERE platform_name = #{platformName}
+          AND deleted_at IS NULL
+        LIMIT 1
+    </select>
+
+    <select id="selectEnabledPlatforms" resultMap="PlatformResultMap">
+        SELECT <include refid="PlatformColumns"/>
+        FROM platforms
+        WHERE status = TRUE
+          AND deleted_at IS NULL
+        ORDER BY id
+    </select>
+</mapper>

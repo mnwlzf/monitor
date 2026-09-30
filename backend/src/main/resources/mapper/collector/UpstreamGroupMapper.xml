@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper">
+
+    <resultMap id="UpstreamGroupResultMap" type="com.monitor.platform.collector.repository.entity.UpstreamGroupEntity">
+        <id column="id" property="id"/>
+        <result column="account_id" property="accountId"/>
+        <result column="platform_type" property="platformType"/>
+        <result column="external_group_id" property="externalGroupId"/>
+        <result column="group_name" property="groupName"/>
+        <result column="description" property="description"/>
+        <result column="platform" property="platform"/>
+        <result column="current_ratio" property="currentRatio"/>
+        <result column="current_base_ratio" property="currentBaseRatio"/>
+        <result column="status" property="status"/>
+        <result column="is_active" property="isActive"/>
+        <result column="first_seen_at" property="firstSeenAt"/>
+        <result column="last_seen_at" property="lastSeenAt"/>
+        <result column="last_changed_at" property="lastChangedAt"/>
+        <result column="metadata" property="metadata" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+    </resultMap>
+
+    <sql id="UpstreamGroupColumns">
+        id, account_id, platform_type, external_group_id, group_name, description,
+        platform, current_ratio, current_base_ratio, status, is_active,
+        first_seen_at, last_seen_at, last_changed_at, metadata
+    </sql>
+
+    <insert id="insertGroup" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO upstream_groups (
+            account_id, platform_type, external_group_id, group_name, description,
+            platform, current_ratio, current_base_ratio, status, is_active,
+            first_seen_at, last_seen_at, last_changed_at, metadata
+        ) VALUES (
+            #{accountId}, #{platformType}, #{externalGroupId}, #{groupName}, #{description},
+            #{platform}, #{currentRatio}, #{currentBaseRatio}, #{status}, #{isActive},
+            #{firstSeenAt}, #{lastSeenAt}, #{lastChangedAt}, #{metadata,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
+        )
+    </insert>
+
+    <update id="updateGroup">
+        UPDATE upstream_groups
+        SET group_name = #{groupName},
+            description = #{description},
+            platform = #{platform},
+            current_ratio = #{currentRatio},
+            current_base_ratio = #{currentBaseRatio},
+            status = #{status},
+            is_active = #{isActive},
+            last_seen_at = #{lastSeenAt},
+            last_changed_at = #{lastChangedAt},
+            metadata = #{metadata,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectGroupByAccountAndExternalId" resultMap="UpstreamGroupResultMap">
+        SELECT <include refid="UpstreamGroupColumns"/>
+        FROM upstream_groups
+        WHERE account_id = #{accountId}
+          AND platform_type = #{platformType}
+          AND external_group_id = #{externalGroupId}
+        LIMIT 1
+    </select>
+
+    <select id="selectGroupsByAccount" resultMap="UpstreamGroupResultMap">
+        SELECT <include refid="UpstreamGroupColumns"/>
+        FROM upstream_groups
+        WHERE account_id = #{accountId}
+        <if test="activeOnly">
+            AND is_active = TRUE
+        </if>
+        ORDER BY group_name ASC
+    </select>
+
+    <update id="deactivateMissingGroups">
+        UPDATE upstream_groups
+        SET is_active = FALSE,
+            last_changed_at = #{changedAt}
+        WHERE account_id = #{accountId}
+          AND platform_type = #{platformType}
+          AND is_active = TRUE
+        <if test="externalGroupIds != null and externalGroupIds.size() > 0">
+            AND external_group_id NOT IN
+            <foreach collection="externalGroupIds" item="externalGroupId" open="(" separator="," close=")">
+                #{externalGroupId}
+            </foreach>
+        </if>
+    </update>
+</mapper>

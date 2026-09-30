@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.CollectionRunMapper">
+
+    <resultMap id="CollectionRunResultMap" type="com.monitor.platform.collector.repository.entity.CollectionRunEntity">
+        <id column="id" property="id"/>
+        <result column="account_id" property="accountId"/>
+        <result column="platform_type" property="platformType"/>
+        <result column="status" property="status"/>
+        <result column="started_at" property="startedAt"/>
+        <result column="finished_at" property="finishedAt"/>
+        <result column="duration_ms" property="durationMs"/>
+        <result column="error_code" property="errorCode"/>
+        <result column="error_message" property="errorMessage"/>
+        <result column="metadata" property="metadata" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+    </resultMap>
+
+    <sql id="CollectionRunColumns">
+        id, account_id, platform_type, status, started_at, finished_at,
+        duration_ms, error_code, error_message, metadata
+    </sql>
+
+    <insert id="insertRun" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO collection_runs (
+            account_id, platform_type, status, started_at, finished_at,
+            duration_ms, error_code, error_message, metadata
+        ) VALUES (
+            #{accountId}, #{platformType}, #{status}, #{startedAt}, #{finishedAt},
+            #{durationMs}, #{errorCode}, #{errorMessage}, #{metadata,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
+        )
+    </insert>
+
+    <update id="updateRunFinish">
+        UPDATE collection_runs
+        SET status = #{status},
+            finished_at = #{finishedAt},
+            duration_ms = #{durationMs},
+            error_code = #{errorCode},
+            error_message = #{errorMessage}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectRunById" resultMap="CollectionRunResultMap">
+        SELECT <include refid="CollectionRunColumns"/>
+        FROM collection_runs
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectRecentRuns" resultMap="CollectionRunResultMap">
+        SELECT <include refid="CollectionRunColumns"/>
+        FROM collection_runs
+        WHERE account_id = #{accountId}
+        ORDER BY started_at DESC
+        LIMIT #{limit}
+    </select>
+</mapper>

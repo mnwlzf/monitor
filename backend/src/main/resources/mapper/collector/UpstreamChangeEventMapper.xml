@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper">
+
+    <resultMap id="UpstreamChangeEventResultMap" type="com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity">
+        <id column="id" property="id"/>
+        <result column="account_id" property="accountId"/>
+        <result column="platform_type" property="platformType"/>
+        <result column="collection_run_id" property="collectionRunId"/>
+        <result column="entity_type" property="entityType"/>
+        <result column="entity_id" property="entityId"/>
+        <result column="entity_key" property="entityKey"/>
+        <result column="change_type" property="changeType"/>
+        <result column="field_name" property="fieldName"/>
+        <result column="old_value" property="oldValue" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="new_value" property="newValue" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="severity" property="severity"/>
+        <result column="message" property="message"/>
+        <result column="detected_at" property="detectedAt"/>
+        <result column="metadata" property="metadata" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+    </resultMap>
+
+    <sql id="UpstreamChangeEventColumns">
+        id, account_id, platform_type, collection_run_id, entity_type, entity_id,
+        entity_key, change_type, field_name, old_value, new_value, severity,
+        message, detected_at, metadata
+    </sql>
+
+    <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO upstream_change_events (
+            account_id, platform_type, collection_run_id, entity_type, entity_id,
+            entity_key, change_type, field_name, old_value, new_value, severity,
+            message, detected_at, metadata
+        ) VALUES (
+            #{accountId}, #{platformType}, #{collectionRunId}, #{entityType}, #{entityId},
+            #{entityKey}, #{changeType}, #{fieldName},
+            #{oldValue,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}, #{newValue,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            #{severity}, #{message}, #{detectedAt}, #{metadata,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
+        )
+    </insert>
+
+    <select id="selectRecentEvents" resultMap="UpstreamChangeEventResultMap">
+        SELECT <include refid="UpstreamChangeEventColumns"/>
+        FROM upstream_change_events
+        WHERE account_id = #{accountId}
+        ORDER BY detected_at DESC
+        LIMIT #{limit}
+    </select>
+</mapper>
