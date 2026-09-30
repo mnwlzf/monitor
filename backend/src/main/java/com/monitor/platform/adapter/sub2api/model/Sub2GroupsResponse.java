@@ -29,12 +29,12 @@ public record Sub2GroupsResponse(
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Group(
             Long id,
-            String name,
-            String description,
-            String platform,
-            @JsonProperty("rate_multiplier") Double rateMultiplier,
+            String name,//分组名称
+            String description,//分组描述
+            String platform,//分组所属平台 如 kimi deepseek  openai
+            @JsonProperty("rate_multiplier") Double rateMultiplier, // 分组倍率
             @JsonProperty("is_exclusive") Boolean isExclusive,
-            String status,
+            String status,//分组状态
             @JsonProperty("subscription_type") String subscriptionType,
             @JsonProperty("daily_limit_usd") Double dailyLimitUsd,
             @JsonProperty("weekly_limit_usd") Double weeklyLimitUsd,

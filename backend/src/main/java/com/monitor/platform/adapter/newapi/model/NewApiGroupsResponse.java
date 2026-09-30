@@ -17,7 +17,7 @@ import java.util.Map;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record NewApiGroupsResponse(
-        Map<String, Group> data,
+        Map<String, Group> data,// key 为分组名称
         String message,
         boolean success
 ) {
@@ -28,9 +28,9 @@ public record NewApiGroupsResponse(
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Group(
             @JsonProperty("base_ratio") Double baseRatio,
-            String desc,
+            String desc,//分组描述
             Integer order,
-            Double ratio,
+            Double ratio,//分组倍率
             @JsonProperty("schedule_active") Boolean scheduleActive,
             @JsonProperty("schedule_enabled") Boolean scheduleEnabled
     ) {

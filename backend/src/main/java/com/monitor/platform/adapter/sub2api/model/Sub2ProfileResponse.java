@@ -36,9 +36,9 @@ public record Sub2ProfileResponse(
             String email,
             String username,
             String role,
-            Double balance,
+            Double balance,  // 当前剩余余额，如果充值了 这个数字会变大，如果使用会变小，单纯使用此字段判断每天消耗不靠谱
             @JsonProperty("frozen_balance") Double frozenBalance,
-            Integer concurrency,
+            Integer concurrency,// 并发数
             String status,
             @JsonProperty("allowed_groups") List<Long> allowedGroups,
             @JsonProperty("last_active_at") OffsetDateTime lastActiveAt,
