@@ -42,6 +42,11 @@ public class AccountCredentialService {
         return credentialRepository.replaceActive(entity);
     }
 
+    public void deactivateAll(Integer accountId) {
+        log.info("停用账号全部凭证: accountId={}", accountId);
+        credentialRepository.deactivateAllActive(accountId);
+    }
+
     public String resolvePassword(Integer accountId) {
         AccountCredentialEntity credential = credentialRepository.findActive(accountId, PASSWORD)
                 .orElseThrow(() -> new IllegalStateException("账号未配置可用密码凭证: " + accountId));

@@ -4,6 +4,7 @@ import com.monitor.platform.api.dto.AccountResponse;
 import com.monitor.platform.api.dto.CreateAccountRequest;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
 import com.monitor.platform.api.dto.PlatformResponse;
+import com.monitor.platform.api.dto.UpdateAccountRequest;
 import com.monitor.platform.collector.application.AccountCredentialService;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
@@ -90,12 +91,59 @@ public class UpstreamAdminService {
         return toAccountResponse(entity);
     }
 
+    @Transactional
+    public AccountResponse updateAccount(Integer platformId, Integer accountId,
+                                         UpdateAccountRequest request) {
+        AccountEntity entity = findAccount(platformId, accountId);
+
+        if (request.loginName() != null && !request.loginName().isBlank()) {
+            accountRepository.findByPlatformIdAndEmail(platformId, request.loginName())
+                    .filter(existing -> !existing.getId().equals(accountId))
+                    .ifPresent(existing -> {
+                        throw BusinessException.of("该平台下账号已存在: " + request.loginName());
+                    });
+            entity.setEmail(request.loginName());
+            entity.setUsername(request.loginName());
+        }
+        if (request.displayName() != null) {
+            entity.setDisplayName(request.displayName());
+        }
+        if (request.authType() != null && !request.authType().isBlank()) {
+            entity.setAuthType(request.authType());
+        }
+
+        accountRepository.save(entity);
+        if (request.password() != null && !request.password().isBlank()) {
+            credentialService.savePassword(accountId, request.password());
+        }
+
+        log.info("更新采集账号成功: accountId={}, platformId={}, loginName={}",
+                accountId, platformId, entity.getUsername());
+        return toAccountResponse(entity);
+    }
+
+    @Transactional
+    public void deleteAccount(Integer platformId, Integer accountId) {
+        AccountEntity entity = findAccount(platformId, accountId);
+        accountRepository.softDelete(accountId);
+        credentialService.deactivateAll(accountId);
+        log.info("删除采集账号成功: accountId={}, platformId={}, loginName={}",
+                accountId, platformId, entity.getUsername());
+    }
     public List<AccountResponse> listAccounts(Integer platformId) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
         return accountRepository.findByPlatformId(platformId).stream().map(this::toAccountResponse).toList();
     }
 
+    private AccountEntity findAccount(Integer platformId, Integer accountId) {
+        AccountEntity entity = accountRepository.findById(accountId)
+                .orElseThrow(() -> BusinessException.of("账号不存在: " + accountId));
+        if (!platformId.equals(entity.getPlatformId())) {
+            throw BusinessException.of("账号不属于指定平台: " + accountId);
+        }
+        return entity;
+    }
     private PlatformResponse toPlatformResponse(PlatformEntity entity) {
         return new PlatformResponse(
                 entity.getId(),

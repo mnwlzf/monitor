@@ -46,6 +46,10 @@ public class AccountCredentialRepository {
         return Optional.ofNullable(credentialMapper.selectActiveCredential(accountId, credentialType));
     }
 
+    public void deactivateAllActive(Integer accountId) {
+        credentialMapper.deactivateAllActiveCredentials(accountId, OffsetDateTime.now());
+    }
+
     public void deactivateActive(Integer accountId, String credentialType) {
         credentialMapper.deactivateActiveCredential(accountId, credentialType, OffsetDateTime.now());
     }

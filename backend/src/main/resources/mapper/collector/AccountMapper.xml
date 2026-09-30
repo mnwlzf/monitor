@@ -86,6 +86,14 @@
         LIMIT 1
     </select>
 
+    <update id="softDeleteAccount">
+        UPDATE accounts
+        SET status = FALSE,
+            deleted_at = #{deletedAt},
+            updated_at = #{deletedAt}
+        WHERE id = #{id}
+          AND deleted_at IS NULL
+    </update>
     <select id="selectAccountsByPlatformId" resultMap="AccountResultMap">
         SELECT <include refid="AccountColumns"/>
         FROM accounts

@@ -22,6 +22,8 @@ public interface AccountMapper {
 
     List<AccountEntity> selectAccountsByPlatformId(@Param("platformId") Integer platformId);
 
+    int softDeleteAccount(@Param("id") Integer id, @Param("deletedAt") OffsetDateTime deletedAt);
+
     List<AccountEntity> selectDueAccountsByPlatform(@Param("platformId") Integer platformId,
                                                     @Param("now") OffsetDateTime now,
                                                     @Param("limit") int limit);

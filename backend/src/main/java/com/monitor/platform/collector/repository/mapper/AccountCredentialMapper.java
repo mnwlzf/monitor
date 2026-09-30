@@ -20,4 +20,7 @@ public interface AccountCredentialMapper  {
     int deactivateActiveCredential(@Param("accountId") Integer accountId,
                                    @Param("credentialType") String credentialType,
                                    @Param("updatedAt") OffsetDateTime updatedAt);
+
+    int deactivateAllActiveCredentials(@Param("accountId") Integer accountId,
+                                       @Param("updatedAt") OffsetDateTime updatedAt);
 }
