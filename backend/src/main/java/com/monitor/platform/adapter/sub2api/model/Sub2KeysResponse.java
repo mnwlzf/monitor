@@ -1,21 +1,49 @@
-package com.monitor.platform.collection.dto;
+package com.monitor.platform.adapter.sub2api.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 
+/**
+ * Sub2API 密钥列表接口响应。
+ *
+ * <p>接口路径：{@code GET /api/v1/keys}。当前模型完整映射采集接口已返回的字段，
+ * 便于后续清洗阶段直接读取，不在适配层做业务裁剪。</p>
+ *
+ * @param code    Sub2API 业务状态码，0 表示成功
+ * @param message 业务提示信息
+ * @param data    分页数据
+ */
 public record Sub2KeysResponse(
         int code,
         String message,
         Data data
 ) {
+
+    /**
+     * 密钥分页结果。
+     *
+     * @param items    当前页密钥列表
+     * @param total    总记录数
+     * @param page     当前页码
+     * @param pageSize 每页记录数
+     * @param pages    总页数
+     */
     public record Data(
             List<KeyItem> items,
             int total,
             int page,
             @JsonProperty("page_size") int pageSize,
             int pages
-    ) {}
+    ) {
+    }
 
+    /**
+     * 单个 API Key 及其关联分组信息。
+     *
+     * <p>配额、窗口用量和时间字段保留上游原始类型，避免在适配层提前做单位转换。
+     * 单位统一和字段清洗属于后续 normalizer 模块的职责。</p>
+     */
     public record KeyItem(
             Long id,
             @JsonProperty("user_id") Long userId,
@@ -43,8 +71,15 @@ public record Sub2KeysResponse(
             @JsonProperty("window_1d_start") String window1dStart,
             @JsonProperty("window_7d_start") String window7dStart,
             Group group
-    ) {}
+    ) {
+    }
 
+    /**
+     * API Key 关联的分组配置。
+     *
+     * <p>该对象字段较多，当前直接保留上游结构；后续如接入清洗模块，
+     * 可在这里或 Mapper 中映射为内部统一模型。</p>
+     */
     public record Group(
             Long id,
             String name,
@@ -94,5 +129,6 @@ public record Sub2KeysResponse(
             @JsonProperty("reasoning_effort_mappings") List<Object> reasoningEffortMappings,
             @JsonProperty("created_at") String createdAt,
             @JsonProperty("updated_at") String updatedAt
-    ) {}
+    ) {
+    }
 }

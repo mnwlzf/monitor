@@ -1,4 +1,4 @@
-package com.monitor.platform.collection.dto;
+package com.monitor.platform.adapter.sub2api.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -8,8 +8,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 个人信息接口响应
- * GET /api/v1/user/profile
+ * Sub2API 个人信息接口响应。
+ *
+ * <p>接口路径：{@code GET /api/v1/auth/me}。使用
+ * {@link JsonIgnoreProperties} 忽略上游新增字段，避免上游扩展响应结构时导致反序列化失败。</p>
+ *
+ * @param code    Sub2API 业务状态码，0 表示成功
+ * @param message 业务提示信息
+ * @param data    用户个人信息
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record Sub2ProfileResponse(
@@ -18,6 +24,12 @@ public record Sub2ProfileResponse(
         UserProfile data
 ) {
 
+    /**
+     * 用户个人信息。
+     *
+     * <p>金额字段按上游返回的 Double 保留；时间字段使用
+     * {@link OffsetDateTime} 承载上游 ISO-8601 时间。</p>
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record UserProfile(
             Long id,
@@ -51,7 +63,10 @@ public record Sub2ProfileResponse(
     }
 
     /**
-     * 身份绑定信息（identities / auth_bindings / identity_bindings 结构一致）
+     * 身份绑定信息。
+     *
+     * <p>{@code identities}、{@code auth_bindings} 和
+     * {@code identity_bindings} 在 Sub2API 中具有相同结构，因此复用该模型。</p>
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record IdentityBinding(

@@ -2,6 +2,8 @@ package com.monitor.platform.common.exception;
 
 import com.monitor.platform.common.response.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -16,14 +18,17 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
-
-import jakarta.validation.ConstraintViolation;
-import jakarta.validation.ConstraintViolationException;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+/**
+ * 全局异常处理器。
+ *
+ * <p>集中把领域异常、参数校验异常和未预期异常转换为统一的
+ * {@link ErrorResponse}，避免各 Controller 重复编写错误处理逻辑。</p>
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -121,16 +126,25 @@ public class GlobalExceptionHandler {
         return response(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "服务器内部错误", Map.of());
     }
 
+    /**
+     * 按 HTTP 状态码和业务错误码构造统一响应。
+     */
     private ResponseEntity<ErrorResponse> response(HttpStatus status, String code, String message, Map<String, String> details) {
         return ResponseEntity.status(status)
                 .body(new ErrorResponse(code, message, currentRequestId(), Instant.now(), details));
     }
 
+    /**
+     * 获取 MDC 中的请求标识；若当前上下文不存在，则生成临时标识。
+     */
     private String currentRequestId() {
         String requestId = MDC.get("requestId");
         return requestId != null ? requestId : UUID.randomUUID().toString();
     }
 
+    /**
+     * 仅保留约束路径的最后一段，作为前端可读的字段名。
+     */
     private String lastNode(ConstraintViolation<?> v) {
         String path = v.getPropertyPath().toString();
         int idx = path.lastIndexOf('.');

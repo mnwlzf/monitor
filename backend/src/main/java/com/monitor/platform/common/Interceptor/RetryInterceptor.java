@@ -1,4 +1,4 @@
-package com.monitor.platform.common.Interceptor;
+package com.monitor.platform.common.interceptor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,12 +14,14 @@ import java.net.UnknownHostException;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * 网络层重试拦截器
+ * 网络层重试拦截器。
  *
- * 职责边界：
- *  - ✅ 只重试「网络失败」：IO 异常、连接超时、读超时、连接拒绝、DNS 解析失败
- *  - ❌ 不重试任何 HTTP 响应（包括 4xx / 5xx），原样返回给业务层
- *  - ❌ 不感知响应体，不判断业务 code
+ * <p>职责边界：</p>
+ * <ul>
+ *     <li>只重试网络失败：IO 异常、连接超时、读超时、连接拒绝、DNS 解析失败；</li>
+ *     <li>不重试任何 HTTP 响应，包括 4xx 和 5xx，响应原样交给业务层判断；</li>
+ *     <li>不解析响应体，也不判断上游业务状态码。</li>
+ * </ul>
  */
 public class RetryInterceptor implements ClientHttpRequestInterceptor {
 
@@ -28,6 +30,10 @@ public class RetryInterceptor implements ClientHttpRequestInterceptor {
     private final int maxAttempts;
     private final long backoffMillis;
 
+    /**
+     * @param maxAttempts   最大请求次数，包含第一次请求
+     * @param backoffMillis 基础退避时间，实际等待时间会叠加随机抖动
+     */
     public RetryInterceptor(int maxAttempts, long backoffMillis) {
         this.maxAttempts = maxAttempts;
         this.backoffMillis = backoffMillis;
@@ -40,11 +46,9 @@ public class RetryInterceptor implements ClientHttpRequestInterceptor {
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                // 成功拿到响应（无论状态码是什么）→ 直接返回，不重试
+                // 成功拿到响应后直接返回，无论 HTTP 状态码是什么，均不在网络层重试。
                 return execution.execute(request, body);
-
             } catch (IOException ex) {
-                // 只对网络类异常重试
                 if (!isRetryable(ex)) {
                     log.warn("{} {} 第 {}/{} 次非可重试异常，直接抛出: {}",
                             request.getMethod(), request.getURI(), attempt, maxAttempts, ex.getMessage());
@@ -67,18 +71,16 @@ public class RetryInterceptor implements ClientHttpRequestInterceptor {
     }
 
     /**
-     * 判断是否为可重试的网络异常
-     * 只认「网络层」异常，不认 HTTP 业务异常
+     * 判断异常是否属于可以安全重试的网络故障。
      */
     private boolean isRetryable(IOException ex) {
-        // 常见的网络故障
         if (ex instanceof ConnectException
                 || ex instanceof SocketTimeoutException
                 || ex instanceof UnknownHostException) {
             return true;
         }
 
-        // 部分底层框架会把超时包装成 IOException，用消息兜底
+        // 部分底层框架会把超时或连接中断包装成普通 IOException，使用消息兜底识别。
         String msg = ex.getMessage();
         if (msg != null) {
             String lower = msg.toLowerCase();
@@ -92,7 +94,9 @@ public class RetryInterceptor implements ClientHttpRequestInterceptor {
         return false;
     }
 
-    /** 退避 + 抖动，避免重试风暴 */
+    /**
+     * 线性退避叠加随机抖动，避免多个请求在同一时刻集中重试。
+     */
     private void sleepWithJitter(long millis) {
         long jitter = ThreadLocalRandom.current().nextLong(millis / 2 + 1);
         try {
