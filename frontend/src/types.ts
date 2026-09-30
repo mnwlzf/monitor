@@ -24,7 +24,7 @@ export interface Account {
   quotaUnit: string
   requestCount: number
   credentialStatus: 'VALID' | 'INVALID' | 'UNKNOWN'
-  lastCollectStatus: 'SUCCESS' | 'FAILED' | 'RUNNING' | 'PARTIAL'
+  lastCollectStatus: 'SUCCESS' | 'FAILED' | 'RUNNING' | 'PARTIAL' | 'UNKNOWN'
   lastCollectedAt: string | null
   nextCollectAt: string | null
 }

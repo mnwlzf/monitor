@@ -3,19 +3,27 @@
     <div class="monitor-page-heading">
       <div><p class="monitor-eyebrow">CHANGES</p><h1>变更记录</h1><p>渠道新增、减少、倍率和状态变化。</p></div>
     </div>
-    <article class="monitor-panel">
-      <div class="monitor-timeline">
-        <div v-for="change in changes" :key="change.id" class="monitor-timeline-item">
-          <span class="monitor-timeline-dot" :class="change.severity.toLowerCase()"></span>
+
+    <el-card shadow="never">
+      <el-timeline>
+        <el-timeline-item
+          v-for="change in changes"
+          :key="change.id"
+          :timestamp="formatDate(change.detectedAt)"
+          :type="change.severity === 'WARNING' ? 'warning' : change.severity === 'CRITICAL' ? 'danger' : 'success'"
+          placement="top"
+        >
           <div class="monitor-timeline-copy">
-            <div><strong>{{ changeLabel(change.type) }}</strong><code>{{ change.entity }}</code></div>
+            <div>
+              <strong>{{ changeLabel(change.type) }}</strong>
+              <el-tag size="small" effect="plain">{{ change.entity }}</el-tag>
+            </div>
             <p>{{ change.message }}</p>
-            <small>{{ formatDate(change.detectedAt) }}</small>
+            <div class="monitor-diff"><span>{{ change.oldValue }}</span><b>→</b><em>{{ change.newValue }}</em></div>
           </div>
-          <div class="monitor-diff"><span>{{ change.oldValue }}</span><b>→</b><em>{{ change.newValue }}</em></div>
-        </div>
-      </div>
-    </article>
+        </el-timeline-item>
+      </el-timeline>
+    </el-card>
   </section>
 </template>
 
