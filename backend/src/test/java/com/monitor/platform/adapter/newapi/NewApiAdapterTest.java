@@ -3,6 +3,8 @@ package com.monitor.platform.adapter.newapi;
 import com.monitor.platform.adapter.newapi.model.NewApiGroupsResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginRequest;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiUser;
+import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -125,7 +127,7 @@ class NewApiAdapterTest {
     }
 
     private NewApiLoginResponse successResponse(long expiresAt) {
-        NewApiLoginResponse.User user = new NewApiLoginResponse.User(
+        NewApiUser user = new NewApiUser(
                 647L,
                 USERNAME,
                 USERNAME,
@@ -157,5 +159,28 @@ class NewApiAdapterTest {
                 false
         );
         return new NewApiGroupsResponse(Map.of("codex-特价", group), "", true);
+    }
+    @Test
+    void shouldFetchSelfUsingCachedToken() {
+        NewApiUser user = new NewApiUser(
+                647L,
+                USERNAME,
+                USERNAME,
+                USERNAME,
+                "default",
+                1,
+                1,
+                1467141L,
+                70135359L,
+                33374L
+        );
+        NewApiSelfResponse selfResponse = new NewApiSelfResponse(user, "", true);
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn("cached-token");
+        when(newApiClient.fetchSelf(BASE_URL, "cached-token")).thenReturn(selfResponse);
+
+        NewApiSelfResponse result = adapter.fetchSelf(BASE_URL, USERNAME, PASSWORD);
+
+        assertSame(selfResponse, result);
+        verify(newApiClient).fetchSelf(BASE_URL, "cached-token");
     }
 }

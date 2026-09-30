@@ -29,7 +29,7 @@ public record NewApiLoginResponse(
             @JsonProperty("access_token") String accessToken,
             Session session,
             @JsonProperty("token_type") String tokenType,
-            User user
+            NewApiUser user
     ) {
     }
 
@@ -46,24 +46,6 @@ public record NewApiLoginResponse(
             @JsonProperty("created_at") Long createdAt,
             @JsonProperty("last_active_at") Long lastActiveAt,
             @JsonProperty("expires_at") Long expiresAt
-    ) {
-    }
-
-    /**
-     * 登录响应中的用户信息。
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record User(
-            Long id,
-            String username,
-            String email,
-            @JsonProperty("display_name") String displayName,
-            String group,
-            Integer role,
-            Integer status,
-            Long quota,
-            @JsonProperty("used_quota") Long usedQuota,
-            @JsonProperty("request_count") Long requestCount
     ) {
     }
 }

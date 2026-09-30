@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.monitor.platform.adapter.newapi.model.NewApiGroupsResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginRequest;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -91,6 +92,37 @@ public class NewApiAdapter {
     }
 
     /**
+     * 获取当前用户信息。
+     *
+     * @param baseUrl  New API 服务地址
+     * @param username 登录用户名
+     * @param password 登录密码，仅当访问令牌不存在时用于重新登录
+     * @return New API 当前用户信息响应
+     */
+    public NewApiSelfResponse fetchSelf(String baseUrl, String username, String password) {
+        return fetchSelf(baseUrl, username, password, "");
+    }
+
+    /**
+     * 获取当前用户信息。
+     *
+     * @param baseUrl   New API 服务地址
+     * @param username  登录用户名
+     * @param password  登录密码，仅当访问令牌不存在时用于重新登录
+     * @param turnstile Turnstile 校验值，可为空
+     * @return New API 当前用户信息响应
+     */
+    public NewApiSelfResponse fetchSelf(String baseUrl, String username, String password,
+                                        String turnstile) {
+        String accessToken = resolveAccessToken(baseUrl, username, password, turnstile);
+        NewApiSelfResponse response = newApiClient.fetchSelf(baseUrl, accessToken);
+        validateSelfResponse(baseUrl, username, response);
+
+        log.info("{} {} 获取 New API 当前用户信息成功", baseUrl, username);
+        return response;
+    }
+
+    /**
      * 获取当前用户可用分组。
      *
      * @param baseUrl  New API 服务地址
@@ -160,6 +192,28 @@ public class NewApiAdapter {
         if (response.data().user() == null || response.data().user().id() == null) {
             log.error("{} {} New API 登录失败：未返回 user.id", baseUrl, username);
             throw new IllegalStateException("New API 登录失败：未返回 user.id");
+        }
+    }
+
+    /**
+     * 校验当前用户信息响应。
+     */
+    private void validateSelfResponse(String baseUrl, String username,
+                                      NewApiSelfResponse response) {
+        if (response == null) {
+            log.error("{} {} 获取 New API 当前用户信息失败：响应为空", baseUrl, username);
+            throw new IllegalStateException("获取 New API 当前用户信息失败：响应为空");
+        }
+
+        if (!response.success()) {
+            log.error("{} {} 获取 New API 当前用户信息失败：message={}",
+                    baseUrl, username, response.message());
+            throw new IllegalStateException("获取 New API 当前用户信息失败：" + response.message());
+        }
+
+        if (response.data() == null) {
+            log.error("{} {} 获取 New API 当前用户信息失败：未返回 data", baseUrl, username);
+            throw new IllegalStateException("获取 New API 当前用户信息失败：未返回 data");
         }
     }
 

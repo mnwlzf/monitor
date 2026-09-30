@@ -3,6 +3,7 @@ package com.monitor.platform.adapter.newapi;
 import com.monitor.platform.adapter.newapi.model.NewApiGroupsResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginRequest;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -106,6 +107,82 @@ class NewApiClientTest {
         assertEquals(10, response.data().get("codex-特价").order());
         assertFalse(response.data().get("codex-特价").scheduleActive());
         assertEquals(0.7, response.data().get("国产-旗舰").ratio(), 0.0001);
+        server.verify();
+    }
+    @Test
+    void shouldGetSelfWithBearerTokenAndDeserializeProfile() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        NewApiClient client = new NewApiClient(builder.build());
+
+        server.expect(requestTo(BASE_URL + "/api/user/self"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer access-token"))
+                .andRespond(withSuccess("""
+                        {
+                          "data": {
+                            "aff_code": "2dXI",
+                            "aff_count": 1,
+                            "aff_history_quota": 250000,
+                            "aff_quota": 250000,
+                            "discord_id": "",
+                            "display_name": "2696775653@qq.com",
+                            "email": "3097553108@qq.com",
+                            "github_id": "",
+                            "group": "default",
+                            "has_password": true,
+                            "id": 647,
+                            "inviter_id": 0,
+                            "linux_do_id": "",
+                            "oidc_id": "",
+                            "permissions": {
+                              "admin_permissions": {
+                                "audit": {
+                                  "read": false
+                                },
+                                "channel": {
+                                  "operate": false,
+                                  "read": false,
+                                  "secret_view": false,
+                                  "sensitive_write": false,
+                                  "write": false
+                                },
+                                "task_plugin": {
+                                  "bind": false
+                                }
+                              },
+                              "sidebar_modules": {
+                                "admin": false
+                              },
+                              "sidebar_settings": true
+                            },
+                            "quota": 1467141,
+                            "request_count": 33374,
+                            "role": 1,
+                            "setting": "{}",
+                            "sidebar_modules": "{}",
+                            "status": 1,
+                            "stripe_customer": "",
+                            "telegram_id": "",
+                            "used_quota": 70135359,
+                            "username": "2696775653@qq.com",
+                            "wechat_id": ""
+                          },
+                          "message": "",
+                          "success": true
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        NewApiSelfResponse response = client.fetchSelf(BASE_URL, "access-token");
+
+        assertTrue(response.success());
+        assertEquals(647L, response.data().id());
+        assertEquals("2dXI", response.data().affCode());
+        assertEquals(250000L, response.data().affHistoryQuota());
+        assertEquals(1467141L, response.data().quota());
+        assertEquals(70135359L, response.data().usedQuota());
+        assertFalse(response.data().permissions().adminPermissions().channel().write());
+        assertTrue(response.data().permissions().sidebarSettings());
         server.verify();
     }
 }

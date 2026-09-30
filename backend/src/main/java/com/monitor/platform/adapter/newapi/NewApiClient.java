@@ -3,6 +3,7 @@ package com.monitor.platform.adapter.newapi;
 import com.monitor.platform.adapter.newapi.model.NewApiGroupsResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginRequest;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -17,6 +18,7 @@ import org.springframework.web.client.RestClient;
 public class NewApiClient {
 
     private static final String LOGIN_PATH = "/api/user/login";
+    private static final String SELF_PATH = "/api/user/self";
     private static final String GROUPS_PATH = "/api/user/self/groups";
 
     private final RestClient restClient;
@@ -54,6 +56,21 @@ public class NewApiClient {
                 .body(request)
                 .retrieve()
                 .body(NewApiLoginResponse.class);
+    }
+
+    /**
+     * 获取当前用户信息。
+     *
+     * @param baseUrl     New API 服务地址
+     * @param accessToken 登录后获得的访问令牌
+     * @return New API 原始用户信息响应
+     */
+    public NewApiSelfResponse fetchSelf(String baseUrl, String accessToken) {
+        return restClient.get()
+                .uri(baseUrl + SELF_PATH)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .body(NewApiSelfResponse.class);
     }
 
     /**
