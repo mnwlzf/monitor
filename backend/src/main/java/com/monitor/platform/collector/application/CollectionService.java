@@ -10,8 +10,10 @@ import com.monitor.platform.adapter.newapi.model.NewApiUser;
 import com.monitor.platform.adapter.sub2api.Sub2ApiAdapter;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
+import com.monitor.platform.collector.repository.AccountUsageDashboardSnapshotRepository;
 import com.monitor.platform.collector.repository.CollectionRunRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
@@ -19,6 +21,7 @@ import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.UpstreamGroupSnapshotRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity;
+import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.CollectionRunEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
@@ -36,6 +39,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -74,6 +78,7 @@ public class CollectionService {
     private final AccountCredentialService credentialService;
     private final CollectionRunRepository collectionRunRepository;
     private final AccountMetricSnapshotRepository metricSnapshotRepository;
+    private final AccountUsageDashboardSnapshotRepository usageDashboardRepository;
     private final UpstreamGroupRepository groupRepository;
     private final UpstreamGroupSnapshotRepository groupSnapshotRepository;
     private final UpstreamChangeEventRepository changeEventRepository;
@@ -86,6 +91,7 @@ public class CollectionService {
                              AccountCredentialService credentialService,
                              CollectionRunRepository collectionRunRepository,
                              AccountMetricSnapshotRepository metricSnapshotRepository,
+                             AccountUsageDashboardSnapshotRepository usageDashboardRepository,
                              UpstreamGroupRepository groupRepository,
                              UpstreamGroupSnapshotRepository groupSnapshotRepository,
                              UpstreamChangeEventRepository changeEventRepository,
@@ -97,6 +103,7 @@ public class CollectionService {
         this.credentialService = credentialService;
         this.collectionRunRepository = collectionRunRepository;
         this.metricSnapshotRepository = metricSnapshotRepository;
+        this.usageDashboardRepository = usageDashboardRepository;
         this.groupRepository = groupRepository;
         this.groupSnapshotRepository = groupSnapshotRepository;
         this.changeEventRepository = changeEventRepository;
@@ -141,8 +148,18 @@ public class CollectionService {
      * 采集单个账号，并写入指标、渠道、快照和变更事件。
      */
     public void collectAccount(Integer accountId) {
+        collectAccount(null, accountId);
+    }
+
+    /**
+     * 采集指定平台下的单个账号。
+     */
+    public void collectAccount(Integer platformId, Integer accountId) {
         AccountEntity account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new IllegalArgumentException("账号不存在: " + accountId));
+        if (platformId != null && !platformId.equals(account.getPlatformId())) {
+            throw new IllegalArgumentException("账号不属于指定平台: " + accountId);
+        }
         PlatformEntity platform = platformRepository.findById(account.getPlatformId())
                 .orElseThrow(() -> new IllegalArgumentException("账号未关联平台: " + accountId));
 
@@ -201,6 +218,7 @@ public class CollectionService {
 
         NewApiSelfResponse selfResponse = newApiAdapter.fetchSelf(baseUrl, username, password);
         saveNewApiMetric(account, collectionRunId, selfResponse);
+        saveNewApiUsageDashboard(account, collectionRunId, selfResponse);
         log.info("New API 账号信息获取成功: accountId={}, userId={}, quota={}, usedQuota={}",
                 account.getId(), selfResponse.data().id(), selfResponse.data().quota(), selfResponse.data().usedQuota());
         if (selfResponse.data().id() != null) {
@@ -232,6 +250,10 @@ public class CollectionService {
 
         Sub2GroupsResponse groupsResponse = sub2ApiAdapter.fetchAvailableGroups(baseUrl, email, password);
         syncSub2Groups(account, platform.getPlatformType(), collectionRunId, groupsResponse);
+
+        Sub2UsageDashboardResponse usageResponse =
+                sub2ApiAdapter.fetchUsageDashboardStats(baseUrl, email, password);
+        saveSub2UsageDashboard(account, collectionRunId, profileResponse, usageResponse);
     }
 
     private void saveNewApiMetric(AccountEntity account, Long collectionRunId,
@@ -239,9 +261,7 @@ public class CollectionService {
         NewApiUser user = response.data();
         String rawData = toJson(response);
         BigDecimal quota = decimal(user.quota());
-        BigDecimal balance = quota == null
-                ? null
-                : quota.divide(NEW_API_QUOTA_PER_USD, 8, RoundingMode.HALF_UP);
+        BigDecimal balance = newApiUsd(user.quota());
 
         AccountMetricSnapshotEntity snapshot = new AccountMetricSnapshotEntity();
         snapshot.setAccountId(account.getId());
@@ -274,6 +294,109 @@ public class CollectionService {
         snapshot.setRawData(rawData);
         snapshot.setContentHash(sha256(rawData));
         metricSnapshotRepository.save(snapshot);
+    }
+
+    /**
+     * 写入 New API 用量看板快照。
+     *
+     * <p>New API 只提供累计请求数与额度消耗，token 明细、今日统计、速率等字段留空，
+     * 由前端按空值降级展示。</p>
+     */
+    private void saveNewApiUsageDashboard(AccountEntity account, Long collectionRunId,
+                                          NewApiSelfResponse response) {
+        NewApiUser user = response.data();
+        BigDecimal usedCost = newApiUsd(user.usedQuota());
+
+        AccountUsageDashboardSnapshotEntity snapshot = new AccountUsageDashboardSnapshotEntity();
+        snapshot.setAccountId(account.getId());
+        snapshot.setCollectionRunId(collectionRunId);
+        snapshot.setPlatformType(PLATFORM_NEW_API);
+        snapshot.setBalance(newApiUsd(user.quota()));
+        snapshot.setTotalRequests(user.requestCount());
+        snapshot.setTotalCost(usedCost);
+        snapshot.setTotalActualCost(usedCost);
+        snapshot.setMetrics(toJson(newApiUsageMetrics(user)));
+        snapshot.setPlatformStats("[]");
+        snapshot.setRawData(toJson(response));
+        usageDashboardRepository.save(snapshot);
+    }
+
+    /**
+     * 写入 Sub2API 用量看板快照。
+     *
+     * <p>看板响应中的 token 明细、今日统计、速率等平台特有指标写入 metrics，
+     * 公共指标保持强类型列，便于跨平台统一查询。</p>
+     */
+    private void saveSub2UsageDashboard(AccountEntity account, Long collectionRunId,
+                                        Sub2ProfileResponse profileResponse,
+                                        Sub2UsageDashboardResponse response) {
+        if (response.data() == null) {
+            throw new IllegalStateException("Sub2API 用量看板响应缺少 data");
+        }
+        Sub2ProfileResponse.UserProfile profile = profileResponse.data();
+        Sub2UsageDashboardResponse.DashboardStats stats = response.data();
+
+        AccountUsageDashboardSnapshotEntity snapshot = new AccountUsageDashboardSnapshotEntity();
+        snapshot.setAccountId(account.getId());
+        snapshot.setCollectionRunId(collectionRunId);
+        snapshot.setPlatformType(PLATFORM_SUB2_API);
+        snapshot.setBalance(decimal(profile.balance()));
+        snapshot.setFrozenBalance(decimal(profile.frozenBalance()));
+        snapshot.setTotalRequests(stats.totalRequests());
+        snapshot.setTotalTokens(stats.totalTokens());
+        snapshot.setTotalCost(stats.totalCost());
+        snapshot.setTotalActualCost(stats.totalActualCost());
+        snapshot.setMetrics(toJson(sub2UsageMetrics(stats)));
+        snapshot.setPlatformStats(toJson(stats.byPlatform() == null ? List.of() : stats.byPlatform()));
+        snapshot.setRawData(toJson(response));
+        usageDashboardRepository.save(snapshot);
+    }
+
+    /**
+     * New API 平台特有明细。额度保留上游原始 quota，quota_per_usd 供前端换算。
+     */
+    private Map<String, Object> newApiUsageMetrics(NewApiUser user) {
+        Map<String, Object> metrics = new LinkedHashMap<>();
+        metrics.put("quota", user.quota());
+        metrics.put("used_quota", user.usedQuota());
+        metrics.put("aff_quota", user.affQuota());
+        metrics.put("aff_history_quota", user.affHistoryQuota());
+        metrics.put("quota_unit", "USD");
+        metrics.put("quota_per_usd", NEW_API_QUOTA_PER_USD);
+        return metrics;
+    }
+
+    /**
+     * Sub2API 平台特有明细。
+     */
+    private Map<String, Object> sub2UsageMetrics(Sub2UsageDashboardResponse.DashboardStats stats) {
+        Map<String, Object> metrics = new LinkedHashMap<>();
+        metrics.put("total_api_keys", stats.totalApiKeys());
+        metrics.put("active_api_keys", stats.activeApiKeys());
+        metrics.put("total_input_tokens", stats.totalInputTokens());
+        metrics.put("total_output_tokens", stats.totalOutputTokens());
+        metrics.put("total_cache_creation_tokens", stats.totalCacheCreationTokens());
+        metrics.put("total_cache_read_tokens", stats.totalCacheReadTokens());
+        metrics.put("today_requests", stats.todayRequests());
+        metrics.put("today_input_tokens", stats.todayInputTokens());
+        metrics.put("today_output_tokens", stats.todayOutputTokens());
+        metrics.put("today_cache_creation_tokens", stats.todayCacheCreationTokens());
+        metrics.put("today_cache_read_tokens", stats.todayCacheReadTokens());
+        metrics.put("today_tokens", stats.todayTokens());
+        metrics.put("today_cost", stats.todayCost());
+        metrics.put("today_actual_cost", stats.todayActualCost());
+        metrics.put("average_duration_ms", stats.averageDurationMs());
+        metrics.put("rpm", stats.rpm());
+        metrics.put("tpm", stats.tpm());
+        return metrics;
+    }
+
+    /**
+     * 将 New API 原始 quota 换算为 USD，为空时返回 null。
+     */
+    private BigDecimal newApiUsd(Long quota) {
+        BigDecimal value = decimal(quota);
+        return value == null ? null : value.divide(NEW_API_QUOTA_PER_USD, 8, RoundingMode.HALF_UP);
     }
 
     private void syncNewApiGroups(AccountEntity account, String platformType,

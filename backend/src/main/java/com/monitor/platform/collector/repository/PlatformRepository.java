@@ -45,4 +45,8 @@ public class PlatformRepository {
     public List<PlatformEntity> findEnabled() {
         return platformMapper.selectEnabledPlatforms();
     }
+
+    public void softDelete(Integer id) {
+        platformMapper.softDeletePlatform(id, OffsetDateTime.now());
+    }
 }

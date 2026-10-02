@@ -50,6 +50,7 @@
         SELECT <include refid="PlatformColumns"/>
         FROM platforms
         WHERE id = #{id}
+          AND deleted_at IS NULL
     </select>
 
     <select id="selectPlatformByName" resultMap="PlatformResultMap">
@@ -59,6 +60,15 @@
           AND deleted_at IS NULL
         LIMIT 1
     </select>
+
+    <update id="softDeletePlatform">
+        UPDATE platforms
+        SET status = FALSE,
+            deleted_at = #{deletedAt},
+            updated_at = #{deletedAt}
+        WHERE id = #{id}
+          AND deleted_at IS NULL
+    </update>
 
     <select id="selectEnabledPlatforms" resultMap="PlatformResultMap">
         SELECT <include refid="PlatformColumns"/>

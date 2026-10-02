@@ -78,4 +78,55 @@ class Sub2ApiClientTest {
         assertEquals(19L, response.data().get(1).id());
         server.verify();
     }
+    @Test
+    void shouldGetUsageDashboardStatsWithBearerToken() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        Sub2ApiClient client = new Sub2ApiClient(builder.build());
+
+        server.expect(requestTo(BASE_URL + "/api/v1/usage/dashboard/stats?timezone=Asia%2FShanghai"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer access-token"))
+                .andRespond(withSuccess("""
+                        {
+                          "code": 0,
+                          "message": "success",
+                          "data": {
+                            "total_api_keys": 3,
+                            "active_api_keys": 3,
+                            "total_requests": 3303,
+                            "total_tokens": 429465577,
+                            "total_cost": 318.56258714,
+                            "total_actual_cost": 54.6197386304,
+                            "today_requests": 516,
+                            "today_tokens": 186967585,
+                            "today_actual_cost": 7.09391364,
+                            "average_duration_ms": 27689.477141992127,
+                            "rpm": 0,
+                            "tpm": 244,
+                            "by_platform": [
+                              {
+                                "platform": "openai",
+                                "total_requests": 2718,
+                                "total_tokens": 238935126,
+                                "total_actual_cost": 47.2272613104,
+                                "today_requests": 0,
+                                "today_tokens": 0,
+                                "today_actual_cost": 0
+                              }
+                            ]
+                          }
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        var response = client.fetchUsageDashboardStats(BASE_URL, "access-token");
+
+        assertTrue(response.code() == 0);
+        assertEquals(3, response.data().totalApiKeys());
+        assertEquals(3303L, response.data().totalRequests());
+        assertEquals(429465577L, response.data().totalTokens());
+        assertEquals(1, response.data().byPlatform().size());
+        server.verify();
+    }
+
 }

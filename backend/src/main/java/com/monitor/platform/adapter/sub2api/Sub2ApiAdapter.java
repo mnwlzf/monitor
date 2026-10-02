@@ -6,6 +6,7 @@ import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -176,6 +177,25 @@ public class Sub2ApiAdapter {
         log.info("{} {} 获取可用分组成功，共 {} 个", baseUrl, email, total);
         return response;
     }
+    /**
+     * 获取当前账号用量看板统计。
+     */
+    public Sub2UsageDashboardResponse fetchUsageDashboardStats(String baseUrl, String email, String password) {
+        String accessToken = resolveAccessToken(baseUrl, email, password);
+        Sub2UsageDashboardResponse response = sub2ApiClient.fetchUsageDashboardStats(baseUrl, accessToken);
+        if (response == null) {
+            log.error("{} {} 获取用量看板失败：响应为空", baseUrl, email);
+            throw new IllegalStateException("获取用量看板失败：响应为空");
+        }
+        if (response.code() != SUCCESS_CODE) {
+            log.error("{} {} 获取用量看板失败：code={}, message={}", baseUrl, email, response.code(), response.message());
+            clearTokenIfUnauthorized(baseUrl, email, response.code());
+            throw new IllegalStateException("获取用量看板失败：" + response.message());
+        }
+        log.info("{} {} 获取用量看板成功", baseUrl, email);
+        return response;
+    }
+
     /**
      * 校验登录响应，保证调用方拿到的令牌可用。
      */

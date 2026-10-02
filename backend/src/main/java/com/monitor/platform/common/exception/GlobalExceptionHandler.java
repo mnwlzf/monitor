@@ -2,6 +2,7 @@ package com.monitor.platform.common.exception;
 
 import com.monitor.platform.common.response.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import org.apache.catalina.connector.ClientAbortException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import java.time.Instant;
@@ -117,6 +119,19 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleNoHandler(NoHandlerFoundException ex) {
         return response(HttpStatus.NOT_FOUND, "NO_HANDLER",
                 "接口不存在: " + ex.getRequestURL(), Map.of());
+    }
+
+    /**
+     * 客户端在响应写完之前断开连接（刷新页面、切换路由、取消请求等）。
+     *
+     * <p>这类异常不是服务端故障：请求已经处理完成，只是响应写不出去。此时响应
+     * 已不可写，构造错误响应体没有意义，因此只保留 DEBUG 级别记录，不再打印
+     * ERROR 堆栈，避免掩盖真正的服务端异常。</p>
+     */
+    @ExceptionHandler({AsyncRequestNotUsableException.class, ClientAbortException.class})
+    public void handleClientAbort(Exception ex, HttpServletRequest request) {
+        log.debug("客户端提前断开连接: {} {} - {}",
+                request.getMethod(), request.getRequestURI(), ex.getMessage());
     }
 
     /** 兜底 -> 500，务必打印堆栈 */

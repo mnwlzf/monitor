@@ -22,7 +22,7 @@ class MapperXmlContractTest {
         Resource[] resources = new PathMatchingResourcePatternResolver()
                 .getResources("classpath*:/mapper/collector/*.xml");
 
-        assertEquals(8, resources.length);
+        assertEquals(9, resources.length);
         for (Resource resource : resources) {
             try (InputStream inputStream = resource.getInputStream()) {
                 XMLMapperBuilder builder = new XMLMapperBuilder(
@@ -38,6 +38,8 @@ class MapperXmlContractTest {
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.PlatformMapper.selectEnabledPlatforms"));
         assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.PlatformMapper.softDeletePlatform"));
+        assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountMapper.selectDueAccountsByPlatform"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountMetricSnapshotMapper.selectLatestSnapshot"));
@@ -45,5 +47,7 @@ class MapperXmlContractTest {
                 "com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper.deactivateMissingGroups"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper.selectRecentEvents"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectLatestSnapshotsByAccounts"));
     }
 }

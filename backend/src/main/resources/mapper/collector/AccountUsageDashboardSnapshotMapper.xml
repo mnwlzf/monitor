@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper">
+
+    <resultMap id="UsageDashboardResultMap" type="com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity">
+        <id column="id" property="id"/>
+        <result column="account_id" property="accountId"/>
+        <result column="collection_run_id" property="collectionRunId"/>
+        <result column="platform_type" property="platformType"/>
+        <result column="balance" property="balance"/>
+        <result column="frozen_balance" property="frozenBalance"/>
+        <result column="total_requests" property="totalRequests"/>
+        <result column="total_tokens" property="totalTokens"/>
+        <result column="total_cost" property="totalCost"/>
+        <result column="total_actual_cost" property="totalActualCost"/>
+        <result column="metrics" property="metrics" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="platform_stats" property="platformStats" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="raw_data" property="rawData" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="collected_at" property="collectedAt"/>
+    </resultMap>
+
+    <sql id="UsageDashboardColumns">
+        id, account_id, collection_run_id, platform_type, balance, frozen_balance,
+        total_requests, total_tokens, total_cost, total_actual_cost,
+        metrics, platform_stats, raw_data, collected_at
+    </sql>
+
+    <insert id="insertSnapshot" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO account_usage_dashboard_snapshots (
+            account_id, collection_run_id, platform_type, balance, frozen_balance,
+            total_requests, total_tokens, total_cost, total_actual_cost,
+            metrics, platform_stats, raw_data, collected_at
+        ) VALUES (
+            #{accountId}, #{collectionRunId}, #{platformType}, #{balance}, #{frozenBalance},
+            #{totalRequests}, #{totalTokens}, #{totalCost}, #{totalActualCost},
+            #{metrics,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            #{platformStats,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            #{rawData,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            #{collectedAt}
+        )
+    </insert>
+
+    <select id="selectLatestSnapshot" resultMap="UsageDashboardResultMap">
+        SELECT <include refid="UsageDashboardColumns"/>
+        FROM account_usage_dashboard_snapshots
+        WHERE account_id = #{accountId}
+        ORDER BY collected_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectLatestSnapshotsByAccounts" resultMap="UsageDashboardResultMap">
+        SELECT DISTINCT ON (account_id) <include refid="UsageDashboardColumns"/>
+        FROM account_usage_dashboard_snapshots
+        WHERE account_id IN
+        <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
+            #{accountId}
+        </foreach>
+        ORDER BY account_id, collected_at DESC
+    </select>
+
+    <select id="selectSnapshotsByAccountRange" resultMap="UsageDashboardResultMap">
+        SELECT <include refid="UsageDashboardColumns"/>
+        FROM account_usage_dashboard_snapshots
+        WHERE account_id = #{accountId}
+        <if test="from != null">AND collected_at &gt;= #{from}</if>
+        <if test="to != null">AND collected_at &lt;= #{to}</if>
+        ORDER BY collected_at ASC
+        LIMIT #{limit}
+    </select>
+</mapper>

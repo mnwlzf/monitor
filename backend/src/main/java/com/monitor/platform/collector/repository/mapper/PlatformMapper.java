@@ -18,5 +18,7 @@ public interface PlatformMapper  {
 
     PlatformEntity selectPlatformByName(@Param("platformName") String platformName);
 
+    int softDeletePlatform(@Param("id") Integer id, @Param("deletedAt") java.time.OffsetDateTime deletedAt);
+
     List<PlatformEntity> selectEnabledPlatforms();
 }
