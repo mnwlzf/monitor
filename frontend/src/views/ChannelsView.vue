@@ -2,7 +2,7 @@
   <section class="admin-page">
     <div class="admin-page-heading">
       <div><p class="admin-eyebrow">CHANNELS</p><h2>渠道监控</h2><p>按平台实例查看渠道倍率、账号归属和当前状态。</p></div>
-      <el-tag effect="plain">{{ channels.length }} 个渠道</el-tag>
+      <el-tag effect="plain">{{ uniqueChannelCount }} 个渠道</el-tag>
     </div>
 
     <el-card shadow="never" class="admin-card admin-toolbar-card">
@@ -73,12 +73,18 @@ const filteredChannels = computed(() => props.channels.filter(channel => {
   return keywordMatched && instanceMatched && providerMatched && statusMatched
 }))
 const groupedChannels = computed(() => {
-  const groups = new Map<string, { platformId: number; platformName: string; platformType: Channel['platformType']; channels: Channel[] }>()
+  const groups = new Map<number, { platformId: number; platformName: string; platformType: Channel['platformType']; channels: Channel[] }>()
+  const seenKeys = new Set<string>()
   for (const channel of filteredChannels.value) {
-    const key = String(channel.platformId)
-    if (!groups.has(key)) groups.set(key, { platformId: channel.platformId, platformName: channel.platformName, platformType: channel.platformType, channels: [] })
-    groups.get(key)!.channels.push(channel)
+    // 同一平台下多个账号会采到相同渠道，按「渠道名 + 上游类型」去重，只展示一次。
+    const dedupeKey = `${channel.platformId}::${channel.name}::${channel.platform}`
+    if (seenKeys.has(dedupeKey)) continue
+    seenKeys.add(dedupeKey)
+    const groupKey = channel.platformId
+    if (!groups.has(groupKey)) groups.set(groupKey, { platformId: channel.platformId, platformName: channel.platformName, platformType: channel.platformType, channels: [] })
+    groups.get(groupKey)!.channels.push(channel)
   }
   return [...groups.values()]
 })
+const uniqueChannelCount = computed(() => groupedChannels.value.reduce((sum, group) => sum + group.channels.length, 0))
 </script>
