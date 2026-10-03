@@ -6,6 +6,10 @@ import jakarta.validation.constraints.Size;
 
 /**
  * 创建上游平台请求。
+ *
+ * @param name     平台名称
+ * @param baseUrl  平台基础地址
+ * @param platform 平台类型，newapi 或 sub2api
  */
 public record CreatePlatformRequest(
         @NotBlank(message = "平台名称不能为空")

@@ -4,6 +4,11 @@ import jakarta.validation.constraints.Size;
 
 /**
  * 更新采集账号请求。密码为空时保留原凭证。
+ *
+ * @param displayName 展示名称
+ * @param loginName   登录账号
+ * @param password    新密码，可为空
+ * @param authType    认证类型
  */
 public record UpdateAccountRequest(
         @Size(max = 255, message = "显示名称不能超过 255 个字符")

@@ -12,18 +12,23 @@ import java.util.List;
  */
 public interface UpstreamGroupMapper  {
 
+    /** 新增渠道。 */
     int insertGroup(UpstreamGroupEntity entity);
 
+    /** 更新渠道。 */
     int updateGroup(UpstreamGroupEntity entity);
 
+    /** 按账号、平台类型和上游渠道 ID 查询渠道。 */
     UpstreamGroupEntity selectGroupByAccountAndExternalId(
             @Param("accountId") Integer accountId,
             @Param("platformType") String platformType,
             @Param("externalGroupId") String externalGroupId);
 
+    /** 查询账号下的渠道，可选择只返回有效渠道。 */
     List<UpstreamGroupEntity> selectGroupsByAccount(@Param("accountId") Integer accountId,
                                                     @Param("activeOnly") boolean activeOnly);
 
+    /** 将未出现在本轮采集结果中的渠道标记为下线。 */
     int deactivateMissingGroups(@Param("accountId") Integer accountId,
                                 @Param("platformType") String platformType,
                                 @Param("externalGroupIds") Collection<String> externalGroupIds,

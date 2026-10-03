@@ -5,6 +5,11 @@ import jakarta.validation.constraints.Size;
 
 /**
  * 创建采集账号请求。
+ *
+ * @param displayName 展示名称
+ * @param loginName   登录账号
+ * @param password    登录密码
+ * @param authType    认证类型，默认 PASSWORD
  */
 public record CreateAccountRequest(
         @Size(max = 255, message = "显示名称不能超过 255 个字符")

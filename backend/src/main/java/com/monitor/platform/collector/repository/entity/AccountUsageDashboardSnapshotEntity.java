@@ -19,22 +19,36 @@ import java.time.OffsetDateTime;
 public class AccountUsageDashboardSnapshotEntity {
 
     @TableId(type = IdType.AUTO)
+    /** 快照主键。 */
     private Long id;
+    /** 账号主键。 */
     private Integer accountId;
+    /** 所属采集批次主键。 */
     private Long collectionRunId;
+    /** 平台类型。 */
     private String platformType;
+    /** 账户余额。 */
     private BigDecimal balance;
+    /** 冻结余额。 */
     private BigDecimal frozenBalance;
+    /** 累计请求数。 */
     private Long totalRequests;
+    /** 累计 Token 数。 */
     private Long totalTokens;
+    /** 累计标准消耗。 */
     private BigDecimal totalCost;
+    /** 累计实际消耗。 */
     private BigDecimal totalActualCost;
+    /** 跨平台公共指标，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String metrics;
+    /** 平台特有统计，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String platformStats;
+    /** 上游原始响应，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String rawData;
+    /** 采集时间。 */
     private OffsetDateTime collectedAt;
 
     public Long getId() { return id; }

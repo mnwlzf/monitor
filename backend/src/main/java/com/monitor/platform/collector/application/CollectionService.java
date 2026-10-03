@@ -69,7 +69,9 @@ public class CollectionService {
     private static final String CHANGE_RATE_CHANGED = "RATE_CHANGED";
     private static final String CHANGE_BASE_RATE_CHANGED = "BASE_RATE_CHANGED";
     private static final String CHANGE_STATUS_CHANGED = "STATUS_CHANGED";
+    /** 采集成功后的默认下次采集间隔。 */
     private static final Duration DEFAULT_COLLECT_INTERVAL = Duration.ofMinutes(10);
+    /** New API 中 1 USD 对应的内部额度数量。 */
     private static final BigDecimal NEW_API_QUOTA_PER_USD = BigDecimal.valueOf(500000L);
     private static final int MAX_ERROR_LENGTH = 2000;
 
@@ -113,7 +115,10 @@ public class CollectionService {
     }
 
     /**
-     * 采集一批到期账号。单个账号失败不会阻断其他账号。
+     * 采集一批到期账号。
+     *
+     * <p>该方法是批量采集入口，可由外部调度器周期性调用；单个账号失败会被捕获，
+     * 不会阻断同一平台或其他平台后续账号的采集。</p>
      */
     public void collectDueAccounts(int limit) {
         List<PlatformEntity> platforms = platformRepository.findEnabled();
@@ -132,6 +137,7 @@ public class CollectionService {
                 try {
                     collectAccount(account.getId());
                 } catch (Exception ex) {
+                    // 单个账号失败只记录日志，继续处理本平台剩余账号。
                     log.error("账号采集失败，继续处理下一个: platformId={}, accountId={}",
                             platform.getId(), account.getId(), ex);
                 }
@@ -209,6 +215,9 @@ public class CollectionService {
         }
     }
 
+    /**
+     * 采集 New API 账号：获取当前用户信息、保存指标与用量看板，再同步可用分组。
+     */
     private void collectNewApi(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
         String password = credentialService.resolvePassword(account.getId());
         String username = StrUtil.blankToDefault(account.getUsername(), account.getEmail());
@@ -229,6 +238,9 @@ public class CollectionService {
         syncNewApiGroups(account, platform.getPlatformType(), collectionRunId, groupsResponse);
     }
 
+    /**
+     * 采集 Sub2API 账号：获取用户资料、保存指标、同步分组并写入用量看板。
+     */
     private void collectSub2Api(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
         String password = credentialService.resolvePassword(account.getId());
         String email = account.getEmail();
@@ -525,6 +537,9 @@ public class CollectionService {
                 account.getId(), response.data().size(), added, updated, removed);
     }
 
+    /**
+     * 查询账号当前有效分组，并以外部分组 ID 建立索引，便于本轮采集做增量对比。
+     */
     private Map<String, UpstreamGroupEntity> activeGroupMap(Integer accountId) {
         Map<String, UpstreamGroupEntity> result = new HashMap<>();
         for (UpstreamGroupEntity group : groupRepository.findByAccount(accountId, true)) {
@@ -533,6 +548,9 @@ public class CollectionService {
         return result;
     }
 
+    /**
+     * 创建新发现的分组实体，并初始化首次发现和最后可见时间。
+     */
     private UpstreamGroupEntity newGroup(AccountEntity account, String platformType,
                                          String externalGroupId, OffsetDateTime now) {
         UpstreamGroupEntity entity = new UpstreamGroupEntity();
@@ -546,6 +564,11 @@ public class CollectionService {
         return entity;
     }
 
+    /**
+     * 将本轮上游未返回的分组标记为下线，并记录下线事件和快照。
+     *
+     * @return 本轮下线的分组数量
+     */
     private int deactivateMissingGroups(AccountEntity account, String platformType,
                                          Long collectionRunId,
                                          Map<String, UpstreamGroupEntity> existing,
@@ -568,6 +591,11 @@ public class CollectionService {
         return removed;
     }
 
+    /**
+     * 对比分组本轮数据与上一轮状态，逐字段写入变更事件。
+     *
+     * @return 是否至少发生一项变更
+     */
     private boolean recordGroupChanges(AccountEntity account, String platformType,
                                        Long collectionRunId, UpstreamGroupEntity entity,
                                        String externalGroupId, BigDecimal ratio,
@@ -607,6 +635,9 @@ public class CollectionService {
         }
         return changed;
     }
+    /**
+     * 保存一次分组状态快照，用于历史查询和变更追溯。
+     */
     private void saveGroupSnapshot(UpstreamGroupEntity group, Long collectionRunId,
                                    BigDecimal ratio, BigDecimal baseRatio, String status,
                                    boolean active, String rawData) {
@@ -647,6 +678,9 @@ public class CollectionService {
         changeEventRepository.save(event);
     }
 
+    /**
+     * 记录采集成功状态，并安排下一次常规采集时间。
+     */
     private void markAccountSuccess(AccountEntity account) {
         OffsetDateTime now = OffsetDateTime.now();
         account.setCredentialStatus(CREDENTIAL_STATUS_VALID);
@@ -658,6 +692,9 @@ public class CollectionService {
         accountRepository.save(account);
     }
 
+    /**
+     * 记录采集失败状态，并按连续失败次数进行最长 60 分钟的退避。
+     */
     private void markAccountFailure(AccountEntity account, Exception ex) {
         int failures = account.getConsecutiveFailures() == null
                 ? 1
@@ -671,14 +708,23 @@ public class CollectionService {
         accountRepository.save(account);
     }
 
+    /**
+     * 将 Long 型上游额度安全转换为 BigDecimal。
+     */
     private BigDecimal decimal(Long value) {
         return value == null ? null : BigDecimal.valueOf(value);
     }
 
+    /**
+     * 将 Double 型上游金额安全转换为 BigDecimal。
+     */
     private BigDecimal decimal(Double value) {
         return value == null ? null : BigDecimal.valueOf(value);
     }
 
+    /**
+     * 使用数值比较判断两个 BigDecimal 是否不同，避免 1.0 与 1.00 被误判。
+     */
     private boolean different(BigDecimal left, BigDecimal right) {
         if (left == null || right == null) {
             return left != right;
@@ -686,6 +732,9 @@ public class CollectionService {
         return left.compareTo(right) != 0;
     }
 
+    /**
+     * 将对象序列化为 JSON，用于保存原始响应或变更前后值。
+     */
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -694,6 +743,9 @@ public class CollectionService {
         }
     }
 
+    /**
+     * 计算文本的 SHA-256 十六进制摘要，用于判断原始数据是否变化。
+     */
     private String sha256(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -708,6 +760,9 @@ public class CollectionService {
         }
     }
 
+    /**
+     * 截断过长的错误信息，避免超过数据库字段长度。
+     */
     private String truncate(String value, int maxLength) {
         if (value == null || value.length() <= maxLength) {
             return value;

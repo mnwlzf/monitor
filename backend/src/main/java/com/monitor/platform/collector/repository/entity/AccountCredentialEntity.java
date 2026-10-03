@@ -15,20 +15,34 @@ import java.time.OffsetDateTime;
 public class AccountCredentialEntity {
 
     @TableId(type = IdType.AUTO)
+    /** 凭证主键。 */
     private Long id;
+    /** 所属账号主键。 */
     private Integer accountId;
+    /** 凭证类型，例如 PASSWORD。 */
     private String credentialType;
+    /** 加密算法标识。 */
     private String encryptionAlgorithm;
+    /** Base64 编码后的密文。 */
     private String encryptedPayload;
+    /** Base64 编码后的 AES-GCM 初始化向量。 */
     private String initializationVector;
+    /** 加密密钥版本。 */
     private Integer keyVersion;
+    /** 凭证过期时间。 */
     private OffsetDateTime expiresAt;
+    /** 最近一次验证成功时间。 */
     private OffsetDateTime lastVerifiedAt;
+    /** 最近一次验证失败信息。 */
     private String verificationError;
+    /** 是否为当前有效凭证。 */
     private Boolean isActive;
+    /** 扩展元数据，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String metadata;
+    /** 创建时间。 */
     private OffsetDateTime createdAt;
+    /** 更新时间。 */
     private OffsetDateTime updatedAt;
 
     public Long getId() { return id; }

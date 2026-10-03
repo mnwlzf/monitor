@@ -11,8 +11,10 @@ import java.util.List;
  */
 public interface UpstreamGroupSnapshotMapper  {
 
+    /** 新增渠道快照。 */
     int insertSnapshot(UpstreamGroupSnapshotEntity entity);
 
+    /** 查询渠道在时间区间内的历史快照。 */
     List<UpstreamGroupSnapshotEntity> selectSnapshotsByGroupRange(
             @Param("groupId") Long groupId,
             @Param("from") OffsetDateTime from,

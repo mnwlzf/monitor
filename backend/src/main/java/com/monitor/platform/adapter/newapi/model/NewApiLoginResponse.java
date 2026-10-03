@@ -22,6 +22,12 @@ public record NewApiLoginResponse(
 
     /**
      * 登录成功后的令牌、会话和用户信息。
+     *
+     * @param accessExpiresAt 令牌过期时间
+     * @param accessToken     访问令牌
+     * @param session         会话信息
+     * @param tokenType       令牌类型
+     * @param user            登录用户
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record LoginData(
@@ -35,6 +41,15 @@ public record NewApiLoginResponse(
 
     /**
      * New API 会话信息。
+     *
+     * @param sid          会话 ID
+     * @param current      是否为当前会话
+     * @param loginMethod  登录方式
+     * @param ip           登录 IP
+     * @param userAgent    客户端 User-Agent
+     * @param createdAt    创建时间
+     * @param lastActiveAt 最近活跃时间
+     * @param expiresAt    过期时间
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Session(

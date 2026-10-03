@@ -15,17 +15,28 @@ import java.time.OffsetDateTime;
 public class PlatformEntity {
 
     @TableId(type = IdType.AUTO)
+    /** 平台主键。 */
     private Integer id;
+    /** 平台名称。 */
     private String platformName;
+    /** 平台基础地址。 */
     private String url;
+    /** 平台类型，newapi 或 sub2api。 */
     private String platformType;
+    /** 平台是否启用。 */
     private Boolean status;
+    /** 平台描述。 */
     private String description;
+    /** 平台扩展配置，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String settings;
+    /** 平台最近一次采集时间。 */
     private OffsetDateTime lastCollectedAt;
+    /** 软删除时间。 */
     private OffsetDateTime deletedAt;
+    /** 创建时间。 */
     private OffsetDateTime createdAt;
+    /** 更新时间。 */
     private OffsetDateTime updatedAt;
 
     public Integer getId() { return id; }

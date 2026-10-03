@@ -20,6 +20,9 @@ public class CollectionRunRepository {
         this.collectionRunMapper = collectionRunMapper;
     }
 
+    /**
+     * 创建 RUNNING 状态的采集批次。
+     */
     public CollectionRunEntity start(Integer accountId, String platformType, String metadata) {
         CollectionRunEntity entity = new CollectionRunEntity();
         entity.setAccountId(accountId);
@@ -31,15 +34,24 @@ public class CollectionRunRepository {
         return entity;
     }
 
+    /**
+     * 按主键查询采集批次。
+     */
     public Optional<CollectionRunEntity> findById(Long id) {
         return Optional.ofNullable(collectionRunMapper.selectRunById(id));
     }
 
+    /**
+     * 写入采集批次的结束状态、耗时和错误信息。
+     */
     public void finish(Long id, String status, OffsetDateTime finishedAt,
                        Long durationMs, String errorCode, String errorMessage) {
         collectionRunMapper.updateRunFinish(id, status, finishedAt, durationMs, errorCode, errorMessage);
     }
 
+    /**
+     * 查询账号最近若干次采集批次。
+     */
     public List<CollectionRunEntity> findRecent(Integer accountId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 1000));
         return collectionRunMapper.selectRecentRuns(accountId, safeLimit);

@@ -9,6 +9,9 @@ public class ResourceNotFoundException extends BaseException {
 
     private static final String DEFAULT_CODE = "RESOURCE_NOT_FOUND";
 
+    /**
+     * 使用指定错误码创建资源不存在异常。
+     */
     public ResourceNotFoundException(String code, String message) {
         super(code, message);
     }

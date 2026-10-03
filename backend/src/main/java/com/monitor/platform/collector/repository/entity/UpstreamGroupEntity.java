@@ -16,20 +16,35 @@ import java.time.OffsetDateTime;
 public class UpstreamGroupEntity {
 
     @TableId(type = IdType.AUTO)
+    /** 渠道主键。 */
     private Long id;
+    /** 所属账号主键。 */
     private Integer accountId;
+    /** 平台类型。 */
     private String platformType;
+    /** 上游渠道 ID。 */
     private String externalGroupId;
+    /** 渠道名称。 */
     private String groupName;
+    /** 渠道描述。 */
     private String description;
+    /** 渠道所属平台。 */
     private String platform;
+    /** 当前倍率。 */
     private BigDecimal currentRatio;
+    /** 当前基础倍率。 */
     private BigDecimal currentBaseRatio;
+    /** 上游返回的状态。 */
     private String status;
+    /** 本地是否仍有效。 */
     private Boolean isActive;
+    /** 首次发现时间。 */
     private OffsetDateTime firstSeenAt;
+    /** 最近一次可见时间。 */
     private OffsetDateTime lastSeenAt;
+    /** 最近一次变更时间。 */
     private OffsetDateTime lastChangedAt;
+    /** 上游原始数据或扩展元数据，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String metadata;
 

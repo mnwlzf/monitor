@@ -15,22 +15,37 @@ import java.time.OffsetDateTime;
 public class UpstreamChangeEventEntity {
 
     @TableId(type = IdType.AUTO)
+    /** 变更事件主键。 */
     private Long id;
+    /** 所属账号主键。 */
     private Integer accountId;
+    /** 平台类型。 */
     private String platformType;
+    /** 产生该事件的采集批次主键。 */
     private Long collectionRunId;
+    /** 变更实体类型，例如 GROUP。 */
     private String entityType;
+    /** 本地实体主键。 */
     private Long entityId;
+    /** 上游实体标识。 */
     private String entityKey;
+    /** 变更类型。 */
     private String changeType;
+    /** 发生变化的字段名。 */
     private String fieldName;
+    /** 变更前值，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String oldValue;
+    /** 变更后值，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String newValue;
+    /** 事件级别。 */
     private String severity;
+    /** 可读事件说明。 */
     private String message;
+    /** 发现时间。 */
     private OffsetDateTime detectedAt;
+    /** 扩展元数据，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String metadata;
 

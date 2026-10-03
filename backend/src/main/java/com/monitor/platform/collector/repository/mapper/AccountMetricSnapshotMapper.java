@@ -11,10 +11,13 @@ import java.util.List;
  */
 public interface AccountMetricSnapshotMapper  {
 
+    /** 新增指标快照。 */
     int insertSnapshot(AccountMetricSnapshotEntity entity);
 
+    /** 查询账号最新指标快照。 */
     AccountMetricSnapshotEntity selectLatestSnapshot(@Param("accountId") Integer accountId);
 
+    /** 查询账号在时间区间内的指标快照。 */
     List<AccountMetricSnapshotEntity> selectSnapshotsByAccountRange(
             @Param("accountId") Integer accountId,
             @Param("from") OffsetDateTime from,

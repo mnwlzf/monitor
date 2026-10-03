@@ -19,6 +19,9 @@ public class UpstreamGroupSnapshotRepository {
         this.snapshotMapper = snapshotMapper;
     }
 
+    /**
+     * 保存渠道快照；未指定采集时间时使用当前时间。
+     */
     public UpstreamGroupSnapshotEntity save(UpstreamGroupSnapshotEntity entity) {
         if (entity.getCollectedAt() == null) {
             entity.setCollectedAt(OffsetDateTime.now());
@@ -27,6 +30,9 @@ public class UpstreamGroupSnapshotRepository {
         return entity;
     }
 
+    /**
+     * 查询渠道在时间区间内的历史快照，并限制最大返回数量。
+     */
     public List<UpstreamGroupSnapshotEntity> findByGroup(Long groupId,
                                                          OffsetDateTime from,
                                                          OffsetDateTime to,

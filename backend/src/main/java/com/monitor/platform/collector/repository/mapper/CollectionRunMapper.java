@@ -11,8 +11,10 @@ import java.util.List;
  */
 public interface CollectionRunMapper  {
 
+    /** 新增采集批次。 */
     int insertRun(CollectionRunEntity entity);
 
+    /** 写入采集批次的完成状态。 */
     int updateRunFinish(@Param("id") Long id,
                         @Param("status") String status,
                         @Param("finishedAt") OffsetDateTime finishedAt,
@@ -20,8 +22,10 @@ public interface CollectionRunMapper  {
                         @Param("errorCode") String errorCode,
                         @Param("errorMessage") String errorMessage);
 
+    /** 按主键查询采集批次。 */
     CollectionRunEntity selectRunById(@Param("id") Long id);
 
+    /** 查询账号最近若干次采集批次。 */
     List<CollectionRunEntity> selectRecentRuns(@Param("accountId") Integer accountId,
                                                @Param("limit") int limit);
 }

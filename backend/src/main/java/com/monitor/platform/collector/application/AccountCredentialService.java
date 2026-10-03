@@ -26,6 +26,13 @@ public class AccountCredentialService {
         this.credentialCipher = credentialCipher;
     }
 
+    /**
+     * 保存账号密码凭证。新凭证会替换同账号同类型的旧凭证。
+     *
+     * @param accountId 账号 ID
+     * @param password  明文密码，仅在内存中短暂存在
+     * @return 已落库的凭证实体
+     */
     public AccountCredentialEntity savePassword(Integer accountId, String password) {
         log.info("保存账号密码凭证: accountId={}", accountId);
         CredentialCipher.EncryptedCredential encrypted = credentialCipher.encrypt(password);
@@ -42,11 +49,22 @@ public class AccountCredentialService {
         return credentialRepository.replaceActive(entity);
     }
 
+    /**
+     * 停用账号的全部有效凭证，通常用于删除账号。
+     *
+     * @param accountId 账号 ID
+     */
     public void deactivateAll(Integer accountId) {
         log.info("停用账号全部凭证: accountId={}", accountId);
         credentialRepository.deactivateAllActive(accountId);
     }
 
+    /**
+     * 读取并解密账号密码；没有有效凭证时直接失败。
+     *
+     * @param accountId 账号 ID
+     * @return 明文密码
+     */
     public String resolvePassword(Integer accountId) {
         AccountCredentialEntity credential = credentialRepository.findActive(accountId, PASSWORD)
                 .orElseThrow(() -> new IllegalStateException("账号未配置可用密码凭证: " + accountId));

@@ -23,6 +23,9 @@ public class AccountUsageDashboardSnapshotRepository {
         this.snapshotMapper = snapshotMapper;
     }
 
+    /**
+     * 保存用量看板快照，并为必填 JSON 字段设置空值兜底。
+     */
     public AccountUsageDashboardSnapshotEntity save(AccountUsageDashboardSnapshotEntity entity) {
         if (entity.getCollectedAt() == null) {
             entity.setCollectedAt(OffsetDateTime.now());
@@ -41,10 +44,16 @@ public class AccountUsageDashboardSnapshotRepository {
         return entity;
     }
 
+    /**
+     * 查询账号最新一条用量看板快照。
+     */
     public Optional<AccountUsageDashboardSnapshotEntity> findLatest(Integer accountId) {
         return Optional.ofNullable(snapshotMapper.selectLatestSnapshot(accountId));
     }
 
+    /**
+     * 批量查询多个账号各自的最新快照，避免逐账号查库。
+     */
     public List<AccountUsageDashboardSnapshotEntity> findLatestByAccounts(List<Integer> accountIds) {
         if (accountIds == null || accountIds.isEmpty()) {
             return List.of();
@@ -52,6 +61,9 @@ public class AccountUsageDashboardSnapshotRepository {
         return snapshotMapper.selectLatestSnapshotsByAccounts(accountIds);
     }
 
+    /**
+     * 查询账号在时间区间内的用量快照，并限制最大返回数量。
+     */
     public List<AccountUsageDashboardSnapshotEntity> findByAccount(Integer accountId,
                                                                    OffsetDateTime from,
                                                                    OffsetDateTime to,

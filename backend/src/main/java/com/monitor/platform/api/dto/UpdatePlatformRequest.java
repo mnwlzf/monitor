@@ -7,6 +7,11 @@ import jakarta.validation.constraints.Size;
  * 更新上游平台请求。
  *
  * <p>字段为空表示不修改；平台类型变更后，该平台下所有账号会按新适配器采集。</p>
+ *
+ * @param name     平台名称
+ * @param baseUrl  平台基础地址
+ * @param platform 平台类型
+ * @param status   平台是否启用
  */
 public record UpdatePlatformRequest(
         @Size(max = 100, message = "平台名称不能超过 100 个字符")

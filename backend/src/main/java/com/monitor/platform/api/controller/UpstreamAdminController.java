@@ -41,34 +41,71 @@ public class UpstreamAdminController {
         this.collectionService = collectionService;
     }
 
+    /**
+     * 查询所有启用的上游平台。
+     *
+     * @return 平台列表
+     */
     @GetMapping("/instances")
     public ApiResponse<List<PlatformResponse>> listInstances() {
         return ApiResponse.of(upstreamAdminService.listPlatforms(), null);
     }
 
+    /**
+     * 新建上游平台。
+     *
+     * @param request 平台名称、地址和类型
+     * @return 新建后的平台信息
+     */
     @PostMapping("/instances")
     public ApiResponse<PlatformResponse> createInstance(@Valid @RequestBody CreatePlatformRequest request) {
         return ApiResponse.of(upstreamAdminService.createPlatform(request), null);
     }
 
+    /**
+     * 更新上游平台信息。
+     *
+     * @param instanceId 平台 ID
+     * @param request    待更新字段
+     * @return 更新后的平台信息
+     */
     @PutMapping("/instances/{instanceId}")
     public ApiResponse<PlatformResponse> updateInstance(@PathVariable Integer instanceId,
                                                         @Valid @RequestBody UpdatePlatformRequest request) {
         return ApiResponse.of(upstreamAdminService.updatePlatform(instanceId, request), null);
     }
 
+    /**
+     * 软删除上游平台。平台下仍有账号时由业务层拒绝删除。
+     *
+     * @param instanceId 平台 ID
+     */
     @DeleteMapping("/instances/{instanceId}")
     public ApiResponse<Void> deleteInstance(@PathVariable Integer instanceId) {
         upstreamAdminService.deletePlatform(instanceId);
         return ApiResponse.of(null, null);
     }
 
+    /**
+     * 手动触发指定平台账号采集。
+     *
+     * @param instanceId 平台 ID
+     * @param accountId  账号 ID
+     */
     @PostMapping("/instances/{instanceId}/accounts/{accountId}/collect")
     public ApiResponse<Void> collectAccount(@PathVariable Integer instanceId,
                                             @PathVariable Integer accountId) {
         collectionService.collectAccount(instanceId, accountId);
         return ApiResponse.of(null, null);
     }
+    /**
+     * 更新指定账号信息；密码为空时保留原凭证。
+     *
+     * @param instanceId 平台 ID
+     * @param accountId  账号 ID
+     * @param request    待更新字段
+     * @return 更新后的账号信息
+     */
     @PutMapping("/instances/{instanceId}/accounts/{accountId}")
     public ApiResponse<AccountResponse> updateAccount(@PathVariable Integer instanceId,
                                                        @PathVariable Integer accountId,
@@ -76,29 +113,60 @@ public class UpstreamAdminController {
         return ApiResponse.of(upstreamAdminService.updateAccount(instanceId, accountId, request), null);
     }
 
+    /**
+     * 软删除指定账号，并停用其凭证。
+     *
+     * @param instanceId 平台 ID
+     * @param accountId  账号 ID
+     */
     @DeleteMapping("/instances/{instanceId}/accounts/{accountId}")
     public ApiResponse<Void> deleteAccount(@PathVariable Integer instanceId,
                                            @PathVariable Integer accountId) {
         upstreamAdminService.deleteAccount(instanceId, accountId);
         return ApiResponse.of(null, null);
     }
+    /**
+     * 查询平台下所有账号采集到的渠道/分组。
+     *
+     * @param instanceId 平台 ID
+     * @return 渠道列表
+     */
     @GetMapping("/instances/{instanceId}/groups")
     public ApiResponse<List<UpstreamGroupResponse>> listGroups(@PathVariable Integer instanceId) {
         return ApiResponse.of(upstreamAdminService.listGroups(instanceId), null);
     }
 
+    /**
+     * 查询平台下各账号的最新用量看板数据。
+     *
+     * @param instanceId 平台 ID
+     * @return 用量看板列表
+     */
     @GetMapping("/instances/{instanceId}/usage-dashboard")
     public ApiResponse<List<AccountUsageDashboardResponse>> listUsageDashboard(
             @PathVariable Integer instanceId) {
         return ApiResponse.of(upstreamAdminService.listUsageDashboard(instanceId), null);
     }
 
+    /**
+     * 查询平台下最近的渠道变更事件。
+     *
+     * @param instanceId 平台 ID
+     * @param limit      最大返回条数
+     * @return 变更事件列表
+     */
     @GetMapping("/instances/{instanceId}/changes")
     public ApiResponse<List<UpstreamChangeEventResponse>> listChanges(@PathVariable Integer instanceId,
                                                                        @RequestParam(defaultValue = "100") int limit) {
         return ApiResponse.of(upstreamAdminService.listChanges(instanceId, limit), null);
     }
 
+    /**
+     * 查询平台下的账号列表。
+     *
+     * @param instanceId 平台 ID
+     * @return 账号列表
+     */
     @GetMapping("/instances/{instanceId}/accounts")
     public ApiResponse<List<AccountResponse>> listAccounts(@PathVariable Integer instanceId) {
         return ApiResponse.of(upstreamAdminService.listAccounts(instanceId), null);

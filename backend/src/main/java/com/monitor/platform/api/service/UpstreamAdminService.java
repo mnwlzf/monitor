@@ -83,6 +83,12 @@ public class UpstreamAdminService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 创建平台实例。平台名称全局唯一，创建后默认启用。
+     *
+     * @param request 平台创建参数
+     * @return 新建平台
+     */
     @Transactional
     public PlatformResponse createPlatform(CreatePlatformRequest request) {
         platformRepository.findByName(request.name()).ifPresent(existing -> {
@@ -102,6 +108,11 @@ public class UpstreamAdminService {
         return toPlatformResponse(entity);
     }
 
+    /**
+     * 查询所有未删除且启用的平台。
+     *
+     * @return 平台列表
+     */
     public List<PlatformResponse> listPlatforms() {
         return platformRepository.findEnabled().stream().map(this::toPlatformResponse).toList();
     }
@@ -163,6 +174,13 @@ public class UpstreamAdminService {
         log.info("删除上游平台成功: platformId={}, name={}", platformId, entity.getPlatformName());
     }
 
+    /**
+     * 在指定平台下创建账号，并保存加密后的登录凭证。
+     *
+     * @param platformId 平台 ID
+     * @param request    账号和密码信息
+     * @return 新建账号
+     */
     @Transactional
     public AccountResponse createAccount(Integer platformId, CreateAccountRequest request) {
         PlatformEntity platform = platformRepository.findById(platformId)
@@ -193,6 +211,14 @@ public class UpstreamAdminService {
         return toAccountResponse(entity);
     }
 
+    /**
+     * 更新指定平台下的账号信息。密码为空时不覆盖原凭证。
+     *
+     * @param platformId 平台 ID
+     * @param accountId  账号 ID
+     * @param request    待更新字段
+     * @return 更新后的账号
+     */
     @Transactional
     public AccountResponse updateAccount(Integer platformId, Integer accountId,
                                          UpdateAccountRequest request) {
@@ -224,6 +250,12 @@ public class UpstreamAdminService {
         return toAccountResponse(entity);
     }
 
+    /**
+     * 软删除账号，并停用该账号的全部凭证。
+     *
+     * @param platformId 平台 ID
+     * @param accountId  账号 ID
+     */
     @Transactional
     public void deleteAccount(Integer platformId, Integer accountId) {
         AccountEntity entity = findAccount(platformId, accountId);
@@ -232,12 +264,21 @@ public class UpstreamAdminService {
         log.info("删除采集账号成功: accountId={}, platformId={}, loginName={}",
                 accountId, platformId, entity.getUsername());
     }
+    /**
+     * 查询指定平台下的账号列表。
+     *
+     * @param platformId 平台 ID
+     * @return 账号列表
+     */
     public List<AccountResponse> listAccounts(Integer platformId) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
         return accountRepository.findByPlatformId(platformId).stream().map(this::toAccountResponse).toList();
     }
 
+    /**
+     * 校验账号存在且确实属于指定平台，防止跨平台操作。
+     */
     private AccountEntity findAccount(Integer platformId, Integer accountId) {
         AccountEntity entity = accountRepository.findById(accountId)
                 .orElseThrow(() -> BusinessException.of("账号不存在: " + accountId));
@@ -246,6 +287,9 @@ public class UpstreamAdminService {
         }
         return entity;
     }
+    /**
+     * 将渠道实体转换为接口响应。
+     */
     private UpstreamGroupResponse toGroupResponse(UpstreamGroupEntity entity) {
         return new UpstreamGroupResponse(
                 entity.getId(), entity.getAccountId(), entity.getExternalGroupId(),
@@ -255,6 +299,9 @@ public class UpstreamAdminService {
         );
     }
 
+    /**
+     * 将变更事件实体转换为接口响应。
+     */
     private UpstreamChangeEventResponse toChangeEventResponse(UpstreamChangeEventEntity entity) {
         return new UpstreamChangeEventResponse(
                 entity.getId(), entity.getAccountId(), entity.getPlatformType(),
@@ -264,6 +311,9 @@ public class UpstreamAdminService {
         );
     }
 
+    /**
+     * 将平台实体转换为接口响应。
+     */
     private PlatformResponse toPlatformResponse(PlatformEntity entity) {
         return new PlatformResponse(
                 entity.getId(),
@@ -274,6 +324,12 @@ public class UpstreamAdminService {
         );
     }
 
+    /**
+     * 查询平台下所有账号的渠道/分组。
+     *
+     * @param platformId 平台 ID
+     * @return 渠道列表
+     */
     public List<UpstreamGroupResponse> listGroups(Integer platformId) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
@@ -286,6 +342,13 @@ public class UpstreamAdminService {
         return result;
     }
 
+    /**
+     * 查询平台下最近的渠道变更事件，并按发现时间倒序截断。
+     *
+     * @param platformId 平台 ID
+     * @param limit      最大返回条数
+     * @return 变更事件列表
+     */
     public List<UpstreamChangeEventResponse> listChanges(Integer platformId, int limit) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
@@ -414,6 +477,9 @@ public class UpstreamAdminService {
         return node;
     }
 
+    /**
+     * 安全解析数据库中保存的 JSON 文本；内容为空或格式错误时返回 null。
+     */
     private JsonNode readJson(String value) {
         if (value == null || value.isBlank()) {
             return null;
@@ -426,6 +492,9 @@ public class UpstreamAdminService {
         }
     }
 
+    /**
+     * 将账号实体与其最新指标快照组合为接口响应。
+     */
     private AccountResponse toAccountResponse(AccountEntity entity) {
         AccountMetricSnapshotEntity snapshot = metricSnapshotRepository.findLatest(entity.getId()).orElse(null);
         return new AccountResponse(

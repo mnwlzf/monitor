@@ -19,6 +19,9 @@ public class UpstreamChangeEventRepository {
         this.eventMapper = eventMapper;
     }
 
+    /**
+     * 保存变更事件，并补齐发现时间、级别和元数据默认值。
+     */
     public UpstreamChangeEventEntity save(UpstreamChangeEventEntity entity) {
         if (entity.getDetectedAt() == null) {
             entity.setDetectedAt(OffsetDateTime.now());
@@ -33,6 +36,9 @@ public class UpstreamChangeEventRepository {
         return entity;
     }
 
+    /**
+     * 查询账号最近若干条变更事件。
+     */
     public List<UpstreamChangeEventEntity> findRecent(Integer accountId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 1000));
         return eventMapper.selectRecentEvents(accountId, safeLimit);

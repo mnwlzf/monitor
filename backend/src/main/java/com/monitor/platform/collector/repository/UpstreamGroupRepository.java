@@ -21,6 +21,9 @@ public class UpstreamGroupRepository {
         this.groupMapper = groupMapper;
     }
 
+    /**
+     * 新增或更新渠道状态；新增时补齐首次发现和最后可见时间。
+     */
     public UpstreamGroupEntity save(UpstreamGroupEntity entity) {
         if (entity.getId() == null) {
             OffsetDateTime now = OffsetDateTime.now();
@@ -40,6 +43,9 @@ public class UpstreamGroupRepository {
         return entity;
     }
 
+    /**
+     * 按账号、平台类型和上游渠道 ID 查询渠道。
+     */
     public Optional<UpstreamGroupEntity> findByAccountAndExternalId(Integer accountId,
                                                                     String platformType,
                                                                     String externalGroupId) {
@@ -47,10 +53,18 @@ public class UpstreamGroupRepository {
                 accountId, platformType, externalGroupId));
     }
 
+    /**
+     * 查询账号下的渠道，可选择只返回有效渠道。
+     */
     public List<UpstreamGroupEntity> findByAccount(Integer accountId, boolean activeOnly) {
         return groupMapper.selectGroupsByAccount(accountId, activeOnly);
     }
 
+    /**
+     * 将本轮未出现在上游的渠道批量标记为下线。
+     *
+     * @return 被标记下线的渠道数量
+     */
     public int deactivateMissing(Integer accountId, String platformType,
                                  Collection<String> activeExternalGroupIds) {
         return groupMapper.deactivateMissingGroups(

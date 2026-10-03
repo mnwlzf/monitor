@@ -15,27 +15,48 @@ import java.time.OffsetDateTime;
 public class AccountEntity {
 
     @TableId(type = IdType.AUTO)
+    /** 账号主键。 */
     private Integer id;
+    /** 登录账号或邮箱。 */
     private String email;
+    /** 登录用户名。 */
     private String username;
+    /** 平台类型的冗余副本，便于查询和兼容历史数据。 */
     private String platform;
+    /** 平台地址的冗余副本。 */
     private String url;
+    /** 账号是否启用。 */
     private Boolean status;
+    /** 创建时间。 */
     private OffsetDateTime createdAt;
+    /** 更新时间。 */
     private OffsetDateTime updatedAt;
+    /** 历史明文密码字段，当前凭证统一存于 account_credentials。 */
     private String password;
+    /** 所属平台主键。 */
     private Integer platformId;
+    /** 前端展示名称。 */
     private String displayName;
+    /** 上游平台中的用户 ID。 */
     private String externalUserId;
+    /** 认证类型，当前默认 PASSWORD。 */
     private String authType;
+    /** 凭证状态，例如 VALID、UNKNOWN。 */
     private String credentialStatus;
+    /** 账号扩展配置，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String settings;
+    /** 最近一次采集时间。 */
     private OffsetDateTime lastCollectedAt;
+    /** 最近一次采集状态。 */
     private String lastCollectStatus;
+    /** 最近一次采集错误信息。 */
     private String lastCollectError;
+    /** 连续采集失败次数，用于计算退避时间。 */
     private Integer consecutiveFailures;
+    /** 下一次计划采集时间。 */
     private OffsetDateTime nextCollectAt;
+    /** 软删除时间。 */
     private OffsetDateTime deletedAt;
 
     public Integer getId() { return id; }

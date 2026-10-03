@@ -33,10 +33,21 @@ public class CredentialCipher {
     private final byte[] keyBytes;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    /**
+     * 使用 Base64 编码的 32 字节密钥初始化加解密服务。
+     *
+     * @param base64Key 环境变量 UPSTREAM_CREDENTIAL_KEY
+     */
     public CredentialCipher(@Value("${UPSTREAM_CREDENTIAL_KEY:}") String base64Key) {
         this.keyBytes = decodeKey(base64Key);
     }
 
+    /**
+     * 使用 AES-GCM 加密明文凭证，每次加密都会生成随机初始化向量。
+     *
+     * @param plaintext 明文密码
+     * @return 可直接落库的密文和算法参数
+     */
     public EncryptedCredential encrypt(String plaintext) {
         requireKey();
         try {
@@ -59,6 +70,11 @@ public class CredentialCipher {
         }
     }
 
+    /**
+     * 校验算法与密钥版本后解密凭证。
+     *
+     * @return 明文密码
+     */
     public String decrypt(String encryptedPayload, String initializationVector,
                           String algorithm, Integer keyVersion) {
         requireKey();
@@ -82,6 +98,9 @@ public class CredentialCipher {
         }
     }
 
+    /**
+     * 解码并校验密钥长度；配置无效时返回 null，由调用方给出明确错误。
+     */
     private byte[] decodeKey(String base64Key) {
         if (base64Key == null || base64Key.isBlank()) {
             return null;
@@ -99,6 +118,9 @@ public class CredentialCipher {
         }
     }
 
+    /**
+     * 确保凭证密钥已正确配置。
+     */
     private void requireKey() {
         if (keyBytes == null) {
             throw new IllegalStateException("未配置 UPSTREAM_CREDENTIAL_KEY");

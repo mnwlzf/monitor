@@ -11,13 +11,17 @@ import java.util.List;
  */
 public interface AccountUsageDashboardSnapshotMapper {
 
+    /** 新增用量看板快照。 */
     int insertSnapshot(AccountUsageDashboardSnapshotEntity entity);
 
+    /** 查询账号最新用量看板快照。 */
     AccountUsageDashboardSnapshotEntity selectLatestSnapshot(@Param("accountId") Integer accountId);
 
+    /** 批量查询多个账号各自的最新快照。 */
     List<AccountUsageDashboardSnapshotEntity> selectLatestSnapshotsByAccounts(
             @Param("accountIds") List<Integer> accountIds);
 
+    /** 查询账号在时间区间内的用量看板快照。 */
     List<AccountUsageDashboardSnapshotEntity> selectSnapshotsByAccountRange(
             @Param("accountId") Integer accountId,
             @Param("from") OffsetDateTime from,

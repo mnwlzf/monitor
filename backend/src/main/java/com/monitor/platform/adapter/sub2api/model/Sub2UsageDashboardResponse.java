@@ -22,6 +22,32 @@ public record Sub2UsageDashboardResponse(
         DashboardStats data
 ) {
 
+    /**
+     * 账号整体用量统计。
+     *
+     * @param totalApiKeys               API Key 总数
+     * @param activeApiKeys              有效 API Key 数
+     * @param totalRequests              累计请求数
+     * @param totalInputTokens           累计输入 Token 数
+     * @param totalOutputTokens          累计输出 Token 数
+     * @param totalCacheCreationTokens   累计缓存创建 Token 数
+     * @param totalCacheReadTokens       累计缓存读取 Token 数
+     * @param totalTokens                累计 Token 总数
+     * @param totalCost                  累计标准消耗
+     * @param totalActualCost            累计实际消耗
+     * @param todayRequests              今日请求数
+     * @param todayInputTokens           今日输入 Token 数
+     * @param todayOutputTokens          今日输出 Token 数
+     * @param todayCacheCreationTokens   今日缓存创建 Token 数
+     * @param todayCacheReadTokens       今日缓存读取 Token 数
+     * @param todayTokens                今日 Token 数
+     * @param todayCost                  今日标准消耗
+     * @param todayActualCost            今日实际消耗
+     * @param averageDurationMs          平均请求耗时
+     * @param rpm                        每分钟请求数
+     * @param tpm                        每分钟 Token 数
+     * @param byPlatform                 按渠道平台聚合的统计
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record DashboardStats(
             @JsonProperty("total_api_keys") Integer totalApiKeys,
@@ -49,6 +75,17 @@ public record Sub2UsageDashboardResponse(
     ) {
     }
 
+    /**
+     * 按渠道平台聚合的用量统计。
+     *
+     * @param platform         平台标识
+     * @param totalRequests    累计请求数
+     * @param totalTokens      累计 Token 数
+     * @param totalActualCost  累计实际消耗
+     * @param todayRequests    今日请求数
+     * @param todayTokens      今日 Token 数
+     * @param todayActualCost  今日实际消耗
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PlatformStats(
             String platform,

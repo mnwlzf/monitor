@@ -16,16 +16,26 @@ import java.time.OffsetDateTime;
 public class UpstreamGroupSnapshotEntity {
 
     @TableId(type = IdType.AUTO)
+    /** 渠道快照主键。 */
     private Long id;
+    /** 渠道主键。 */
     private Long groupId;
+    /** 所属采集批次主键。 */
     private Long collectionRunId;
+    /** 快照时的渠道倍率。 */
     private BigDecimal ratio;
+    /** 快照时的基础倍率。 */
     private BigDecimal baseRatio;
+    /** 快照时的上游状态。 */
     private String status;
+    /** 快照时本地是否有效。 */
     private Boolean isActive;
+    /** 快照原始数据，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String rawData;
+    /** 原始数据内容哈希。 */
     private String contentHash;
+    /** 采集时间。 */
     private OffsetDateTime collectedAt;
 
     public Long getId() { return id; }

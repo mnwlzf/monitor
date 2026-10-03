@@ -20,6 +20,9 @@ public class AccountMetricSnapshotRepository {
         this.snapshotMapper = snapshotMapper;
     }
 
+    /**
+     * 保存账号指标快照；未指定采集时间时使用当前时间。
+     */
     public AccountMetricSnapshotEntity save(AccountMetricSnapshotEntity entity) {
         if (entity.getCollectedAt() == null) {
             entity.setCollectedAt(OffsetDateTime.now());
@@ -28,10 +31,16 @@ public class AccountMetricSnapshotRepository {
         return entity;
     }
 
+    /**
+     * 查询账号最新一条指标快照。
+     */
     public Optional<AccountMetricSnapshotEntity> findLatest(Integer accountId) {
         return Optional.ofNullable(snapshotMapper.selectLatestSnapshot(accountId));
     }
 
+    /**
+     * 查询账号在时间区间内的指标快照，并限制最大返回数量。
+     */
     public List<AccountMetricSnapshotEntity> findByAccount(Integer accountId,
                                                            OffsetDateTime from,
                                                            OffsetDateTime to,

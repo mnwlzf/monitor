@@ -15,15 +15,25 @@ import java.time.OffsetDateTime;
 public class CollectionRunEntity {
 
     @TableId(type = IdType.AUTO)
+    /** 采集批次主键。 */
     private Long id;
+    /** 账号主键。 */
     private Integer accountId;
+    /** 平台类型。 */
     private String platformType;
+    /** 批次状态，例如 RUNNING、SUCCESS、FAILED。 */
     private String status;
+    /** 开始时间。 */
     private OffsetDateTime startedAt;
+    /** 结束时间。 */
     private OffsetDateTime finishedAt;
+    /** 采集耗时，单位毫秒。 */
     private Long durationMs;
+    /** 失败错误码。 */
     private String errorCode;
+    /** 失败错误信息。 */
     private String errorMessage;
+    /** 批次扩展元数据，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String metadata;
 
