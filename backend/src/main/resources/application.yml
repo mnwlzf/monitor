@@ -38,3 +38,15 @@ mybatis-plus:
     cache-enabled: false
   global-config:
     banner: false
+
+# 采集任务调度配置
+
+# 定时任务框架配置
+monitor:
+  scheduling:
+    enabled: true
+    pool-size: 4
+    thread-name-prefix: scheduled-task-
+    await-termination-seconds: 30
+  collection:
+    batch-size: 100
