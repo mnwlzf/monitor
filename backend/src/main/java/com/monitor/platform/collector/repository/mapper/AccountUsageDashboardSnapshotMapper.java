@@ -23,4 +23,14 @@ public interface AccountUsageDashboardSnapshotMapper {
             @Param("from") OffsetDateTime from,
             @Param("to") OffsetDateTime to,
             @Param("limit") int limit);
+
+    /**
+     * 批量查询多个账号在时间区间内的快照，按账号与采集时间升序返回。
+     *
+     * <p>New API 的「今日消耗」由当天首次与最新一次累计消耗的差值推算，批量查询避免按账号循环查库。</p>
+     */
+    List<AccountUsageDashboardSnapshotEntity> selectSnapshotsByAccountsRange(
+            @Param("accountIds") List<Integer> accountIds,
+            @Param("from") OffsetDateTime from,
+            @Param("to") OffsetDateTime to);
 }

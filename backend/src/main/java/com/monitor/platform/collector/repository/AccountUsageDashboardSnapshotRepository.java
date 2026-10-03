@@ -59,4 +59,18 @@ public class AccountUsageDashboardSnapshotRepository {
         int safeLimit = Math.max(1, Math.min(limit, 10000));
         return snapshotMapper.selectSnapshotsByAccountRange(accountId, from, to, safeLimit);
     }
+
+    /**
+     * 批量查询账号在时间区间内的快照，按账号与采集时间升序返回。
+     *
+     * <p>用于按天计算累计指标差值（如 New API 今日消耗）。</p>
+     */
+    public List<AccountUsageDashboardSnapshotEntity> findByAccounts(List<Integer> accountIds,
+                                                                    OffsetDateTime from,
+                                                                    OffsetDateTime to) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
+        }
+        return snapshotMapper.selectSnapshotsByAccountsRange(accountIds, from, to);
+    }
 }

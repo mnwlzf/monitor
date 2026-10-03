@@ -3,6 +3,7 @@ package com.monitor.platform.api.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.monitor.platform.api.dto.AccountResponse;
 import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.CreateAccountRequest;
@@ -31,6 +32,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -44,6 +49,12 @@ import java.util.Map;
 public class UpstreamAdminService {
 
     private static final Logger log = LoggerFactory.getLogger(UpstreamAdminService.class);
+
+    /** New API 平台标识，其「今日消耗」由累计消耗差值推算。 */
+    private static final String PLATFORM_NEW_API = "newapi";
+
+    /** 日统计所属时区，与上游采集口径保持一致。 */
+    private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final PlatformRepository platformRepository;
     private final AccountRepository accountRepository;
@@ -309,12 +320,21 @@ public class UpstreamAdminService {
             return List.of();
         }
 
+        List<Integer> accountIds = new ArrayList<>(accountMap.keySet());
+        Map<Integer, BigDecimal> newApiTodayCost = calculateNewApiTodayCost(accountIds);
+
         List<AccountUsageDashboardResponse> result = new ArrayList<>();
         for (AccountUsageDashboardSnapshotEntity snapshot
-                : usageDashboardRepository.findLatestByAccounts(new ArrayList<>(accountMap.keySet()))) {
+                : usageDashboardRepository.findLatestByAccounts(accountIds)) {
             AccountEntity account = accountMap.get(snapshot.getAccountId());
             if (account == null) {
                 continue;
+            }
+            // New API 上游没有当日字段，用当天累计消耗差值补出 metrics.today_actual_cost；
+            // totalActualCost 仍保持「累计实际成本」语义，不被覆盖。
+            JsonNode metrics = readJson(snapshot.getMetrics());
+            if (PLATFORM_NEW_API.equalsIgnoreCase(snapshot.getPlatformType())) {
+                metrics = withTodayActualCost(metrics, newApiTodayCost.get(snapshot.getAccountId()));
             }
             result.add(new AccountUsageDashboardResponse(
                     snapshot.getId(),
@@ -328,12 +348,70 @@ public class UpstreamAdminService {
                     snapshot.getTotalTokens(),
                     snapshot.getTotalCost(),
                     snapshot.getTotalActualCost(),
-                    readJson(snapshot.getMetrics()),
+                    metrics,
                     readJson(snapshot.getPlatformStats()),
                     snapshot.getCollectedAt()
             ));
         }
         return result;
+    }
+
+    /**
+     * 计算 New API 账号的「今日消耗」。
+     *
+     * <p>New API 只提供累计已用额度，没有当日统计，因此用当天首次采集与最新一次采集的
+     * 累计消耗（已换算 USD 的 total_cost）差值作为今日消耗；额度被重置或换套餐导致
+     * 差值为负时跳过，避免展示误导数据。</p>
+     *
+     * @return accountId -> 今日消耗（USD），无法计算时不包含该账号
+     */
+    private Map<Integer, BigDecimal> calculateNewApiTodayCost(List<Integer> accountIds) {
+        OffsetDateTime now = OffsetDateTime.now(REPORT_ZONE);
+        OffsetDateTime dayStart = LocalDate.now(REPORT_ZONE).atStartOfDay(REPORT_ZONE).toOffsetDateTime();
+        List<AccountUsageDashboardSnapshotEntity> snapshots =
+                usageDashboardRepository.findByAccounts(accountIds, dayStart, now);
+        if (snapshots.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Integer, BigDecimal> first = new HashMap<>();
+        Map<Integer, BigDecimal> last = new HashMap<>();
+        for (AccountUsageDashboardSnapshotEntity snapshot : snapshots) {
+            if (!PLATFORM_NEW_API.equalsIgnoreCase(snapshot.getPlatformType())
+                    || snapshot.getTotalCost() == null) {
+                continue;
+            }
+            first.putIfAbsent(snapshot.getAccountId(), snapshot.getTotalCost());
+            last.put(snapshot.getAccountId(), snapshot.getTotalCost());
+        }
+
+        Map<Integer, BigDecimal> result = new HashMap<>();
+        for (Map.Entry<Integer, BigDecimal> entry : last.entrySet()) {
+            BigDecimal firstCost = first.get(entry.getKey());
+            if (firstCost == null) {
+                continue;
+            }
+            BigDecimal delta = entry.getValue().subtract(firstCost);
+            if (delta.signum() < 0) {
+                continue;
+            }
+            result.put(entry.getKey(), delta);
+        }
+        return result;
+    }
+
+    /**
+     * 把推导出的当日消耗写回 metrics，前端统一读取 today_actual_cost。
+     */
+    private JsonNode withTodayActualCost(JsonNode metrics, BigDecimal todayActualCost) {
+        if (todayActualCost == null) {
+            return metrics;
+        }
+        ObjectNode node = metrics != null && metrics.isObject()
+                ? ((ObjectNode) metrics).deepCopy()
+                : objectMapper.createObjectNode();
+        node.put("today_actual_cost", todayActualCost);
+        return node;
     }
 
     private JsonNode readJson(String value) {

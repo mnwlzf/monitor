@@ -1,7 +1,11 @@
 <template>
   <section class="admin-page">
     <div class="admin-page-heading">
-      <div><p class="admin-eyebrow">PLATFORMS</p><h2>平台管理</h2><p>上游平台实例、适配器类型、账号规模和采集状态。一个平台可挂载多个账号。</p></div>
+      <div>
+        <p class="admin-eyebrow">PLATFORMS</p>
+        <h2>平台管理</h2>
+        <p>上游平台实例、适配器类型、账号规模与采集状态。一个平台可挂载多个账号。</p>
+      </div>
       <el-button type="primary" :icon="Plus" @click="openCreate">新增平台</el-button>
     </div>
 
@@ -9,42 +13,80 @@
       <el-col :xs="12" :sm="6"><MetricCard label="平台总数" :value="String(platforms.length)" hint="全部上游平台" tone="neutral" /></el-col>
       <el-col :xs="12" :sm="6"><MetricCard label="启用平台" :value="String(enabledCount)" hint="当前启用采集" tone="positive" /></el-col>
       <el-col :xs="12" :sm="6"><MetricCard label="账号总数" :value="String(accounts.length)" hint="平台下账号合计" tone="positive" /></el-col>
-      <el-col :xs="12" :sm="6"><MetricCard label="New API / Sub2" :value="`${newApiCount} / ${sub2Count}`" hint="适配器类型分布" tone="neutral" /></el-col>
+      <el-col :xs="12" :sm="6"><MetricCard label="New API / Sub2" :value="newApiCount + ' / ' + sub2Count" hint="适配器类型分布" tone="neutral" /></el-col>
     </el-row>
 
-    <el-row v-if="platforms.length" :gutter="16">
-      <el-col v-for="platform in platforms" :key="platform.id" :xs="24" :md="12" :xl="8">
-        <el-card shadow="hover" class="admin-card admin-platform-card">
-          <div class="admin-platform-head">
-            <span class="admin-platform-icon" :class="platform.type">{{ platform.type === 'newapi' ? 'NA' : 'S2' }}</span>
-            <el-tag :type="platform.status ? 'success' : 'info'" effect="light" round>{{ platform.status ? '启用' : '停用' }}</el-tag>
+    <el-card shadow="never" class="admin-card admin-toolbar-card">
+      <div class="admin-toolbar admin-toolbar-compact">
+        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索平台名称或地址" />
+        <el-select v-model="typeFilter" clearable placeholder="全部类型">
+          <el-option label="Sub2API" value="sub2api" />
+          <el-option label="New API" value="newapi" />
+        </el-select>
+        <el-checkbox v-model="onlyAbnormal" label="仅看有异常账号的平台" />
+      </div>
+    </el-card>
+
+    <section v-if="filteredPlatforms.length" class="admin-platform-rows">
+      <article v-for="platform in filteredPlatforms" :key="platform.id" class="admin-platform-entry">
+        <div class="admin-platform-identity">
+          <span class="admin-platform-icon" :class="platform.type">{{ platform.type === 'newapi' ? 'NA' : 'S2' }}</span>
+          <div class="admin-platform-identity-text">
+            <div class="admin-platform-name-row">
+              <strong>{{ platform.name }}</strong>
+              <el-tag size="small" :type="platform.type === 'newapi' ? 'primary' : 'success'" effect="plain">{{ typeLabel(platform.type) }}</el-tag>
+              <el-tag size="small" :type="platform.status ? 'success' : 'info'" effect="light">{{ platform.status ? '启用' : '停用' }}</el-tag>
+            </div>
+            <small class="admin-platform-url" :title="platform.url">{{ platform.url }}</small>
           </div>
-          <h3>{{ platform.name }}</h3>
-          <el-text class="admin-url" truncated>{{ platform.url }}</el-text>
-          <div class="admin-platform-stats">
-            <div><strong>{{ platform.accountCount }}</strong><span>账号数</span></div>
-            <div><strong>{{ platform.type }}</strong><span>适配器</span></div>
-            <div><strong>{{ platform.lastCollectedAt ? formatDate(platform.lastCollectedAt) : '暂无' }}</strong><span>最近采集</span></div>
+        </div>
+
+        <div class="admin-platform-cell">
+          <span>账号规模</span>
+          <strong>{{ platform.accountCount }} 个账号</strong>
+          <small>正常 {{ healthyCount(platform.id) }} · 异常 {{ failedCount(platform.id) }}</small>
+          <div v-if="accountsOf(platform.id).length" class="admin-platform-account-chips">
+            <span v-for="account in accountsOf(platform.id).slice(0, 3)" :key="account.id" class="admin-platform-account-chip">{{ account.displayName }}</span>
+            <span v-if="accountsOf(platform.id).length > 3" class="admin-platform-account-chip more">+{{ accountsOf(platform.id).length - 3 }}</span>
           </div>
-          <el-progress :percentage="platform.accountCount ? 100 : 0" :stroke-width="7" :show-text="false" />
-          <div class="admin-platform-actions">
-            <el-button size="small" @click="emit('view-accounts', platform)">查看账号</el-button>
-            <el-button size="small" type="primary" plain @click="emit('add-account', platform)">添加账号</el-button>
-            <el-button size="small" @click="openEdit(platform)">编辑</el-button>
-            <el-popconfirm
-              :title="platform.accountCount ? `该平台下还有 ${platform.accountCount} 个账号，需先删除账号后才能删除平台。` : '确认删除该平台？'"
-              :confirm-button-text="platform.accountCount ? '知道了' : '删除'"
-              :show-cancel-button="!platform.accountCount"
-              width="260"
-              @confirm="platform.accountCount ? undefined : remove(platform)"
-            >
-              <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
-            </el-popconfirm>
+        </div>
+
+        <div class="admin-platform-cell admin-platform-cost">
+          <div class="admin-platform-cost-item">
+            <span>账号余额合计</span>
+            <strong class="positive">{{ formatMoney(balanceTotal(platform.id)) }}</strong>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
-    <el-card v-else shadow="never" class="admin-card"><el-empty description="暂无平台数据" /></el-card>
+          <div class="admin-platform-cost-item">
+            <span>{{ costMeta(platform).label }}</span>
+            <strong class="cost">{{ costMeta(platform).value }}</strong>
+          </div>
+        </div>
+
+        <div class="admin-platform-cell">
+          <span>最近采集</span>
+          <strong>{{ platform.lastCollectedAt ? formatDate(platform.lastCollectedAt) : '暂无采集' }}</strong>
+          <small>{{ platform.accountCount ? '共 ' + platform.accountCount + ' 个账号参与采集' : '尚未挂载账号' }}</small>
+        </div>
+
+        <div class="admin-platform-actions">
+          <el-button size="small" @click="emit('view-accounts', platform)">查看账号</el-button>
+          <el-button size="small" type="primary" plain @click="emit('add-account', platform)">添加账号</el-button>
+          <el-button size="small" @click="openEdit(platform)">编辑</el-button>
+          <el-popconfirm
+            :title="platform.accountCount ? '该平台下还有 ' + platform.accountCount + ' 个账号，需先删除账号后才能删除平台。' : '确认删除该平台？'"
+            :confirm-button-text="platform.accountCount ? '知道了' : '删除'"
+            :show-cancel-button="!platform.accountCount"
+            width="260"
+            @confirm="platform.accountCount ? undefined : remove(platform)"
+          >
+            <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
+          </el-popconfirm>
+        </div>
+      </article>
+    </section>
+    <el-card v-else shadow="never" class="admin-card">
+      <el-empty :description="platforms.length ? '没有符合筛选条件的平台' : '暂无平台数据'" :image-size="80" />
+    </el-card>
 
     <el-dialog v-model="showForm" :title="editingPlatform ? '编辑平台实例' : '新增平台实例'" width="560px" destroy-on-close>
       <el-form label-position="top">
@@ -75,13 +117,13 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import MetricCard from '../components/MetricCard.vue'
 import { createPlatformRecord, deletePlatformRecord, updatePlatformRecord, type CreatePlatformInput } from '../api/accounts'
-import type { Account, Platform } from '../types'
+import type { Account, Platform, PlatformType, UsageDashboard } from '../types'
 
-const props = defineProps<{ platforms: Platform[]; accounts: Account[] }>()
+const props = defineProps<{ platforms: Platform[]; accounts: Account[]; usageDashboards: UsageDashboard[] }>()
 const emit = defineEmits<{
   saved: [platform: Platform]
   updated: [platform: Platform]
@@ -90,6 +132,9 @@ const emit = defineEmits<{
   'view-accounts': [platform: Platform]
 }>()
 
+const keyword = ref('')
+const typeFilter = ref('')
+const onlyAbnormal = ref(false)
 const showForm = ref(false)
 const saving = ref(false)
 const editingPlatform = ref<Platform | null>(null)
@@ -98,6 +143,56 @@ const form = reactive<CreatePlatformInput>({ name: '', baseUrl: '', type: 'sub2a
 const enabledCount = computed(() => props.platforms.filter(platform => platform.status).length)
 const newApiCount = computed(() => props.platforms.filter(platform => platform.type === 'newapi').length)
 const sub2Count = computed(() => props.platforms.filter(platform => platform.type === 'sub2api').length)
+
+const filteredPlatforms = computed(() => props.platforms.filter(platform => {
+  const text = (platform.name + ' ' + platform.url).toLowerCase()
+  const keywordMatched = !keyword.value || text.includes(keyword.value.trim().toLowerCase())
+  const typeMatched = !typeFilter.value || platform.type === typeFilter.value
+  const abnormalMatched = !onlyAbnormal.value || failedCount(platform.id) > 0
+  return keywordMatched && typeMatched && abnormalMatched
+}))
+
+function typeLabel(type: PlatformType) {
+  return type === 'newapi' ? 'New API' : 'Sub2API'
+}
+
+function accountsOf(platformId: number) {
+  return props.accounts.filter(account => account.platformId === platformId)
+}
+
+function healthyCount(platformId: number) {
+  return accountsOf(platformId).filter(account => account.lastCollectStatus === 'SUCCESS').length
+}
+
+function failedCount(platformId: number) {
+  return accountsOf(platformId).filter(account => account.lastCollectStatus === 'FAILED' || account.lastCollectStatus === 'PARTIAL').length
+}
+
+function balanceTotal(platformId: number): number | null {
+  const rows = accountsOf(platformId)
+  if (!rows.length) return null
+  return rows.reduce((sum, account) => sum + Number(account.balance || 0), 0)
+}
+
+/**
+ * 平台消耗口径随平台类型：
+ * - Sub2API 上游返回 today_actual_cost，直接汇总为今日消耗；
+ * - New API 只有累计 used_quota，展示累计消耗，今日增量需按快照差值单独统计。
+ */
+function costMeta(platform: Platform): { label: string; value: string } {
+  const accountIds = new Set(accountsOf(platform.id).map(account => account.id))
+  // 两类平台的今日消耗都由后端统一写入 metrics.today_actual_cost：
+  // Sub2API 直接来自上游，New API 由当天累计消耗差值推算。
+  const values = props.usageDashboards
+    .filter(item => accountIds.has(item.accountId))
+    .map(item => item.metrics?.today_actual_cost)
+    .filter((value): value is number => typeof value === 'number')
+  return { label: '今日消耗', value: values.length ? formatMoney(values.reduce((sum, value) => sum + value, 0)) : '—' }
+}
+
+function formatMoney(value: number | null | undefined) {
+  return value == null ? '—' : '$' + Number(value).toFixed(2)
+}
 
 function openCreate() {
   editingPlatform.value = null
@@ -141,7 +236,7 @@ async function remove(platform: Platform) {
   try {
     await deletePlatformRecord(platform)
     emit('deleted', platform.id)
-    ElMessage.success(`平台「${platform.name}」已删除`)
+    ElMessage.success('平台「' + platform.name + '」已删除')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '平台删除失败')
   }

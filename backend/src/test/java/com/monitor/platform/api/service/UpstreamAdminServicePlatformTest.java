@@ -1,6 +1,7 @@
 package com.monitor.platform.api.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
 import com.monitor.platform.api.dto.PlatformResponse;
 import com.monitor.platform.api.dto.UpdatePlatformRequest;
@@ -12,6 +13,7 @@ import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
 import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
+import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,10 +23,13 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -166,6 +171,78 @@ class UpstreamAdminServicePlatformTest {
         service.deletePlatform(1);
 
         verify(platformRepository).softDelete(1);
+    }
+
+    private AccountUsageDashboardSnapshotEntity usageSnapshot(Integer accountId, String type,
+                                                             BigDecimal totalCost, OffsetDateTime at) {
+        AccountUsageDashboardSnapshotEntity entity = new AccountUsageDashboardSnapshotEntity();
+        entity.setId(1L);
+        entity.setAccountId(accountId);
+        entity.setPlatformType(type);
+        entity.setTotalCost(totalCost);
+        // 累计实际成本需保持原语义，这里与累计消耗区分开以便断言不被覆盖。
+        entity.setTotalActualCost(totalCost);
+        entity.setMetrics("{}");
+        entity.setPlatformStats("[]");
+        entity.setCollectedAt(at);
+        return entity;
+    }
+
+    @Test
+    void shouldDeriveNewApiTodayCostFromDailyAccumulatedUsageDelta() {
+        AccountEntity account = new AccountEntity();
+        account.setId(10);
+        account.setPlatformId(1);
+        account.setDisplayName("newapi-account");
+        account.setPlatform("newapi");
+
+        OffsetDateTime now = OffsetDateTime.now();
+        AccountUsageDashboardSnapshotEntity latest = usageSnapshot(
+                10, "newapi", new BigDecimal("140.70"), now);
+        when(platformRepository.findById(1))
+                .thenReturn(Optional.of(platform(1, "云眠", "https://a", "newapi")));
+        when(accountRepository.findByPlatformId(1)).thenReturn(List.of(account));
+        when(usageDashboardRepository.findLatestByAccounts(ArgumentMatchers.anyList()))
+                .thenReturn(List.of(latest));
+        // 当天首末两条累计消耗：300.00 -> 300.80，差值为今日消耗 0.80。
+        when(usageDashboardRepository.findByAccounts(ArgumentMatchers.anyList(),
+                ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(List.of(
+                usageSnapshot(10, "newapi", new BigDecimal("300.00"), now.minusHours(6)),
+                usageSnapshot(10, "newapi", new BigDecimal("300.80"), now.minusHours(1))));
+
+        List<AccountUsageDashboardResponse> rows = service.listUsageDashboard(1);
+
+        assertEquals(1, rows.size());
+        // 累计实际成本保持原语义，不被今日值覆盖。
+        assertEquals(new BigDecimal("140.70"), rows.get(0).totalActualCost());
+        assertEquals(new BigDecimal("0.80"),
+                rows.get(0).metrics().get("today_actual_cost").decimalValue());
+    }
+
+    @Test
+    void shouldSkipNewApiTodayCostWhenAccumulatedUsageDecreases() {
+        AccountEntity account = new AccountEntity();
+        account.setId(10);
+        account.setPlatformId(1);
+        account.setDisplayName("newapi-account");
+        account.setPlatform("newapi");
+
+        OffsetDateTime now = OffsetDateTime.now();
+        when(platformRepository.findById(1))
+                .thenReturn(Optional.of(platform(1, "云眠", "https://a", "newapi")));
+        when(accountRepository.findByPlatformId(1)).thenReturn(List.of(account));
+        when(usageDashboardRepository.findLatestByAccounts(ArgumentMatchers.anyList()))
+                .thenReturn(List.of(usageSnapshot(10, "newapi", new BigDecimal("10.00"), now)));
+        // 额度被重置导致累计值下降时不展示，避免负的今日消耗。
+        when(usageDashboardRepository.findByAccounts(ArgumentMatchers.anyList(),
+                ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(List.of(
+                usageSnapshot(10, "newapi", new BigDecimal("300.00"), now.minusHours(6)),
+                usageSnapshot(10, "newapi", new BigDecimal("10.00"), now.minusHours(1))));
+
+        List<AccountUsageDashboardResponse> rows = service.listUsageDashboard(1);
+
+        assertEquals(1, rows.size());
+        assertFalse(rows.get(0).metrics().has("today_actual_cost"));
     }
 
     @Test

@@ -152,18 +152,43 @@ button, select, input { font: inherit; }
 .admin-change-item strong { font-size: 12px; }
 .admin-change-item p { margin: 6px 0; color: #657570; font-size: 11px; }
 .admin-change-item code, .admin-diff { color: #1f7a69; font-size: 11px; }
-.admin-platform-card .el-card__body { padding: 20px; }
-.admin-platform-head { display: flex; align-items: center; justify-content: space-between; }
-.admin-platform-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 12px; background: #e4f3ee; color: #1f7a69; font-size: 12px; font-weight: 800; }
+.admin-platform-icon { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 11px; background: #e4f3ee; color: #1f7a69; font-size: 12px; font-weight: 800; }
 .admin-platform-icon.sub2api { background: #e8edf6; color: #526f9e; }
-.admin-platform-card h3 { margin: 18px 0 8px; font-size: 16px; }
 .admin-url { display: block; margin-bottom: 18px; color: #7b8b87; font-size: 11px; }
-.admin-platform-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
-.admin-platform-stats div { min-width: 0; padding: 11px; border-radius: 9px; background: #f7faf9; }
-.admin-platform-stats strong, .admin-platform-stats span { display: block; }
-.admin-platform-stats strong { overflow: hidden; color: #263f3b; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.admin-platform-stats span { margin-top: 5px; color: #879591; font-size: 10px; }
-.admin-platform-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 13px; border-top: 1px solid #edf2f0; }
+.admin-platform-rows { display: grid; gap: 10px; }
+.admin-platform-entry { display: grid; grid-template-columns: minmax(230px, 1.3fr) minmax(180px, 1fr) minmax(150px, .8fr) minmax(150px, .8fr) auto; align-items: center; gap: 18px; padding: 14px 18px; border: 1px solid #e8efec; border-radius: 12px; background: #fff; box-shadow: 0 4px 14px rgba(23,58,51,.035); }
+.admin-platform-entry:hover { border-color: #cfe4dc; box-shadow: 0 10px 24px rgba(23,58,51,.06); }
+.admin-platform-identity { display: flex; min-width: 0; align-items: center; gap: 12px; }
+.admin-platform-identity-text { min-width: 0; }
+.admin-platform-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.admin-platform-name-row strong { color: #263f3b; font-size: 14px; }
+.admin-platform-url { display: block; margin-top: 5px; overflow: hidden; color: #87958f; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-platform-cell { display: grid; min-width: 0; gap: 5px; }
+.admin-platform-cell > span { color: #87958f; font-size: 10px; font-weight: 600; }
+.admin-platform-cell > strong { overflow: hidden; color: #2b423e; font-size: 14px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.admin-platform-cell > strong.positive { color: #1f7a69; }
+.admin-platform-cell > small { overflow: hidden; color: #87958f; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-platform-cost { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.admin-platform-cost-item { display: grid; min-width: 0; gap: 5px; }
+.admin-platform-cost-item > span { color: #87958f; font-size: 10px; font-weight: 600; }
+.admin-platform-cost-item > strong { overflow: hidden; color: #2b423e; font-size: 14px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.admin-platform-cost-item > strong.positive { color: #1f7a69; }
+.admin-platform-cost-item > strong.cost { color: #b07a1f; }
+.admin-platform-account-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.admin-platform-account-chip { max-width: 92px; overflow: hidden; padding: 2px 7px; border-radius: 999px; background: #f1f7f5; color: #4d6b64; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-platform-account-chip.more { background: #eef2f1; color: #7b8b87; }
+.admin-platform-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.admin-platform-actions .el-button { margin-left: 0; }
+@media (max-width: 1399px) {
+  .admin-platform-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 16px; }
+  .admin-platform-identity { grid-column: 1 / -1; }
+  .admin-platform-actions { grid-column: 1 / -1; justify-content: flex-end; padding-top: 13px; border-top: 1px dashed #e8efec; }
+}
+@media (max-width: 900px) {
+  .admin-platform-entry { grid-template-columns: 1fr; gap: 14px; padding: 16px; }
+  .admin-platform-identity, .admin-platform-actions { grid-column: auto; }
+  .admin-platform-actions { justify-content: flex-start; }
+}
 /* 窄屏保持同样的锁定布局：菜单依旧固定可见，只是字号与间距收紧。 */
 @media (max-width: 900px) {
   .admin-header { min-height: 72px; padding: 0 16px; }

@@ -19,6 +19,7 @@ interface InstanceDto {
   name: string
   baseUrl: string
   platform: string
+  status?: boolean
 }
 
 interface AccountDto {
@@ -121,7 +122,7 @@ export async function createPlatformRecord(input: CreatePlatformInput): Promise<
     name: row.name,
     type: (row.platform as PlatformType) || input.type,
     url: row.baseUrl,
-    status: true,
+    status: row.status ?? true,
     accountCount: 0,
     lastCollectedAt: null,
   }
@@ -151,7 +152,7 @@ export async function updatePlatformRecord(platform: Platform, input: UpdatePlat
     name: row.name ?? input.name,
     type: (row.platform as PlatformType) || input.type,
     url: row.baseUrl ?? input.baseUrl,
-    status: true,
+    status: row.status ?? true,
     accountCount: platform.accountCount,
     lastCollectedAt: platform.lastCollectedAt,
   }
@@ -171,7 +172,7 @@ export async function listPlatformRecords(): Promise<Platform[]> {
     name: row.name,
     type: row.platform as PlatformType,
     url: row.baseUrl,
-    status: true,
+    status: row.status ?? true,
     accountCount: 0,
     lastCollectedAt: null,
   }))

@@ -108,9 +108,10 @@
             <small>累计请求 {{ formatNumberOrDash(usageOf(account)?.totalRequests) }}</small>
           </template>
           <template v-else>
-            <span>额度消耗 {{ usagePercent(account) }}%</span>
+            <span>今日消耗</span>
+            <strong>{{ formatMoney(metricNumber(usageOf(account), 'today_actual_cost')) }}</strong>
             <el-progress :percentage="usagePercent(account)" :stroke-width="8" :show-text="false" :status="usagePercent(account) > 80 ? 'exception' : 'success'" />
-            <small>已用 {{ formatNumberOrDash(account.usedQuota) }} · 请求 {{ formatNumberOrDash(account.requestCount) }}</small>
+            <small>额度消耗 {{ usagePercent(account) }}% · 已用 {{ formatNumberOrDash(account.usedQuota) }}</small>
           </template>
         </div>
 

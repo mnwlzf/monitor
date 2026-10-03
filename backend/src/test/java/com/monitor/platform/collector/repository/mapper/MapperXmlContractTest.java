@@ -49,5 +49,7 @@ class MapperXmlContractTest {
                 "com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper.selectRecentEvents"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectLatestSnapshotsByAccounts"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectSnapshotsByAccountsRange"));
     }
 }

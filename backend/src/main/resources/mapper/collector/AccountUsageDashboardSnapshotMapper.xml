@@ -67,4 +67,16 @@
         ORDER BY collected_at ASC
         LIMIT #{limit}
     </select>
+
+    <select id="selectSnapshotsByAccountsRange" resultMap="UsageDashboardResultMap">
+        SELECT <include refid="UsageDashboardColumns"/>
+        FROM account_usage_dashboard_snapshots
+        WHERE account_id IN
+        <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
+            #{accountId}
+        </foreach>
+        <if test="from != null">AND collected_at &gt;= #{from}</if>
+        <if test="to != null">AND collected_at &lt;= #{to}</if>
+        ORDER BY account_id ASC, collected_at ASC
+    </select>
 </mapper>

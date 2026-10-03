@@ -54,6 +54,7 @@
           v-else-if="currentPage === 'platforms'"
           :platforms="platformList"
           :accounts="accountList"
+          :usage-dashboards="usageDashboards"
           @saved="handlePlatformSaved"
           @updated="handlePlatformUpdated"
           @deleted="handlePlatformDeleted"
