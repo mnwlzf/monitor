@@ -18,3 +18,8 @@ frontend/.vite/
 *.iml
 Thumbs.db
 .DS_Store
+
+# Docker 外挂配置与日志
+config/application.yml
+config/*.local.yml
+logs/*.log

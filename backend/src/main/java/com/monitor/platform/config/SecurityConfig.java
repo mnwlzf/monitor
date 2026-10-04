@@ -25,6 +25,8 @@ public class SecurityConfig {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(authorize -> authorize
+                        // 前端静态资源匿名开放
+                        .requestMatchers("/", "/index.html", "/favicon.ico", "/vite.svg", "/assets/**", "/error").permitAll()
                         .requestMatchers("/api/v1/upstream/**", "/api/v1/scheduled-tasks/**", "/actuator/health").permitAll()
                         .anyRequest().authenticated()
                 )

@@ -28,6 +28,7 @@ spring:
       username: ${REDIS_USERNAME:}
       password: ${REDIS_PASSWORD}
   flyway:
+    enabled: true
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

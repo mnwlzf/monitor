@@ -1,0 +1,31 @@
+# 外挂配置文件示例
+#
+# 把本文件复制为 config/application.yml，容器启动时会通过
+# --spring.config.additional-location=optional:file:/app/config/ 自动读取，
+# 并与镜像内默认配置合并（此处优先级更高）。
+#
+# 也可以完全不使用本文件，只用 .env / 环境变量配置。
+
+server:
+  port: 8080
+  address: 0.0.0.0
+
+spring:
+  datasource:
+    url: jdbc:postgresql://your-postgres-host:5432/monitor
+    username: monitor
+    password: change-me
+  data:
+    redis:
+      host: your-redis-host
+      port: 6379
+      password: change-me
+  flyway:
+    enabled: true
+
+monitor:
+  scheduling:
+    pool-size: 4
+  collection:
+    pool-size: 8
+    queue-capacity: 200

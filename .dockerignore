@@ -1,0 +1,29 @@
+# Git / IDE
+.git
+.gitignore
+.idea
+.vscode
+*.iml
+
+# 本地环境与密钥
+.env
+.env.local
+config/application.yml
+config/*.local.yml
+
+# 构建产物
+**/target
+**/dist
+**/node_modules
+frontend/.vite
+
+# 文档与本地脚本
+docs
+scripts
+*.md
+!README.md
+
+# 其他
+*.log
+.DS_Store
+Thumbs.db

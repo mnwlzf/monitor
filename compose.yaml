@@ -1,12 +1,54 @@
+name: monitor
+
 services:
+  app:
+    image: ghcr.io/mnwlzf/monitor:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: 8080
+      # 数据库与 Redis 全部通过环境变量外挂，指向外部服务时改这里即可
+      DB_URL: ${DB_URL:?Set DB_URL in .env}
+      DB_USERNAME: ${DB_USERNAME:?Set DB_USERNAME in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      REDIS_HOST: ${REDIS_HOST:?Set REDIS_HOST in .env}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_USERNAME: ${REDIS_USERNAME:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      UPSTREAM_CREDENTIAL_KEY: ${UPSTREAM_CREDENTIAL_KEY:?Set UPSTREAM_CREDENTIAL_KEY in .env}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      # 外挂配置：宿主机 ./config 下的 application.yml 会覆盖镜像内默认配置
+      - ./config:/app/config:ro
+      - app-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # 内置数据库：不想自建时可直接使用；使用外部数据库时把 DB_* 指向外部地址即可
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-monitor}
       POSTGRES_USER: ${POSTGRES_USER:-monitor}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -15,15 +57,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # 内置 Redis：用于缓存上游登录凭证，使用外部 Redis 时把 REDIS_* 指向外部地址即可
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -31,3 +77,4 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  app-logs:
