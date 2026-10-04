@@ -1,4 +1,4 @@
-package com.monitor.platform.scheduler;
+package com.monitor.platform.common.schedule;
 
 /**
  * 定时任务处理器。
@@ -20,4 +20,3 @@ public interface ScheduledTaskHandler {
     /** 执行一次任务。 */
     void execute();
 }
-

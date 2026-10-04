@@ -1,5 +1,6 @@
 package com.monitor.platform.scheduler;
 
+import com.monitor.platform.common.schedule.ScheduledTaskHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;

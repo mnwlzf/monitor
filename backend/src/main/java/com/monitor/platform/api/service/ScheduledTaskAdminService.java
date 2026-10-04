@@ -7,7 +7,7 @@ import com.monitor.platform.api.dto.UpdateScheduledTaskRequest;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.scheduler.DynamicScheduledTaskManager;
 import com.monitor.platform.scheduler.ScheduledTaskEntity;
-import com.monitor.platform.scheduler.ScheduledTaskHandler;
+import com.monitor.platform.common.schedule.ScheduledTaskHandler;
 import com.monitor.platform.scheduler.ScheduledTaskRepository;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;

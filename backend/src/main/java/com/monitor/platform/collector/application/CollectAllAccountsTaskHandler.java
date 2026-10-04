@@ -1,6 +1,6 @@
 package com.monitor.platform.collector.application;
 
-import com.monitor.platform.scheduler.ScheduledTaskHandler;
+import com.monitor.platform.common.schedule.ScheduledTaskHandler;
 import org.springframework.stereotype.Component;
 
 /**
