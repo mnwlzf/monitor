@@ -29,6 +29,7 @@ import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamGroupSnapshotEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -37,6 +38,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -44,6 +46,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 上游采集业务服务。
@@ -87,6 +92,7 @@ public class CollectionService {
     private final NewApiAdapter newApiAdapter;
     private final Sub2ApiAdapter sub2ApiAdapter;
     private final ObjectMapper objectMapper;
+    private final Executor collectionTaskExecutor;
 
     public CollectionService(AccountRepository accountRepository,
                              PlatformRepository platformRepository,
@@ -99,7 +105,8 @@ public class CollectionService {
                              UpstreamChangeEventRepository changeEventRepository,
                              NewApiAdapter newApiAdapter,
                              Sub2ApiAdapter sub2ApiAdapter,
-                             ObjectMapper objectMapper) {
+                             ObjectMapper objectMapper,
+                              @Qualifier("collectionTaskExecutor") Executor collectionTaskExecutor) {
         this.accountRepository = accountRepository;
         this.platformRepository = platformRepository;
         this.credentialService = credentialService;
@@ -112,6 +119,7 @@ public class CollectionService {
         this.newApiAdapter = newApiAdapter;
         this.sub2ApiAdapter = sub2ApiAdapter;
         this.objectMapper = objectMapper;
+        this.collectionTaskExecutor = collectionTaskExecutor;
     }
 
     /**
@@ -148,6 +156,53 @@ public class CollectionService {
         }
 
         log.info("账号采集任务结束: enabledPlatforms={}", platforms.size());
+    }
+
+    /**
+     * 并发采集所有启用平台下的全部启用账号。
+     *
+     * <p>与到期采集不同，本方法每轮会把所有启用账号提交到
+     * {@code collectionTaskExecutor} 并发执行；单个账号失败只记录日志，不影响其他账号。</p>
+     */
+    public void collectAllAccounts() {
+        List<AccountEntity> accounts = new ArrayList<>();
+        for (PlatformEntity platform : platformRepository.findEnabled()) {
+            List<AccountEntity> platformAccounts = accountRepository.findEnabledByPlatformId(platform.getId());
+            accounts.addAll(platformAccounts);
+            log.info("平台账号收集完成: platformId={}, platformName={}, accountCount={}",
+                    platform.getId(), platform.getPlatformName(), platformAccounts.size());
+        }
+        if (accounts.isEmpty()) {
+            log.info("没有需要采集的账号");
+            return;
+        }
+
+        AtomicInteger successCount = new AtomicInteger();
+        AtomicInteger failureCount = new AtomicInteger();
+        log.info("开始并发采集全部账号: accountCount={}", accounts.size());
+
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        for (AccountEntity account : accounts) {
+            futures.add(CompletableFuture.runAsync(
+                    () -> collectSafely(account.getId(), successCount, failureCount),
+                    collectionTaskExecutor));
+        }
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        log.info("全部账号并发采集结束: total={}, success={}, failure={}",
+                accounts.size(), successCount.get(), failureCount.get());
+    }
+
+    /**
+     * 捕获单账号采集异常，保证并发任务不会因个别账号失败而中断。
+     */
+    private void collectSafely(Integer accountId, AtomicInteger successCount, AtomicInteger failureCount) {
+        try {
+            collectAccount(accountId);
+            successCount.incrementAndGet();
+        } catch (Exception ex) {
+            failureCount.incrementAndGet();
+            log.error("账号并发采集失败: accountId={}", accountId, ex);
+        }
     }
 
     /**

@@ -81,3 +81,29 @@ export interface UsageDashboard {
   platformStats: Array<Record<string, unknown>>
   collectedAt: string | null
 }
+
+/**
+ * 页面可配置的定时任务。
+ */
+export interface ScheduledTask {
+  id: number
+  taskName: string
+  taskCode: string
+  handlerName: string
+  cronExpression: string
+  timezone: string
+  enabled: boolean
+  description: string | null
+  lastRunAt: string | null
+  lastRunStatus: 'RUNNING' | 'SUCCESS' | 'FAILED' | null
+  lastRunMessage: string | null
+}
+
+/**
+ * 定时任务处理器，即页面可选择的任务类型。
+ */
+export interface ScheduledTaskHandler {
+  code: string
+  name: string
+  description: string
+}

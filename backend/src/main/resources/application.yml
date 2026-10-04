@@ -28,7 +28,6 @@ spring:
       username: ${REDIS_USERNAME:}
       password: ${REDIS_PASSWORD}
   flyway:
-    enabled: true
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -39,14 +38,12 @@ mybatis-plus:
   global-config:
     banner: false
 
-# 采集任务调度配置
-
 # 定时任务框架配置
 monitor:
   scheduling:
-    enabled: true
     pool-size: 4
     thread-name-prefix: scheduled-task-
     await-termination-seconds: 30
   collection:
-    batch-size: 100
+    pool-size: 8
+    queue-capacity: 200

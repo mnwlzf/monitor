@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.scheduler.ScheduledTaskMapper">
+
+    <resultMap id="ScheduledTaskResultMap" type="com.monitor.platform.scheduler.ScheduledTaskEntity">
+        <id column="id" property="id"/>
+        <result column="task_name" property="taskName"/>
+        <result column="task_code" property="taskCode"/>
+        <result column="cron_expression" property="cronExpression"/>
+        <result column="timezone" property="timezone"/>
+        <result column="enabled" property="enabled"/>
+        <result column="description" property="description"/>
+        <result column="last_run_at" property="lastRunAt"/>
+        <result column="last_run_status" property="lastRunStatus"/>
+        <result column="last_run_message" property="lastRunMessage"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="ScheduledTaskColumns">
+        id, task_name, task_code, cron_expression, timezone, enabled, description,
+        last_run_at, last_run_status, last_run_message, created_at, updated_at
+    </sql>
+
+    <insert id="insertTask" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO scheduled_tasks (
+            task_name, task_code, cron_expression, timezone, enabled, description,
+            last_run_at, last_run_status, last_run_message, created_at, updated_at
+        ) VALUES (
+            #{taskName}, #{taskCode}, #{cronExpression}, #{timezone}, #{enabled}, #{description},
+            #{lastRunAt}, #{lastRunStatus}, #{lastRunMessage}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateTask">
+        UPDATE scheduled_tasks
+        SET task_name = #{taskName},
+            task_code = #{taskCode},
+            cron_expression = #{cronExpression},
+            timezone = #{timezone},
+            enabled = #{enabled},
+            description = #{description},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteTask">
+        DELETE FROM scheduled_tasks WHERE id = #{id}
+    </delete>
+
+    <select id="selectTaskById" resultMap="ScheduledTaskResultMap">
+        SELECT <include refid="ScheduledTaskColumns"/>
+        FROM scheduled_tasks
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectAllTasks" resultMap="ScheduledTaskResultMap">
+        SELECT <include refid="ScheduledTaskColumns"/>
+        FROM scheduled_tasks
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectEnabledTasks" resultMap="ScheduledTaskResultMap">
+        SELECT <include refid="ScheduledTaskColumns"/>
+        FROM scheduled_tasks
+        WHERE enabled = TRUE
+        ORDER BY id ASC
+    </select>
+
+    <update id="updateRunStatus">
+        UPDATE scheduled_tasks
+        SET last_run_at = #{lastRunAt},
+            last_run_status = #{lastRunStatus},
+            last_run_message = #{lastRunMessage}
+        WHERE id = #{id}
+    </update>
+</mapper>

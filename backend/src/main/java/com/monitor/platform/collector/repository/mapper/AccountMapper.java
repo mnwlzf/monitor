@@ -30,6 +30,9 @@ public interface AccountMapper {
     /** 软删除账号。 */
     int softDeleteAccount(@Param("id") Integer id, @Param("deletedAt") OffsetDateTime deletedAt);
 
+    /** 查询平台下所有启用且未删除的账号。 */
+    List<AccountEntity> selectEnabledAccountsByPlatform(@Param("platformId") Integer platformId);
+
     /** 查询平台下已到采集时间的账号。 */
     List<AccountEntity> selectDueAccountsByPlatform(@Param("platformId") Integer platformId,
                                                     @Param("now") OffsetDateTime now,

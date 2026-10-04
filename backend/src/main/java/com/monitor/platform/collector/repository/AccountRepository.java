@@ -65,6 +65,13 @@ public class AccountRepository {
     }
 
     /**
+     * 查询指定平台下所有启用且未删除的账号。
+     */
+    public List<AccountEntity> findEnabledByPlatformId(Integer platformId) {
+        return accountMapper.selectEnabledAccountsByPlatform(platformId);
+    }
+
+    /**
      * 查询指定平台下已到采集时间且启用的账号，limit 会限制在 1 到 1000。
      */
     public List<AccountEntity> findDueForCollection(Integer platformId, OffsetDateTime now, int limit) {

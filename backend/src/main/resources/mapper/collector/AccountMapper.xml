@@ -111,4 +111,13 @@
         ORDER BY next_collect_at ASC NULLS FIRST, id ASC
         LIMIT #{limit}
     </select>
+
+    <select id="selectEnabledAccountsByPlatform" resultMap="AccountResultMap">
+        SELECT <include refid="AccountColumns"/>
+        FROM accounts
+        WHERE platform_id = #{platformId}
+          AND status = TRUE
+          AND deleted_at IS NULL
+        ORDER BY id ASC
+    </select>
 </mapper>

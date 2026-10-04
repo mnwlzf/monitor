@@ -8,9 +8,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "monitor.scheduling")
 public class SchedulingProperties {
 
-    /** 是否启用定时任务框架。 */
-    private boolean enabled = true;
-
     /** 调度线程池大小，避免默认单线程导致任务互相阻塞。 */
     private int poolSize = 4;
 
@@ -19,14 +16,6 @@ public class SchedulingProperties {
 
     /** 应用关闭时等待任务结束的秒数。 */
     private int awaitTerminationSeconds = 30;
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
 
     public int getPoolSize() {
         return poolSize;
