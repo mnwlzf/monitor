@@ -1,4 +1,5 @@
 # 只启动 Monitor 应用容器，数据库与 Redis 使用外部已有服务。
+# 环境变量命名与项目原始 compose.yaml 保持一致（POSTGRES_* 仅内置基础设施场景使用）。
 # 使用方式：
 #   1) cp .env.example .env 并按外部数据库/Redis 地址填写
 #   2) docker compose -f compose.external.yaml up -d

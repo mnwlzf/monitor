@@ -1,3 +1,10 @@
+# ============================================================
+# Monitor 一体化部署
+# 基于项目原始 compose.yaml（postgres + redis）扩展，新增 app 服务：
+#   - 只起基础设施：docker compose up -d postgres redis
+#   - 一体化启动：  docker compose up -d --build
+# 使用外部数据库/Redis 部署时请使用 compose.external.yaml
+# ============================================================
 name: monitor
 
 services:
