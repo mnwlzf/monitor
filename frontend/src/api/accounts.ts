@@ -273,6 +273,9 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
   return rows.map(row => ({
     id: String(row.id),
     type: row.changeType,
+    platformId: platform.id,
+    platformName: platform.name,
+    platformType: platform.type,
     entity: row.entityKey || '',
     field: row.fieldName || '',
     oldValue: row.oldValue || 'null',

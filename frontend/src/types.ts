@@ -51,6 +51,9 @@ export interface Channel {
 export interface ChangeEvent {
   id: string
   type: string
+  platformId: number
+  platformName: string
+  platformType: PlatformType
   entity: string
   field: string
   oldValue: string

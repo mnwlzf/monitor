@@ -41,11 +41,12 @@
     <el-card shadow="never" class="admin-card admin-table-card">
       <el-table
         v-if="filteredAccounts.length"
-        :data="filteredAccounts"
+        :data="sortedAccounts"
         row-key="id"
         stripe
         class="admin-table"
-        :default-sort="{ prop: 'balance', order: 'descending' }"
+        :row-class-name="accountRowClass"
+        @sort-change="onSortChange"
       >
         <el-table-column label="账号" min-width="200" fixed>
           <template #default="{ row }">
@@ -59,9 +60,22 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="平台" min-width="140">
+        <el-table-column label="平台" min-width="200">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.platformType === 'newapi' ? 'primary' : 'success'" effect="plain">{{ row.platformName }}</el-tag>
+            <div class="admin-platform-cell-head">
+              <el-tag size="small" :type="row.platformType === 'newapi' ? 'primary' : 'success'" effect="plain">{{ row.platformName }}</el-tag>
+              <span v-if="groupOf(asAccount(row)).total > 1" class="admin-platform-group-count">
+                {{ groupOf(asAccount(row)).index }}/{{ groupOf(asAccount(row)).total }}
+              </span>
+            </div>
+            <div v-if="platformUrl(asAccount(row))" class="admin-platform-link">
+              <a
+                :href="platformUrl(asAccount(row))"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="platformUrl(asAccount(row))"
+              >{{ platformHost(asAccount(row)) }}</a>
+            </div>
             <div class="admin-table-sub">
               <el-tag size="small" :type="row.credentialStatus === 'VALID' ? 'success' : row.credentialStatus === 'INVALID' ? 'danger' : 'info'" effect="light">
                 {{ credentialLabel(row.credentialStatus) }}
@@ -70,7 +84,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="balance" label="余额" min-width="110" sortable align="right">
+        <el-table-column prop="balance" label="余额" min-width="110" sortable="custom" align="right">
           <template #default="{ row }">
             <strong class="admin-num positive">{{ formatMoney(row.balance) }}</strong>
           </template>
@@ -220,11 +234,19 @@
           </template>
         </el-table-column>
       </el-table>
-      <div v-if="revealedKey" class="admin-key-secret">
-        <span class="muted">完整密钥（仅管理员可见）</span>
+    </el-drawer>
+
+    <el-dialog v-model="showSecret" title="API 密钥明文" width="560px" destroy-on-close append-to-body>
+      <p class="admin-key-secret-tip">完整密钥（仅管理员可见），请妥善保管，避免泄露。</p>
+      <div class="admin-key-secret">
+        <span v-if="revealedKeyLabel" class="admin-key-secret-label">{{ revealedKeyLabel }}</span>
         <code>{{ revealedKey }}</code>
       </div>
-    </el-drawer>
+      <template #footer>
+        <el-button @click="copyRevealedKey">复制</el-button>
+        <el-button type="primary" @click="showSecret = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -241,6 +263,7 @@ const emit = defineEmits<{ collect: [account: Account]; saved: [account: Account
 const keyword = ref('')
 const selectedPlatformId = ref<number | null>(null)
 const statusFilter = ref('')
+const balanceSort = ref<'ascending' | 'descending' | null>(null)
 const showForm = ref(false)
 const saving = ref(false)
 const editingAccount = ref<Account | null>(null)
@@ -249,6 +272,8 @@ const form = reactive<{ platformId: number | null } & CreateAccountInput>({ plat
 const showKeys = ref(false)
 const keysAccount = ref<Account | null>(null)
 const revealedKey = ref('')
+const revealedKeyLabel = ref('')
+const showSecret = ref(false)
 const revealingId = ref<number | null>(null)
 
 const currentKeys = computed(() => keysAccount.value
@@ -263,6 +288,8 @@ function keyCount(account: Account) {
 function openKeys(account: Account) {
   keysAccount.value = account
   revealedKey.value = ''
+  revealedKeyLabel.value = ''
+  showSecret.value = false
   showKeys.value = true
 }
 
@@ -270,10 +297,23 @@ async function revealKey(apiKey: ApiKey) {
   revealingId.value = apiKey.id
   try {
     revealedKey.value = await revealApiKeyRecord(apiKey)
+    revealedKeyLabel.value = `${apiKey.keyName || '未命名'} · ${apiKey.keyMasked || '—'}`
+    showSecret.value = true
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '获取明文密钥失败')
   } finally {
     revealingId.value = null
+  }
+}
+
+/** 复制明文密钥，便于直接粘贴到上游平台。 */
+async function copyRevealedKey() {
+  if (!revealedKey.value) return
+  try {
+    await navigator.clipboard.writeText(revealedKey.value)
+    ElMessage.success('密钥已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择复制')
   }
 }
 
@@ -314,6 +354,60 @@ const filteredAccounts = computed(() => props.accounts.filter(account => {
   return keywordMatched && platformMatched && statusMatched
 }))
 
+/** 平台在平台列表中的顺序，作为账号分组排序依据。 */
+const platformRank = computed(() => new Map(props.platforms.map((platform, index) => [platform.id, index])))
+
+/** 组内排序键：优先登录账号，其次显示名称。 */
+function accountSortKey(account: Account) {
+  return (account.loginName || account.displayName || '').toLowerCase()
+}
+
+/**
+ * 账号列表：先按平台分组，保证同一平台账号相邻；组内默认按账号排序。
+ * 点击「余额」排序时只在平台组内按余额排列，不会打散平台分组。
+ */
+const sortedAccounts = computed(() => [...filteredAccounts.value].sort((a, b) => {
+  const rankA = platformRank.value.get(a.platformId) ?? Number.MAX_SAFE_INTEGER
+  const rankB = platformRank.value.get(b.platformId) ?? Number.MAX_SAFE_INTEGER
+  if (rankA !== rankB) return rankA - rankB
+  if (balanceSort.value) {
+    const diff = Number(a.balance ?? 0) - Number(b.balance ?? 0)
+    if (diff) return balanceSort.value === 'ascending' ? diff : -diff
+  }
+  return accountSortKey(a).localeCompare(accountSortKey(b), 'zh-Hans-CN')
+}))
+
+/** 余额列启用 custom 排序，交由 computed 在平台组内排序。 */
+function onSortChange({ prop, order }: { prop: string | null; order: 'ascending' | 'descending' | null }) {
+  balanceSort.value = prop === 'balance' && order ? order : null
+}
+
+/** 每个账号在其所属平台分组内的位置，用于展示「第 n/共 m 个」。 */
+const platformGroupMeta = computed(() => {
+  const totals = new Map<number, number>()
+  for (const account of sortedAccounts.value) {
+    totals.set(account.platformId, (totals.get(account.platformId) ?? 0) + 1)
+  }
+  const seen = new Map<number, number>()
+  const meta = new Map<number, { index: number; total: number; first: boolean }>()
+  for (const account of sortedAccounts.value) {
+    const index = (seen.get(account.platformId) ?? 0) + 1
+    seen.set(account.platformId, index)
+    const total = totals.get(account.platformId) ?? 1
+    meta.set(account.id, { index, total, first: index === 1 })
+  }
+  return meta
+})
+
+function groupOf(account: Account) {
+  return platformGroupMeta.value.get(account.id) ?? { index: 1, total: 1, first: true }
+}
+
+/** 平台分组首行加分隔线，强化「同一平台账号相邻」的视觉边界。 */
+function accountRowClass({ row, rowIndex }: { row: Account; rowIndex: number }) {
+  return rowIndex > 0 && platformGroupMeta.value.get(row.id)?.first ? 'is-platform-start' : ''
+}
+
 const successCount = computed(() => filteredAccounts.value.filter(account => account.lastCollectStatus === 'SUCCESS').length)
 const failedCount = computed(() => filteredAccounts.value.filter(account => account.lastCollectStatus === 'FAILED' || account.lastCollectStatus === 'PARTIAL').length)
 
@@ -334,6 +428,16 @@ function typeLabel(type: Platform['type']) {
 
 function countAccounts(platformId: number) {
   return props.accounts.filter(account => account.platformId === platformId).length
+}
+
+/** 账号所属平台的访问地址，便于跳转到上游查询。 */
+function platformUrl(account: Account): string {
+  return props.platforms.find(platform => platform.id === account.platformId)?.url ?? ''
+}
+
+/** 展示用主机名，去掉协议与结尾斜杠。 */
+function platformHost(account: Account): string {
+  return platformUrl(account).replace(/^https?:\/\//, '').replace(/\/+$/, '')
 }
 
 /**

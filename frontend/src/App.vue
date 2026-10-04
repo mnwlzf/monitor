@@ -84,7 +84,7 @@
         />
         <ChannelsView v-else-if="currentPage === 'channels'" :channels="channels" />
         <ScheduledTasksView v-else-if="currentPage === 'schedules'" :can-write="isAdmin" />
-        <ChangesView v-else :changes="changes" />
+        <ChangesView v-else :changes="changes" :platforms="platformList" />
       </el-main>
     </el-container>
   </el-container>
@@ -241,6 +241,10 @@ function handlePlatformUpdated(platform: Platform) {
   accountList.value = accountList.value.map(account => account.platformId === platform.id
     ? { ...account, platformName: platform.name, platformType: platform.type }
     : account)
+  // 变更记录冗余了平台名称，重命名后同步刷新，避免展示旧名称。
+  changes.value = changes.value.map(change => change.platformId === platform.id
+    ? { ...change, platformName: platform.name, platformType: platform.type }
+    : change)
 }
 
 function handlePlatformDeleted(platformId: number) {
