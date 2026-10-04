@@ -7,7 +7,7 @@ name: monitor
 
 services:
   app:
-    image: ghcr.io/mnwlzf/monitor:latest
+    image: ${MONITOR_IMAGE:-ghcr.io/mnwlzf/monitor:latest}
     container_name: monitor
     build:
       context: .
