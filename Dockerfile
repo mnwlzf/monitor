@@ -7,7 +7,9 @@ FROM node:22-alpine AS frontend
 WORKDIR /build/frontend
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+# npm 缓存挂载：依赖下载结果在多次构建之间复用
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund
 
 COPY frontend/ ./
 RUN npm run build
@@ -19,11 +21,12 @@ FROM maven:3.9-eclipse-temurin-21 AS backend
 WORKDIR /build
 
 COPY backend/pom.xml ./
-RUN mvn -B -q dependency:go-offline
-
 COPY backend/src ./src
 COPY --from=frontend /build/frontend/dist ./src/main/resources/static
-RUN mvn -B -q -DskipTests package
+
+# Maven 本地仓库缓存挂载：jar 依赖只下载一次
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -ntp -DskipTests package
 
 # ============================================================
 # 3) 运行镜像：单个容器同时提供前端页面和后端 API

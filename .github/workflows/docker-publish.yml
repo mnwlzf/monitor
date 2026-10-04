@@ -17,13 +17,14 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  # 需要更快的构建可只保留 linux/amd64；需要 NAS/ARM 服务器再加 linux/arm64
-  PLATFORMS: linux/amd64,linux/arm64
+  # 默认只构建 amd64，速度最快；需要 ARM/NAS 时改成 linux/amd64,linux/arm64
+  PLATFORMS: linux/amd64
 
 jobs:
   build:
     name: Build and push image
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
