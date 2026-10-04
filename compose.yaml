@@ -26,12 +26,16 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
       UPSTREAM_CREDENTIAL_KEY: ${UPSTREAM_CREDENTIAL_KEY:?Set UPSTREAM_CREDENTIAL_KEY in .env}
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8}
+      LOGGING_FILE_NAME: /app/logs/monitor.log
     ports:
       - "${APP_PORT:-8080}:8080"
     volumes:
       # 外挂配置：宿主机 ./config 下的 application.yml 会覆盖镜像内默认配置
       - ./config:/app/config:ro
       - app-logs:/app/logs
+    # 数据库/Redis 若部署在宿主机，可用 host.docker.internal 访问
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health"]
       interval: 30s
