@@ -6,7 +6,7 @@
         <h2>定时任务</h2>
         <p>页面管理任务类型、Cron 表达式和启用状态，修改后即时生效，无需重启。</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreate">新增任务</el-button>
+      <el-button v-if="canWrite !== false" type="primary" :icon="Plus" @click="openCreate">新增任务</el-button>
     </div>
 
     <el-card shadow="never" class="admin-card">
@@ -35,12 +35,12 @@
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" :icon="VideoPlay" @click="trigger(asTask(row))">执行</el-button>
-            <el-button size="small" @click="openEdit(asTask(row))">编辑</el-button>
-            <el-button size="small" type="primary" plain @click="toggle(asTask(row))">
+            <el-button v-if="canWrite !== false" size="small" :icon="VideoPlay" @click="trigger(asTask(row))">执行</el-button>
+            <el-button v-if="canWrite !== false" size="small" @click="openEdit(asTask(row))">编辑</el-button>
+            <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="toggle(asTask(row))">
               {{ row.enabled ? '停用' : '启用' }}
             </el-button>
-            <el-popconfirm title="确认删除该任务？" @confirm="remove(asTask(row))">
+            <el-popconfirm v-if="canWrite !== false" title="确认删除该任务？" @confirm="remove(asTask(row))">
               <template #reference>
                 <el-button size="small" type="danger" plain :icon="Delete">删除</el-button>
               </template>
@@ -89,6 +89,8 @@ import { Delete, Plus, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { createScheduledTask, deleteScheduledTask, listScheduledTaskHandlers, listScheduledTasks, triggerScheduledTask, updateScheduledTask, type ScheduledTaskInput } from '../api/scheduledTasks'
 import type { ScheduledTask, ScheduledTaskHandler } from '../types'
+
+defineProps<{ canWrite?: boolean }>()
 
 const tasks = ref<ScheduledTask[]>([])
 const handlers = ref<ScheduledTaskHandler[]>([])

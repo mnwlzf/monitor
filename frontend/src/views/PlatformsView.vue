@@ -6,7 +6,7 @@
         <h2>平台管理</h2>
         <p>上游平台实例、适配器类型、账号规模与采集状态。一个平台可挂载多个账号。</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreate">新增平台</el-button>
+      <el-button v-if="canWrite !== false" type="primary" :icon="Plus" @click="openCreate">新增平台</el-button>
     </div>
 
     <el-row :gutter="16" class="admin-metric-grid">
@@ -70,8 +70,8 @@
 
         <div class="admin-platform-actions">
           <el-button size="small" @click="emit('view-accounts', platform)">查看账号</el-button>
-          <el-button size="small" type="primary" plain @click="emit('add-account', platform)">添加账号</el-button>
-          <el-button size="small" @click="openEdit(platform)">编辑</el-button>
+          <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="emit('add-account', platform)">添加账号</el-button>
+          <el-button v-if="canWrite !== false" size="small" @click="openEdit(platform)">编辑</el-button>
           <el-popconfirm
             :title="platform.accountCount ? '该平台下还有 ' + platform.accountCount + ' 个账号，需先删除账号后才能删除平台。' : '确认删除该平台？'"
             :confirm-button-text="platform.accountCount ? '知道了' : '删除'"
@@ -123,7 +123,7 @@ import MetricCard from '../components/MetricCard.vue'
 import { createPlatformRecord, deletePlatformRecord, updatePlatformRecord, type CreatePlatformInput } from '../api/accounts'
 import type { Account, Platform, PlatformType, UsageDashboard } from '../types'
 
-const props = defineProps<{ platforms: Platform[]; accounts: Account[]; usageDashboards: UsageDashboard[] }>()
+const props = defineProps<{ platforms: Platform[]; accounts: Account[]; usageDashboards: UsageDashboard[]; canWrite?: boolean }>()
 const emit = defineEmits<{
   saved: [platform: Platform]
   updated: [platform: Platform]

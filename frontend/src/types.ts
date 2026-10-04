@@ -107,3 +107,17 @@ export interface ScheduledTaskHandler {
   name: string
   description: string
 }
+
+/**
+ * 用户角色：ADMIN 可读写，VIEWER 只读。
+ */
+export type UserRole = 'ADMIN' | 'VIEWER'
+
+/**
+ * 当前登录用户。
+ */
+export interface CurrentUser {
+  username: string
+  roles: UserRole[]
+  admin: boolean
+}

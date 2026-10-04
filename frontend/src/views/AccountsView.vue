@@ -8,7 +8,7 @@
       </div>
       <div class="admin-page-heading-actions">
         <el-tooltip content="请先在上方选择要添加账号的平台" placement="bottom" :disabled="Boolean(activePlatform)">
-          <span><el-button type="primary" :icon="Plus" :disabled="!activePlatform" @click="openCreate()">添加账号</el-button></span>
+          <span v-if="canWrite !== false"><el-button type="primary" :icon="Plus" :disabled="!activePlatform" @click="openCreate()">添加账号</el-button></span>
         </el-tooltip>
         <el-button :icon="Monitor" @click="emit('manage-platforms')">平台管理</el-button>
       </div>
@@ -63,7 +63,7 @@
         </div>
         <div class="admin-platform-focus-actions">
           <span class="admin-platform-focus-count">{{ countAccounts(activePlatform.id) }} 个账号</span>
-          <el-button type="primary" :icon="Plus" @click="openCreate()">为该平台添加账号</el-button>
+          <el-button v-if="canWrite !== false" type="primary" :icon="Plus" @click="openCreate()">为该平台添加账号</el-button>
         </div>
       </div>
     </el-card>
@@ -127,8 +127,8 @@
         </div>
 
         <div class="admin-account-col actions">
-          <el-button size="small" :loading="account.lastCollectStatus === 'RUNNING'" @click="emit('collect', account)">立即采集</el-button>
-          <el-button size="small" type="primary" plain @click="openEdit(account)">编辑</el-button>
+          <el-button v-if="canWrite !== false" size="small" :loading="account.lastCollectStatus === 'RUNNING'" @click="emit('collect', account)">立即采集</el-button>
+          <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="openEdit(account)">编辑</el-button>
           <el-popconfirm title="确认删除该账号？" @confirm="remove(account)">
             <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
           </el-popconfirm>
@@ -175,7 +175,7 @@ import { ElMessage } from 'element-plus'
 import { createAccountRecord, deleteAccountRecord, updateAccountRecord, type CreateAccountInput, type UpdateAccountInput } from '../api/accounts'
 import type { Account, Platform, UsageDashboard } from '../types'
 
-const props = defineProps<{ accounts: Account[]; platforms: Platform[]; usageDashboards: UsageDashboard[] }>()
+const props = defineProps<{ accounts: Account[]; platforms: Platform[]; usageDashboards: UsageDashboard[]; canWrite?: boolean }>()
 const emit = defineEmits<{ collect: [account: Account]; saved: [account: Account]; deleted: [accountId: number]; refresh: []; 'manage-platforms': [] }>()
 
 const keyword = ref('')

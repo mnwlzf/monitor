@@ -1,6 +1,14 @@
 server:
   port: ${SERVER_PORT:8080}
   address: ${SERVER_ADDRESS:127.0.0.1}
+  servlet:
+    session:
+      timeout: ${MONITOR_SESSION_TIMEOUT:8h}
+      cookie:
+        name: ${MONITOR_SESSION_COOKIE_NAME:MONITOR_SESSION}
+        http-only: true
+        same-site: strict
+        secure: ${MONITOR_SESSION_COOKIE_SECURE:false}
 
 spring:
   config:
@@ -39,12 +47,21 @@ mybatis-plus:
   global-config:
     banner: false
 
-# 定时任务框架配置
 monitor:
+  # 登录与权限：ADMIN 可读写，VIEWER 只读
+  security:
+    enabled: ${MONITOR_SECURITY_ENABLED:true}
+    users:
+      - username: ${MONITOR_ADMIN_USERNAME:admin}
+        password: ${MONITOR_ADMIN_PASSWORD:}
+        roles:
+          - ADMIN
+  # 定时任务框架配置
   scheduling:
     pool-size: 4
     thread-name-prefix: scheduled-task-
     await-termination-seconds: 30
+  # 采集线程池配置
   collection:
     pool-size: 8
     queue-capacity: 200

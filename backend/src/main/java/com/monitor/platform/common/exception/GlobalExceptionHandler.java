@@ -11,6 +11,7 @@ import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -48,6 +49,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusiness(BusinessException ex, HttpServletRequest request) {
         log.warn("Business error: {} {} - [{}] {}", request.getMethod(), request.getRequestURI(), ex.getCode(), ex.getMessage());
         return response(HttpStatus.UNPROCESSABLE_ENTITY, ex.getCode(), ex.getMessage(), Map.of());
+    }
+
+    /** 登录失败 -> 401 */
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ErrorResponse> handleAuthentication(AuthenticationException ex) {
+        log.warn("Authentication failed: {}", ex.getMessage());
+        return response(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "登录名或密码错误", Map.of());
     }
 
     /** @RequestBody 参数校验失败 -> 400 */

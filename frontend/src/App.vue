@@ -1,5 +1,7 @@
 <template>
-  <el-container class="admin-shell">
+  <LoginView v-if="authReady && !currentUser" @logged-in="handleLoggedIn" />
+  <div v-else-if="!authReady" class="admin-boot">正在校验登录状态…</div>
+  <el-container v-else class="admin-shell">
     <el-aside width="236px" class="admin-sidebar">
       <div class="admin-brand">
         <span class="admin-brand-mark">M</span>
@@ -35,6 +37,10 @@
         <div class="admin-header-actions">
           <el-tag type="success" effect="dark" round>自动采集已开启</el-tag>
           <el-button :icon="Refresh" @click="refresh">刷新数据</el-button>
+          <el-tag v-if="currentUser" :type="isAdmin ? 'warning' : 'info'" effect="plain" round>
+            {{ currentUser.username }} · {{ isAdmin ? '管理员' : '只读' }}
+          </el-tag>
+          <el-button :icon="SwitchButton" @click="handleLogout">退出</el-button>
         </div>
       </el-header>
 
@@ -55,6 +61,7 @@
           :platforms="platformList"
           :accounts="accountList"
           :usage-dashboards="usageDashboards"
+          :can-write="isAdmin"
           @saved="handlePlatformSaved"
           @updated="handlePlatformUpdated"
           @deleted="handlePlatformDeleted"
@@ -67,6 +74,7 @@
           :accounts="accountList"
           :platforms="platformList"
           :usage-dashboards="usageDashboards"
+          :can-write="isAdmin"
           @collect="collectAccount"
           @saved="handleAccountSaved"
           @deleted="handleAccountDeleted"
@@ -74,7 +82,7 @@
           @manage-platforms="selectPage('platforms')"
         />
         <ChannelsView v-else-if="currentPage === 'channels'" :channels="channels" />
-        <ScheduledTasksView v-else-if="currentPage === 'schedules'" />
+        <ScheduledTasksView v-else-if="currentPage === 'schedules'" :can-write="isAdmin" />
         <ChangesView v-else :changes="changes" />
       </el-main>
     </el-container>
@@ -83,7 +91,7 @@
 
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onMounted, ref, type Component } from 'vue'
-import { Bell, Connection, DataAnalysis, Monitor, Refresh, Timer, User } from '@element-plus/icons-vue'
+import { Bell, Connection, DataAnalysis, Monitor, Refresh, SwitchButton, Timer, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import OverviewView from './views/OverviewView.vue'
 import PlatformsView from './views/PlatformsView.vue'
@@ -91,8 +99,11 @@ import AccountsView from './views/AccountsView.vue'
 import ChangesView from './views/ChangesView.vue'
 import ChannelsView from './views/ChannelsView.vue'
 import ScheduledTasksView from './views/ScheduledTasksView.vue'
+import LoginView from './views/LoginView.vue'
 import { collectAccountRecord, listAccountRecords, listChangeRecords, listGroupRecords, listPlatformRecords, listUsageDashboardRecords } from './api/accounts'
-import type { Account, ChangeEvent, Channel, MetricPoint, Platform, UsageDashboard } from './types'
+import { fetchCurrentUser, logout as logoutRequest } from './api/auth'
+import { isUnauthorized } from './api/client'
+import type { Account, ChangeEvent, Channel, CurrentUser, MetricPoint, Platform, UsageDashboard } from './types'
 
 type PageKey = 'overview' | 'platforms' | 'accounts' | 'channels' | 'changes' | 'schedules'
 
@@ -105,6 +116,8 @@ const navItems: Array<{ id: PageKey; label: string; description: string; icon: C
   { id: 'changes', label: '变更记录', description: '渠道新增、减少、倍率和状态变化', icon: markRaw(Bell) },
 ]
 
+const authReady = ref(false)
+const currentUser = ref<CurrentUser | null>(null)
 const currentPage = ref<PageKey>('overview')
 const selectedAccountId = ref(0)
 const accountsViewRef = ref<{ openCreateForm: (platformId?: number) => void } | null>(null)
@@ -116,11 +129,47 @@ const metricSeries = ref<Record<number, MetricPoint[]>>({})
 const usageDashboards = ref<UsageDashboard[]>([])
 const lastUpdated = ref(formatTime(new Date()))
 
+const isAdmin = computed(() => currentUser.value?.admin === true)
 const activeNav = computed(() => navItems.find(item => item.id === currentPage.value) ?? navItems[0])
 const selectedSeries = computed(() => metricSeries.value[selectedAccountId.value] ?? [])
 
 function selectPage(index: string) {
   currentPage.value = index as PageKey
+}
+
+async function bootstrap() {
+  try {
+    currentUser.value = await fetchCurrentUser()
+    await loadRemoteData()
+  } catch (error) {
+    if (!isUnauthorized(error)) {
+      ElMessage.error(error instanceof Error ? error.message : '登录状态校验失败')
+    }
+    currentUser.value = null
+  } finally {
+    authReady.value = true
+  }
+}
+
+async function handleLoggedIn(user: CurrentUser) {
+  currentUser.value = user
+  await loadRemoteData()
+}
+
+async function handleLogout() {
+  try {
+    await logoutRequest()
+  } catch {
+    // 退出失败也清理本地状态，强制回到登录页
+  }
+  currentUser.value = null
+  platformList.value = []
+  accountList.value = []
+  channels.value = []
+  changes.value = []
+  usageDashboards.value = []
+  selectedAccountId.value = 0
+  ElMessage.success('已退出登录')
 }
 
 async function refresh() {
@@ -156,6 +205,10 @@ async function loadRemoteData() {
     selectedAccountId.value = accountList.value[0]?.id ?? 0
     lastUpdated.value = formatTime(new Date())
   } catch (error) {
+    if (isUnauthorized(error)) {
+      currentUser.value = null
+      return
+    }
     platformList.value = []
     accountList.value = []
     usageDashboards.value = []
@@ -238,5 +291,5 @@ function formatTime(value: Date) {
   return value.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
-onMounted(loadRemoteData)
+onMounted(bootstrap)
 </script>
