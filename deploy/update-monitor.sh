@@ -6,14 +6,15 @@
 #   - 自动沿用当前目录下已有的 .env / config / logs
 #   - 默认从 GHCR 拉取最新镜像后重建容器
 #   - 也支持本地重新构建镜像
-#   - 支持指定标签与回滚
+#   - 支持指定标签、同步 compose、回滚
 #
 # 用法：
-#   ./update-monitor.sh                 拉取最新镜像并重建容器
-#   ./update-monitor.sh --build         本地重新构建镜像后重建容器
+#   ./update-monitor.sh                  拉取最新镜像并重建容器
+#   ./update-monitor.sh --sync-compose   先同步仓库最新 compose 再更新
+#   ./update-monitor.sh --build          本地重新构建镜像后重建容器
 #   ./update-monitor.sh --build --no-cache
-#   ./update-monitor.sh --tag v1.0.0    使用指定标签
-#   ./update-monitor.sh --rollback      回滚到上一次更新前的镜像
+#   ./update-monitor.sh --tag v1.0.0     使用指定标签
+#   ./update-monitor.sh --rollback       回滚到上一次更新前的镜像
 #   ./update-monitor.sh --help
 # ============================================================
 set -euo pipefail
@@ -22,6 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 COMPOSE_FILE="${COMPOSE_FILE:-compose.external.yaml}"
+COMPOSE_URL="${COMPOSE_URL:-https://raw.githubusercontent.com/mnwlzf/monitor/main/compose.external.yaml}"
 SERVICE="${SERVICE:-app}"
 CONTAINER="${CONTAINER:-monitor}"
 ENV_FILE="${ENV_FILE:-.env}"
@@ -30,6 +32,7 @@ IMAGE_REPO="${IMAGE_REPO:-ghcr.io/mnwlzf/monitor}"
 
 MODE="pull"
 TAG=""
+SYNC_COMPOSE=0
 BUILD_ARGS=()
 
 log()  { printf '\033[32m[%s]\033[0m %s\n' "$(date '+%F %T')" "$*"; }
@@ -37,17 +40,18 @@ warn() { printf '\033[33m[%s]\033[0m %s\n' "$(date '+%F %T')" "$*"; }
 die()  { printf '\033[31m[%s]\033[0m %s\n' "$(date '+%F %T')" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --build)     MODE="build"; shift ;;
-    --no-cache)  BUILD_ARGS+=("--no-cache"); shift ;;
-    --tag)       TAG="${2:-}"; [[ -n "$TAG" ]] || die "--tag 需要一个参数"; shift 2 ;;
-    --rollback)  MODE="rollback"; shift ;;
-    -h|--help)   usage; exit 0 ;;
-    *)           die "未知参数: $1（用 --help 查看用法）" ;;
+    --build)        MODE="build"; shift ;;
+    --no-cache)     BUILD_ARGS+=("--no-cache"); shift ;;
+    --tag)          TAG="${2:-}"; [[ -n "$TAG" ]] || die "--tag 需要一个参数"; shift 2 ;;
+    --sync-compose) SYNC_COMPOSE=1; shift ;;
+    --rollback)     MODE="rollback"; shift ;;
+    -h|--help)      usage; exit 0 ;;
+    *)              die "未知参数: $1（用 --help 查看用法）" ;;
   esac
 done
 
@@ -59,12 +63,27 @@ docker compose version >/dev/null 2>&1 || die "未安装 docker compose 插件"
 export COMPOSE_FILE
 export MONITOR_IMAGE="${IMAGE_REPO}:${TAG:-latest}"
 
-# ------------------------------------------------------------
-# 1. 备份配置，保证任何情况下都能恢复
-# ------------------------------------------------------------
 STAMP="$(date +%Y%m%d%H%M%S)"
+
+# ------------------------------------------------------------
+# 1. 备份配置
+# ------------------------------------------------------------
 cp "$ENV_FILE" "${ENV_FILE}.bak.${STAMP}"
 log "配置已备份: ${ENV_FILE}.bak.${STAMP}"
+
+# ------------------------------------------------------------
+# 1.1 可选：同步仓库最新 compose（compose 结构变更时使用）
+# ------------------------------------------------------------
+if [[ "$SYNC_COMPOSE" == "1" ]]; then
+  cp "$COMPOSE_FILE" "${COMPOSE_FILE}.bak.${STAMP}" 2>/dev/null || true
+  if curl -fsSL -o "${COMPOSE_FILE}.new" "$COMPOSE_URL"; then
+    mv "${COMPOSE_FILE}.new" "$COMPOSE_FILE"
+    log "已同步最新 compose: $COMPOSE_URL"
+  else
+    rm -f "${COMPOSE_FILE}.new"
+    warn "compose 同步失败，继续使用本地版本"
+  fi
+fi
 
 # ------------------------------------------------------------
 # 2. 日志目录权限：容器内以 UID 10001 运行
