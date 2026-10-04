@@ -989,18 +989,19 @@ public class CollectionService {
                                         String groupName) {
         boolean changed = false;
         if (!Objects.equals(entity.getKeyName(), keyName)) {
+            // 名称本身就是变化项，用明确标注的上游 ID 定位密钥，避免旧名被误读成新名。
             recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
-                    "name", entity.getKeyName(), keyName, "密钥名称变化: " + entity.getExternalKeyId());
+                    "name", entity.getKeyName(), keyName, "密钥名称变化（密钥 ID " + entity.getExternalKeyId() + "）");
             changed = true;
         }
         if (!Objects.equals(entity.getStatus(), status)) {
             recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
-                    "status", entity.getStatus(), status, "密钥状态变化: " + entity.getExternalKeyId());
+                    "status", entity.getStatus(), status, "密钥状态变化: " + displayKeyName(entity));
             changed = true;
         }
         if (!Objects.equals(entity.getGroupName(), groupName)) {
             recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
-                    "group", entity.getGroupName(), groupName, "密钥分组变化: " + entity.getExternalKeyId());
+                    "group", entity.getGroupName(), groupName, "密钥所属分组变化: " + displayKeyName(entity));
             changed = true;
         }
         return changed;
@@ -1151,16 +1152,20 @@ public class CollectionService {
     }
 
     /**
-     * 密钥展示名称：优先名称，其次脱敏值，最后上游 ID。
+     * 变更说明里的密钥标识：优先名称、其次脱敏值，并统一附上明确标注的上游 ID。
+     *
+     * <p>只写裸 ID 时无法判断这串数字代表什么，这里始终带上「密钥 ID」前缀，
+     * 保证变更记录自解释、无歧义。</p>
      */
     private String displayKeyName(AccountApiKeyEntity entity) {
+        String identity = "密钥 ID " + entity.getExternalKeyId();
         if (StrUtil.isNotEmpty(entity.getKeyName())) {
-            return entity.getKeyName();
+            return entity.getKeyName() + "（" + identity + "）";
         }
         if (StrUtil.isNotEmpty(entity.getKeyMasked())) {
-            return entity.getKeyMasked();
+            return entity.getKeyMasked() + "（" + identity + "）";
         }
-        return entity.getExternalKeyId();
+        return identity;
     }
 
     /**

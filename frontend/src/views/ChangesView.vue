@@ -46,10 +46,10 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="entity" label="渠道" min-width="200" show-overflow-tooltip>
+        <el-table-column prop="entity" label="渠道 / 密钥" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <strong>{{ row.entity || '—' }}</strong>
-            <div v-if="row.field" class="admin-table-sub muted">{{ row.field }}</div>
+            <div v-if="row.field" class="admin-table-sub muted">{{ fieldLabel(asChange(row)) }}</div>
           </template>
         </el-table-column>
 
@@ -149,6 +149,31 @@ function changeLabel(type: string) {
 }
 
 function asChange(row: unknown): ChangeEvent { return row as ChangeEvent }
+
+/** 变更字段的中文名：渠道与密钥的字段含义不同，分开映射避免误读。 */
+const channelFieldLabels: Record<string, string> = {
+  ratio: '倍率',
+  base_ratio: '基础倍率',
+  status: '状态',
+  name: '渠道名称',
+  platform: '上游平台',
+  description: '描述',
+  is_active: '启用状态',
+}
+
+const apiKeyFieldLabels: Record<string, string> = {
+  name: '密钥名称',
+  status: '密钥状态',
+  group: '所属分组',
+  key: '密钥明文',
+  is_active: '启用状态',
+}
+
+function fieldLabel(change: ChangeEvent) {
+  if (!change.field) return ''
+  const labels = change.type.startsWith('API_KEY_') ? apiKeyFieldLabels : channelFieldLabels
+  return labels[change.field] ?? change.field
+}
 
 /** 变更前后值是否为上游响应体等大块 JSON，需要折叠展示。 */
 function isRawPayload(value: string | null | undefined) {
