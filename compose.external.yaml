@@ -2,11 +2,12 @@
 # 使用方式：
 #   1) cp .env.example .env 并按外部数据库/Redis 地址填写
 #   2) docker compose -f compose.external.yaml up -d
-name: monitor-external
+name: monitor
 
 services:
   app:
     image: ghcr.io/mnwlzf/monitor:latest
+    container_name: monitor
     build:
       context: .
       dockerfile: Dockerfile

@@ -3,6 +3,7 @@ name: monitor
 services:
   app:
     image: ghcr.io/mnwlzf/monitor:latest
+    container_name: monitor
     build:
       context: .
       dockerfile: Dockerfile
