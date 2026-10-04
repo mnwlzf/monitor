@@ -22,7 +22,7 @@ class MapperXmlContractTest {
         Resource[] resources = new PathMatchingResourcePatternResolver()
                 .getResources("classpath*:/mapper/collector/*.xml");
 
-        assertEquals(9, resources.length);
+        assertEquals(11, resources.length);
         for (Resource resource : resources) {
             try (InputStream inputStream = resource.getInputStream()) {
                 XMLMapperBuilder builder = new XMLMapperBuilder(
@@ -51,5 +51,9 @@ class MapperXmlContractTest {
                 "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectLatestSnapshotsByAccounts"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectSnapshotsByAccountsRange"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.AccountApiKeyMapper.deactivateMissingKeys"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.AccountApiKeySnapshotMapper.insertSnapshot"));
     }
 }

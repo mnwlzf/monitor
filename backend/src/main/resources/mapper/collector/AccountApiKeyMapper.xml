@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.AccountApiKeyMapper">
+
+    <resultMap id="AccountApiKeyResultMap" type="com.monitor.platform.collector.repository.entity.AccountApiKeyEntity">
+        <id column="id" property="id"/>
+        <result column="account_id" property="accountId"/>
+        <result column="platform_type" property="platformType"/>
+        <result column="external_key_id" property="externalKeyId"/>
+        <result column="key_name" property="keyName"/>
+        <result column="key_masked" property="keyMasked"/>
+        <result column="key_hash" property="keyHash"/>
+        <result column="key_encryption_algorithm" property="keyEncryptionAlgorithm"/>
+        <result column="key_encrypted_payload" property="keyEncryptedPayload"/>
+        <result column="key_initialization_vector" property="keyInitializationVector"/>
+        <result column="key_key_version" property="keyKeyVersion"/>
+        <result column="status" property="status"/>
+        <result column="upstream_status" property="upstreamStatus"/>
+        <result column="group_name" property="groupName"/>
+        <result column="group_platform" property="groupPlatform"/>
+        <result column="unlimited_quota" property="unlimitedQuota"/>
+        <result column="remain_quota" property="remainQuota"/>
+        <result column="used_quota" property="usedQuota"/>
+        <result column="quota_unit" property="quotaUnit"/>
+        <result column="model_limits_enabled" property="modelLimitsEnabled"/>
+        <result column="model_limits" property="modelLimits"/>
+        <result column="allow_ips" property="allowIps"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="upstream_created_at" property="upstreamCreatedAt"/>
+        <result column="last_used_at" property="lastUsedAt"/>
+        <result column="is_active" property="isActive"/>
+        <result column="first_seen_at" property="firstSeenAt"/>
+        <result column="last_seen_at" property="lastSeenAt"/>
+        <result column="last_changed_at" property="lastChangedAt"/>
+        <result column="metrics" property="metrics" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+        <result column="raw_data" property="rawData" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
+    </resultMap>
+
+    <sql id="AccountApiKeyColumns">
+        id, account_id, platform_type, external_key_id, key_name, key_masked, key_hash,
+        key_encryption_algorithm, key_encrypted_payload, key_initialization_vector, key_key_version,
+        status, upstream_status, group_name, group_platform, unlimited_quota, remain_quota, used_quota,
+        quota_unit, model_limits_enabled, model_limits, allow_ips, expires_at, upstream_created_at,
+        last_used_at, is_active, first_seen_at, last_seen_at, last_changed_at, metrics, raw_data
+    </sql>
+
+    <insert id="insertKey" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO account_api_keys (
+            account_id, platform_type, external_key_id, key_name, key_masked, key_hash,
+            key_encryption_algorithm, key_encrypted_payload, key_initialization_vector, key_key_version,
+            status, upstream_status, group_name, group_platform, unlimited_quota, remain_quota, used_quota,
+            quota_unit, model_limits_enabled, model_limits, allow_ips, expires_at, upstream_created_at,
+            last_used_at, is_active, first_seen_at, last_seen_at, last_changed_at, metrics, raw_data
+        ) VALUES (
+            #{accountId}, #{platformType}, #{externalKeyId}, #{keyName}, #{keyMasked}, #{keyHash},
+            #{keyEncryptionAlgorithm}, #{keyEncryptedPayload}, #{keyInitializationVector}, #{keyKeyVersion},
+            #{status}, #{upstreamStatus}, #{groupName}, #{groupPlatform}, #{unlimitedQuota}, #{remainQuota}, #{usedQuota},
+            #{quotaUnit}, #{modelLimitsEnabled}, #{modelLimits}, #{allowIps}, #{expiresAt}, #{upstreamCreatedAt},
+            #{lastUsedAt}, #{isActive}, #{firstSeenAt}, #{lastSeenAt}, #{lastChangedAt},
+            #{metrics,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            #{rawData,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
+        )
+    </insert>
+
+    <update id="updateKey">
+        UPDATE account_api_keys
+        SET key_name = #{keyName},
+            key_masked = #{keyMasked},
+            key_hash = #{keyHash},
+            key_encryption_algorithm = #{keyEncryptionAlgorithm},
+            key_encrypted_payload = #{keyEncryptedPayload},
+            key_initialization_vector = #{keyInitializationVector},
+            key_key_version = #{keyKeyVersion},
+            status = #{status},
+            upstream_status = #{upstreamStatus},
+            group_name = #{groupName},
+            group_platform = #{groupPlatform},
+            unlimited_quota = #{unlimitedQuota},
+            remain_quota = #{remainQuota},
+            used_quota = #{usedQuota},
+            quota_unit = #{quotaUnit},
+            model_limits_enabled = #{modelLimitsEnabled},
+            model_limits = #{modelLimits},
+            allow_ips = #{allowIps},
+            expires_at = #{expiresAt},
+            upstream_created_at = #{upstreamCreatedAt},
+            last_used_at = #{lastUsedAt},
+            is_active = #{isActive},
+            last_seen_at = #{lastSeenAt},
+            last_changed_at = #{lastChangedAt},
+            metrics = #{metrics,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            raw_data = #{rawData,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectKeyByAccountAndExternalId" resultMap="AccountApiKeyResultMap">
+        SELECT <include refid="AccountApiKeyColumns"/>
+        FROM account_api_keys
+        WHERE account_id = #{accountId}
+          AND platform_type = #{platformType}
+          AND external_key_id = #{externalKeyId}
+        LIMIT 1
+    </select>
+
+    <select id="selectKeysByAccount" resultMap="AccountApiKeyResultMap">
+        SELECT <include refid="AccountApiKeyColumns"/>
+        FROM account_api_keys
+        WHERE account_id = #{accountId}
+        <if test="activeOnly">
+            AND is_active = TRUE
+        </if>
+        ORDER BY key_name ASC
+    </select>
+
+    <select id="selectKeyById" resultMap="AccountApiKeyResultMap">
+        SELECT <include refid="AccountApiKeyColumns"/>
+        FROM account_api_keys
+        WHERE id = #{id}
+    </select>
+
+    <update id="deactivateMissingKeys">
+        UPDATE account_api_keys
+        SET is_active = FALSE,
+            last_changed_at = #{changedAt}
+        WHERE account_id = #{accountId}
+          AND platform_type = #{platformType}
+          AND is_active = TRUE
+        <if test="externalKeyIds != null and externalKeyIds.size() > 0">
+            AND external_key_id NOT IN
+            <foreach collection="externalKeyIds" item="externalKeyId" open="(" separator="," close=")">
+                #{externalKeyId}
+            </foreach>
+        </if>
+    </update>
+</mapper>

@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { Account, ChangeEvent, Channel, Platform, PlatformType, UsageDashboard } from '../types'
+import type { Account, ApiKey, ChangeEvent, Channel, Platform, PlatformType, UsageDashboard } from '../types'
 
 export interface CreateAccountInput {
   displayName: string
@@ -331,4 +331,80 @@ export async function listUsageDashboardRecords(platform: Platform): Promise<Usa
  */
 function toNullableNumber(value: number | null | undefined): number | null {
   return value == null ? null : Number(value)
+}
+
+interface ApiKeyDto {
+  id: string | number
+  accountId: string | number
+  platformId?: string | number
+  accountName?: string
+  platformType?: string
+  externalKeyId?: string
+  keyName?: string | null
+  keyMasked?: string | null
+  status?: string
+  upstreamStatus?: string | null
+  groupName?: string | null
+  groupPlatform?: string | null
+  unlimitedQuota?: boolean | null
+  remainQuota?: number | null
+  usedQuota?: number | null
+  quotaUnit?: string | null
+  modelLimitsEnabled?: boolean | null
+  modelLimits?: string | null
+  allowIps?: string | null
+  expiresAt?: string | null
+  upstreamCreatedAt?: string | null
+  lastUsedAt?: string | null
+  active?: boolean
+  firstSeenAt?: string | null
+  lastSeenAt?: string | null
+  lastChangedAt?: string | null
+  metrics?: Record<string, unknown> | null
+}
+
+/**
+ * 读取平台下所有账号的 API Key（仅脱敏信息）。
+ */
+export async function listApiKeyRecords(platform: Platform): Promise<ApiKey[]> {
+  const rows = await apiRequest<ApiKeyDto[]>(`/api/v1/upstream/instances/${platform.id}/api-keys`)
+  return rows.map(row => ({
+    id: Number(row.id),
+    accountId: Number(row.accountId),
+    platformId: Number(row.platformId ?? platform.id),
+    accountName: row.accountName || '',
+    platformType: (row.platformType as PlatformType) || platform.type,
+    externalKeyId: row.externalKeyId || '',
+    keyName: row.keyName ?? null,
+    keyMasked: row.keyMasked ?? null,
+    status: row.status || 'UNKNOWN',
+    upstreamStatus: row.upstreamStatus ?? null,
+    groupName: row.groupName ?? null,
+    groupPlatform: row.groupPlatform ?? null,
+    unlimitedQuota: row.unlimitedQuota ?? null,
+    remainQuota: toNullableNumber(row.remainQuota),
+    usedQuota: toNullableNumber(row.usedQuota),
+    quotaUnit: row.quotaUnit ?? null,
+    modelLimitsEnabled: row.modelLimitsEnabled ?? null,
+    modelLimits: row.modelLimits ?? null,
+    allowIps: row.allowIps ?? null,
+    expiresAt: row.expiresAt ?? null,
+    upstreamCreatedAt: row.upstreamCreatedAt ?? null,
+    lastUsedAt: row.lastUsedAt ?? null,
+    active: row.active ?? true,
+    firstSeenAt: row.firstSeenAt ?? null,
+    lastSeenAt: row.lastSeenAt ?? null,
+    lastChangedAt: row.lastChangedAt ?? null,
+    metrics: row.metrics ?? {},
+  }))
+}
+
+/**
+ * 解密获取指定密钥的完整明文（仅管理员可用）。
+ */
+export async function revealApiKeyRecord(apiKey: ApiKey): Promise<string> {
+  return apiRequest<string>(
+    `/api/v1/upstream/instances/${apiKey.platformId}/accounts/${apiKey.accountId}/api-keys/${apiKey.id}/reveal`,
+    { method: 'POST' },
+  )
 }

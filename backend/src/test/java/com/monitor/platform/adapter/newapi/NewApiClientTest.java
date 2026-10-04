@@ -4,6 +4,8 @@ import com.monitor.platform.adapter.newapi.model.NewApiGroupsResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginRequest;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiTokenKeyResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiTokensResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -183,6 +185,95 @@ class NewApiClientTest {
         assertEquals(70135359L, response.data().usedQuota());
         assertFalse(response.data().permissions().adminPermissions().channel().write());
         assertTrue(response.data().permissions().sidebarSettings());
+        server.verify();
+    }
+
+    @Test
+    void shouldGetTokensWithPagingAndDeserializeItems() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        NewApiClient client = new NewApiClient(builder.build());
+
+        server.expect(requestTo(BASE_URL + "/api/token/?p=1&size=20"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer access-token"))
+                .andRespond(withSuccess("""
+                        {
+                          "data": {
+                            "page": 1,
+                            "page_size": 20,
+                            "total": 2,
+                            "items": [
+                              {
+                                "id": 2561,
+                                "user_id": 647,
+                                "key": "1jai***********YABA",
+                                "status": 1,
+                                "name": "特价",
+                                "created_time": 1786254732,
+                                "accessed_time": 1788421061,
+                                "expired_time": -1,
+                                "remain_quota": -12577320,
+                                "unlimited_quota": true,
+                                "model_limits_enabled": false,
+                                "model_limits": "",
+                                "allow_ips": "",
+                                "used_quota": 12577407,
+                                "group": "codex-特价",
+                                "cross_group_retry": false,
+                                "group_route_config": "",
+                                "group_route_sticky": false,
+                                "DeletedAt": null,
+                                "auto_groups": null
+                              }
+                            ]
+                          },
+                          "message": "",
+                          "success": true
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        NewApiTokensResponse response = client.fetchTokens(BASE_URL, "access-token", 1, 20);
+
+        assertTrue(response.success());
+        assertEquals(2, response.data().total());
+        assertEquals(1, response.data().items().size());
+        NewApiTokensResponse.Item item = response.data().items().get(0);
+        assertEquals(2561L, item.id());
+        assertEquals(647L, item.userId());
+        assertEquals("特价", item.name());
+        assertEquals(1, item.status());
+        assertEquals(-1L, item.expiredTime());
+        assertEquals(-12577320L, item.remainQuota());
+        assertTrue(item.unlimitedQuota());
+        assertEquals(12577407L, item.usedQuota());
+        assertEquals("codex-特价", item.group());
+        server.verify();
+    }
+
+    @Test
+    void shouldGetFullTokenKeyById() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        NewApiClient client = new NewApiClient(builder.build());
+
+        server.expect(requestTo(BASE_URL + "/api/token/2561/key"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer access-token"))
+                .andRespond(withSuccess("""
+                        {
+                          "data": {
+                            "key": "1jaifC666M5jtXBGbR5Bie3YxcKnt79q0cY0MCFx5dQhYABA"
+                          },
+                          "message": "",
+                          "success": true
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        NewApiTokenKeyResponse response = client.fetchTokenKey(BASE_URL, "access-token", 2561L);
+
+        assertTrue(response.success());
+        assertEquals("1jaifC666M5jtXBGbR5Bie3YxcKnt79q0cY0MCFx5dQhYABA", response.data().key());
         server.verify();
     }
 }

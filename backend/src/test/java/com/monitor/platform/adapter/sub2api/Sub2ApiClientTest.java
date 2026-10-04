@@ -1,6 +1,7 @@
 package com.monitor.platform.adapter.sub2api;
 
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2ApiKeysUsageResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -8,9 +9,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -126,6 +130,48 @@ class Sub2ApiClientTest {
         assertEquals(3303L, response.data().totalRequests());
         assertEquals(429465577L, response.data().totalTokens());
         assertEquals(1, response.data().byPlatform().size());
+        server.verify();
+    }
+
+    @Test
+    void shouldPostApiKeysUsageWithIdList() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        Sub2ApiClient client = new Sub2ApiClient(builder.build());
+
+        server.expect(requestTo(BASE_URL + "/api/v1/usage/dashboard/api-keys-usage"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer access-token"))
+                .andExpect(jsonPath("$.api_key_ids[0]").value(53))
+                .andExpect(jsonPath("$.api_key_ids[2]").value(39))
+                .andRespond(withSuccess("""
+                        {
+                          "code": 0,
+                          "message": "success",
+                          "data": {
+                            "stats": {
+                              "39": {
+                                "api_key_id": 39,
+                                "today_actual_cost": 0,
+                                "total_actual_cost": 0.145950112
+                              },
+                              "53": {
+                                "api_key_id": 53,
+                                "today_actual_cost": 0,
+                                "total_actual_cost": 0
+                              }
+                            }
+                          }
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        Sub2ApiKeysUsageResponse response = client.fetchKeysUsage(
+                BASE_URL, "access-token", List.of(53L, 40L, 39L));
+
+        assertEquals(0, response.code());
+        assertEquals(2, response.data().stats().size());
+        assertEquals(0.145950112,
+                response.data().stats().get("39").totalActualCost().doubleValue(), 1e-9);
         server.verify();
     }
 

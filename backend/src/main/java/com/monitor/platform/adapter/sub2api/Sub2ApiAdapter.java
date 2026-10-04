@@ -2,6 +2,7 @@ package com.monitor.platform.adapter.sub2api;
 
 import cn.hutool.core.util.StrUtil;
 import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2ApiKeysUsageResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
@@ -13,6 +14,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Sub2API 采集适配器。
@@ -33,6 +37,12 @@ public class Sub2ApiAdapter {
 
     /** 登录令牌在 Redis 中的缓存时长。 */
     private static final Duration TOKEN_TTL = Duration.ofDays(1);
+
+    /** 密钥列表每页条数。 */
+    private static final int KEY_PAGE_SIZE = 100;
+
+    /** 密钥列表最大翻页数，避免上游分页异常导致死循环。 */
+    private static final int MAX_KEY_PAGES = 100;
 
     private final Sub2ApiClient sub2ApiClient;
     private final StringRedisTemplate stringRedisTemplate;
@@ -128,9 +138,24 @@ public class Sub2ApiAdapter {
      */
 
     public Sub2KeysResponse fetchKeys(String baseUrl, String email, String password) {
+        return fetchKeys(baseUrl, email, password, 1, KEY_PAGE_SIZE);
+    }
+
+    /**
+     * 分页获取当前账号的密钥列表。
+     *
+     * @param baseUrl  Sub2API 服务地址
+     * @param email    账号邮箱
+     * @param password 登录密码
+     * @param page     页码，从 1 开始
+     * @param pageSize 每页记录数
+     * @return Sub2API 密钥列表响应
+     */
+    public Sub2KeysResponse fetchKeys(String baseUrl, String email, String password,
+                                      int page, int pageSize) {
         String accessToken = resolveAccessToken(baseUrl, email, password);
 
-        Sub2KeysResponse response = sub2ApiClient.fetchKeys(baseUrl, accessToken);
+        Sub2KeysResponse response = sub2ApiClient.fetchKeys(baseUrl, accessToken, page, pageSize);
         if (response == null) {
             log.error("{} {} 获取密钥列表失败：响应为空", baseUrl, email);
             throw new IllegalStateException("获取密钥列表失败：响应为空");
@@ -144,8 +169,68 @@ public class Sub2ApiAdapter {
         }
 
         int total = response.data() == null ? 0 : response.data().total();
-        log.info("{} {} 获取密钥列表成功，共 {} 条", baseUrl, email, total);
+        log.info("{} {} 获取密钥列表成功，page={}, total={}", baseUrl, email, page, total);
         return response;
+    }
+
+    /**
+     * 分页拉取当前账号的全部密钥，供采集流程做全量对比。
+     *
+     * @param baseUrl  Sub2API 服务地址
+     * @param email    账号邮箱
+     * @param password 登录密码
+     * @return 全部密钥条目
+     */
+    public List<Sub2KeysResponse.KeyItem> fetchAllKeys(String baseUrl, String email, String password) {
+        List<Sub2KeysResponse.KeyItem> all = new ArrayList<>();
+        int page = 1;
+        int total = Integer.MAX_VALUE;
+        while (page <= MAX_KEY_PAGES && all.size() < total) {
+            Sub2KeysResponse response = fetchKeys(baseUrl, email, password, page, KEY_PAGE_SIZE);
+            if (response.data() == null || response.data().items() == null
+                    || response.data().items().isEmpty()) {
+                break;
+            }
+            all.addAll(response.data().items());
+            total = response.data().total();
+            page++;
+        }
+        return all;
+    }
+
+    /**
+     * 批量获取密钥用量。
+     *
+     * <p>密钥列表中的用量字段恒为 0，真实用量需要通过该接口按 ID 批量查询。</p>
+     *
+     * @param baseUrl   Sub2API 服务地址
+     * @param email     账号邮箱
+     * @param password  登录密码
+     * @param apiKeyIds 密钥 ID 列表
+     * @return 密钥 ID 到用量的映射，无数据时为空 Map
+     */
+    public Map<String, Sub2ApiKeysUsageResponse.Stat> fetchKeysUsage(String baseUrl, String email,
+                                                                    String password, List<Long> apiKeyIds) {
+        if (apiKeyIds == null || apiKeyIds.isEmpty()) {
+            return Map.of();
+        }
+        String accessToken = resolveAccessToken(baseUrl, email, password);
+        Sub2ApiKeysUsageResponse response = sub2ApiClient.fetchKeysUsage(baseUrl, accessToken, apiKeyIds);
+        if (response == null) {
+            log.error("{} {} 获取密钥用量失败：响应为空", baseUrl, email);
+            throw new IllegalStateException("获取密钥用量失败：响应为空");
+        }
+        if (response.code() != SUCCESS_CODE) {
+            log.error("{} {} 获取密钥用量失败：code={}, message={}",
+                    baseUrl, email, response.code(), response.message());
+            clearTokenIfUnauthorized(baseUrl, email, response.code());
+            throw new IllegalStateException("获取密钥用量失败：" + response.message());
+        }
+        Map<String, Sub2ApiKeysUsageResponse.Stat> stats =
+                response.data() == null || response.data().stats() == null
+                        ? Map.of() : response.data().stats();
+        log.info("{} {} 获取密钥用量成功，共 {} 条", baseUrl, email, stats.size());
+        return stats;
     }
 
     /**

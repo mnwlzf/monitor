@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.monitor.platform.api.dto.AccountResponse;
+import com.monitor.platform.api.dto.AccountApiKeyResponse;
 import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.CreateAccountRequest;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
@@ -15,17 +16,20 @@ import com.monitor.platform.api.dto.UpdateAccountRequest;
 import com.monitor.platform.api.dto.UpdatePlatformRequest;
 import com.monitor.platform.collector.application.AccountCredentialService;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
+import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.AccountUsageDashboardSnapshotRepository;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
 import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
+import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.collector.security.CredentialCipher;
 import com.monitor.platform.common.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,7 +66,9 @@ public class UpstreamAdminService {
     private final AccountUsageDashboardSnapshotRepository usageDashboardRepository;
     private final UpstreamGroupRepository groupRepository;
     private final UpstreamChangeEventRepository changeEventRepository;
+    private final AccountApiKeyRepository apiKeyRepository;
     private final AccountCredentialService credentialService;
+    private final CredentialCipher credentialCipher;
     private final ObjectMapper objectMapper;
 
     public UpstreamAdminService(PlatformRepository platformRepository,
@@ -71,7 +77,9 @@ public class UpstreamAdminService {
                                 AccountUsageDashboardSnapshotRepository usageDashboardRepository,
                                 UpstreamGroupRepository groupRepository,
                                 UpstreamChangeEventRepository changeEventRepository,
+                                AccountApiKeyRepository apiKeyRepository,
                                 AccountCredentialService credentialService,
+                                CredentialCipher credentialCipher,
                                 ObjectMapper objectMapper) {
         this.platformRepository = platformRepository;
         this.accountRepository = accountRepository;
@@ -79,7 +87,9 @@ public class UpstreamAdminService {
         this.usageDashboardRepository = usageDashboardRepository;
         this.groupRepository = groupRepository;
         this.changeEventRepository = changeEventRepository;
+        this.apiKeyRepository = apiKeyRepository;
         this.credentialService = credentialService;
+        this.credentialCipher = credentialCipher;
         this.objectMapper = objectMapper;
     }
 
@@ -340,6 +350,75 @@ public class UpstreamAdminService {
             }
         }
         return result;
+    }
+
+    /**
+     * 查询平台下所有账号的 API Key。
+     *
+     * <p>只返回脱敏后的密钥，完整明文需通过显式解密接口获取。</p>
+     *
+     * @param platformId 平台 ID
+     * @return 密钥列表
+     */
+    public List<AccountApiKeyResponse> listApiKeys(Integer platformId) {
+        platformRepository.findById(platformId)
+                .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
+        List<AccountApiKeyResponse> result = new ArrayList<>();
+        for (AccountEntity account : accountRepository.findByPlatformId(platformId)) {
+            for (AccountApiKeyEntity apiKey : apiKeyRepository.findByAccount(account.getId(), false)) {
+                result.add(toApiKeyResponse(account, apiKey));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 解密并返回指定密钥的完整明文。
+     *
+     * <p>属于敏感操作，仅管理员可调用。</p>
+     *
+     * @param platformId 平台 ID
+     * @param accountId  账号 ID
+     * @param keyId      密钥主键
+     * @return 完整明文密钥
+     */
+    public String revealApiKeySecret(Integer platformId, Integer accountId, Long keyId) {
+        AccountEntity account = findAccount(platformId, accountId);
+        AccountApiKeyEntity apiKey = apiKeyRepository.findById(keyId)
+                .orElseThrow(() -> BusinessException.of("密钥不存在: " + keyId));
+        if (!account.getId().equals(apiKey.getAccountId())) {
+            throw BusinessException.of("密钥不属于指定账号: " + keyId);
+        }
+        if (apiKey.getKeyEncryptedPayload() == null || apiKey.getKeyEncryptedPayload().isBlank()) {
+            throw BusinessException.of("该密钥未保存密文，无法获取明文");
+        }
+        return credentialCipher.decrypt(
+                apiKey.getKeyEncryptedPayload(),
+                apiKey.getKeyInitializationVector(),
+                apiKey.getKeyEncryptionAlgorithm(),
+                apiKey.getKeyKeyVersion()
+        );
+    }
+
+    /**
+     * 将密钥实体转换为接口响应。
+     */
+    private AccountApiKeyResponse toApiKeyResponse(AccountEntity account, AccountApiKeyEntity entity) {
+        String accountName = account.getDisplayName();
+        if (accountName == null || accountName.isBlank()) {
+            accountName = account.getUsername() == null ? account.getEmail() : account.getUsername();
+        }
+        return new AccountApiKeyResponse(
+                entity.getId(), entity.getAccountId(), account.getPlatformId(), accountName,
+                entity.getPlatformType(), entity.getExternalKeyId(), entity.getKeyName(),
+                entity.getKeyMasked(), entity.getStatus(), entity.getUpstreamStatus(),
+                entity.getGroupName(), entity.getGroupPlatform(), entity.getUnlimitedQuota(),
+                entity.getRemainQuota(), entity.getUsedQuota(), entity.getQuotaUnit(),
+                entity.getModelLimitsEnabled(), entity.getModelLimits(), entity.getAllowIps(),
+                entity.getExpiresAt(), entity.getUpstreamCreatedAt(), entity.getLastUsedAt(),
+                entity.getIsActive(), entity.getFirstSeenAt(), entity.getLastSeenAt(),
+                entity.getLastChangedAt(), readJson(entity.getMetrics())
+        );
     }
 
     /**

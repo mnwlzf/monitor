@@ -7,71 +7,22 @@
         <p>账号余额、额度消耗、凭证状态和采集健康度。</p>
       </div>
       <div class="admin-page-heading-actions">
-        <el-tooltip content="请先在上方选择要添加账号的平台" placement="bottom" :disabled="Boolean(activePlatform)">
-          <span v-if="canWrite !== false"><el-button type="primary" :icon="Plus" :disabled="!activePlatform" @click="openCreate()">添加账号</el-button></span>
+        <el-tooltip content="请先在左侧选择要添加账号的平台" placement="bottom" :disabled="Boolean(selectedPlatformId)">
+          <span v-if="canWrite !== false">
+            <el-button type="primary" :icon="Plus" :disabled="!platforms.length" @click="openCreate()">添加账号</el-button>
+          </span>
         </el-tooltip>
         <el-button :icon="Monitor" @click="emit('manage-platforms')">平台管理</el-button>
       </div>
     </div>
 
-    <!-- 第一步：选择平台（平台在「平台管理」单独添加） -->
-    <el-card shadow="never" class="admin-card admin-platform-selector-card">
-      <div class="admin-platform-selector-head">
-        <div>
-          <h3>第一步 · 选择平台</h3>
-          <p>平台在上方「平台管理」中单独添加；选中平台后即可为其挂载一个或多个账号。</p>
-        </div>
-        <el-button size="small" :icon="Plus" @click="emit('manage-platforms')">新增平台</el-button>
-      </div>
-      <div v-if="platforms.length" class="admin-platform-selector">
-        <button
-          type="button"
-          class="admin-platform-chip"
-          :class="{ active: selectedPlatformId === 0 }"
-          @click="selectPlatform(0)"
-        >
-          <span class="admin-platform-chip-name">全部平台</span>
-          <span class="admin-platform-chip-meta">{{ accounts.length }} 个账号</span>
-        </button>
-        <button
-          v-for="platform in platforms"
-          :key="platform.id"
-          type="button"
-          class="admin-platform-chip"
-          :class="{ active: selectedPlatformId === platform.id }"
-          @click="selectPlatform(platform.id)"
-        >
-          <span class="admin-platform-chip-name">{{ platform.name }}</span>
-          <span class="admin-platform-chip-meta">
-            <el-tag size="small" :type="platform.type === 'newapi' ? 'primary' : 'success'" effect="plain">{{ typeLabel(platform.type) }}</el-tag>
-            {{ countAccounts(platform.id) }} 个账号
-          </span>
-        </button>
-      </div>
-      <el-empty v-else description="还没有平台，请先到「平台管理」添加 Sub2API 或 New API 平台" :image-size="70" />
-    </el-card>
-
-    <!-- 第二步：对所选平台添加账号 -->
-    <el-card v-if="activePlatform" shadow="never" class="admin-card admin-platform-focus-card">
-      <div class="admin-platform-focus">
-        <div class="admin-platform-focus-main">
-          <span class="admin-platform-icon" :class="activePlatform.type">{{ activePlatform.type === 'newapi' ? 'NA' : 'S2' }}</span>
-          <div class="admin-platform-focus-text">
-            <h3>{{ activePlatform.name }}</h3>
-            <el-text truncated class="admin-url">{{ activePlatform.url }}</el-text>
-          </div>
-        </div>
-        <div class="admin-platform-focus-actions">
-          <span class="admin-platform-focus-count">{{ countAccounts(activePlatform.id) }} 个账号</span>
-          <el-button v-if="canWrite !== false" type="primary" :icon="Plus" @click="openCreate()">为该平台添加账号</el-button>
-        </div>
-      </div>
-    </el-card>
-
     <el-card shadow="never" class="admin-card admin-toolbar-card">
       <div class="admin-toolbar admin-toolbar-compact">
-        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索账号或平台" />
-        <el-select v-model="statusFilter" clearable placeholder="全部状态">
+        <el-select v-model="selectedPlatformId" clearable placeholder="全部平台" class="admin-toolbar-select" @change="onPlatformChange">
+          <el-option v-for="platform in platforms" :key="platform.id" :label="platform.name" :value="platform.id" />
+        </el-select>
+        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索账号、登录名或平台" />
+        <el-select v-model="statusFilter" clearable placeholder="全部状态" class="admin-toolbar-select">
           <el-option label="采集成功" value="SUCCESS" />
           <el-option label="采集失败" value="FAILED" />
           <el-option label="采集中" value="RUNNING" />
@@ -79,63 +30,106 @@
         </el-select>
         <el-button :icon="Refresh" @click="emit('refresh')">刷新</el-button>
       </div>
+      <div class="admin-summary-line">
+        <span>共 <strong>{{ filteredAccounts.length }}</strong> 个账号</span>
+        <span class="ok">成功 {{ successCount }}</span>
+        <span class="bad" v-if="failedCount">失败 {{ failedCount }}</span>
+        <span v-if="selectedPlatformId" class="muted">已按平台筛选</span>
+      </div>
     </el-card>
 
-    <section v-if="filteredAccounts.length" class="admin-account-rows">
-      <article v-for="account in filteredAccounts" :key="account.id" class="admin-account-entry">
-        <div class="admin-account-col identity">
-          <span class="admin-account-avatar">{{ account.displayName.slice(0, 1) }}</span>
-          <div class="admin-account-col-text">
-            <strong>{{ account.displayName }}</strong>
-            <small>{{ account.loginName || '未填写登录账号' }}</small>
-            <div class="admin-account-badges">
-              <el-tag size="small" :type="account.platformType === 'newapi' ? 'primary' : 'success'" effect="plain">{{ account.platformName }}</el-tag>
-              <el-tag size="small" type="info" effect="plain">{{ credentialLabel(account.credentialStatus) }}</el-tag>
+    <el-card shadow="never" class="admin-card admin-table-card">
+      <el-table
+        v-if="filteredAccounts.length"
+        :data="filteredAccounts"
+        row-key="id"
+        stripe
+        class="admin-table"
+        :default-sort="{ prop: 'balance', order: 'descending' }"
+      >
+        <el-table-column label="账号" min-width="200" fixed>
+          <template #default="{ row }">
+            <div class="admin-table-identity">
+              <span class="admin-account-avatar">{{ row.displayName.slice(0, 1) }}</span>
+              <div class="admin-table-identity-text">
+                <strong>{{ row.displayName }}</strong>
+                <small>{{ row.loginName || '未填写登录账号' }}</small>
+              </div>
             </div>
-          </div>
-        </div>
-
-        <div class="admin-account-col">
-          <span>余额</span>
-          <strong class="positive">{{ formatMoney(account.balance) }}</strong>
-          <small>{{ account.platformType === 'sub2api' ? `累计消耗 ${formatMoney(usageOf(account)?.totalCost)}` : `剩余额度 ${formatNumberOrDash(account.quota)}` }}</small>
-        </div>
-
-        <div class="admin-account-col usage">
-          <template v-if="account.platformType === 'sub2api'">
-            <span>今日消耗 / Token</span>
-            <strong>{{ formatMoney(metricNumber(usageOf(account), 'today_actual_cost')) }} · {{ formatNumberOrDash(metricNumber(usageOf(account), 'today_tokens')) }}</strong>
-            <small>累计请求 {{ formatNumberOrDash(usageOf(account)?.totalRequests) }}</small>
           </template>
-          <template v-else>
-            <span>今日消耗</span>
-            <strong>{{ formatMoney(metricNumber(usageOf(account), 'today_actual_cost')) }}</strong>
-            <el-progress :percentage="usagePercent(account)" :stroke-width="8" :show-text="false" :status="usagePercent(account) > 80 ? 'exception' : 'success'" />
-            <small>额度消耗 {{ usagePercent(account) }}% · 已用 {{ formatNumberOrDash(account.usedQuota) }}</small>
+        </el-table-column>
+
+        <el-table-column label="平台" min-width="140">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.platformType === 'newapi' ? 'primary' : 'success'" effect="plain">{{ row.platformName }}</el-tag>
+            <div class="admin-table-sub">
+              <el-tag size="small" :type="row.credentialStatus === 'VALID' ? 'success' : row.credentialStatus === 'INVALID' ? 'danger' : 'info'" effect="light">
+                {{ credentialLabel(row.credentialStatus) }}
+              </el-tag>
+            </div>
           </template>
-        </div>
+        </el-table-column>
 
-        <div class="admin-account-col status">
-          <span>采集状态</span>
-          <el-tag :type="statusType(account.lastCollectStatus)" effect="light" round>{{ statusLabel(account.lastCollectStatus) }}</el-tag>
-        </div>
+        <el-table-column prop="balance" label="余额" min-width="110" sortable align="right">
+          <template #default="{ row }">
+            <strong class="admin-num positive">{{ formatMoney(row.balance) }}</strong>
+          </template>
+        </el-table-column>
 
-        <div class="admin-account-col timing">
-          <span>采集时间</span>
-          <strong>最近 {{ account.lastCollectedAt ? formatDate(account.lastCollectedAt) : '暂无' }}</strong>
-          <small>下次 {{ account.nextCollectAt ? formatDate(account.nextCollectAt) : '待调度' }}</small>
-        </div>
+        <el-table-column label="额度消耗" min-width="160">
+          <template #default="{ row }">
+            <template v-if="row.platformType === 'newapi' && (row.quota || row.usedQuota)">
+              <el-progress :percentage="usagePercent(asAccount(row))" :stroke-width="6" :show-text="false" />
+              <small class="admin-table-sub">{{ formatNumberOrDash(row.usedQuota) }} / {{ formatNumberOrDash(Number(row.quota || 0) + Number(row.usedQuota || 0)) }}</small>
+            </template>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
 
-        <div class="admin-account-col actions">
-          <el-button v-if="canWrite !== false" size="small" :loading="account.lastCollectStatus === 'RUNNING'" @click="emit('collect', account)">立即采集</el-button>
-          <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="openEdit(account)">编辑</el-button>
-          <el-popconfirm title="确认删除该账号？" @confirm="remove(account)">
-            <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
-          </el-popconfirm>
-        </div>
-      </article>
-    </section>
-    <el-card v-else shadow="never" class="admin-card"><el-empty :description="emptyText" /></el-card>
+        <el-table-column label="今日消耗" min-width="110" align="right">
+          <template #default="{ row }">
+            <strong class="admin-num cost">{{ formatMoney(metricNumber(usageOf(asAccount(row)), 'today_actual_cost')) }}</strong>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="requestCount" label="请求数" min-width="110" sortable align="right">
+          <template #default="{ row }">
+            <span class="admin-num">{{ formatNumberOrDash(row.requestCount) }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="采集状态" min-width="120">
+          <template #default="{ row }">
+            <el-tag :type="statusType(row.lastCollectStatus)" effect="light" round>{{ statusLabel(row.lastCollectStatus) }}</el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="采集时间" min-width="170">
+          <template #default="{ row }">
+            <div class="admin-table-stack">
+              <span>最近 {{ row.lastCollectedAt ? formatDate(row.lastCollectedAt) : '暂无' }}</span>
+              <small>下次 {{ row.nextCollectAt ? formatDate(row.nextCollectAt) : '待调度' }}</small>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="320" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="canWrite !== false" size="small" :loading="row.lastCollectStatus === 'RUNNING'" @click="emit('collect', asAccount(row))">采集</el-button>
+            <el-button size="small" @click="openKeys(asAccount(row))">密钥{{ keyCount(asAccount(row)) ? `(${keyCount(asAccount(row))})` : '' }}</el-button>
+            <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="openEdit(asAccount(row))">编辑</el-button>
+            <el-popconfirm v-if="canWrite !== false" title="确认删除该账号？" @confirm="remove(asAccount(row))">
+              <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-empty v-else :description="emptyText">
+        <el-button v-if="!platforms.length" type="primary" @click="emit('manage-platforms')">去添加平台</el-button>
+        <el-button v-else-if="canWrite !== false" type="primary" @click="openCreate()">添加账号</el-button>
+      </el-empty>
+    </el-card>
 
     <el-dialog v-model="showForm" :title="editingAccount ? '编辑采集账号' : '新增采集账号'" width="640px" destroy-on-close>
       <el-form label-position="top" class="admin-form-grid">
@@ -165,6 +159,72 @@
         <el-button type="primary" :loading="saving" :disabled="!editingAccount && !platforms.length" @click="submit">保存账号</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="showKeys" :title="keysTitle" size="900px" destroy-on-close>
+      <el-table :data="currentKeys" row-key="id" stripe class="admin-table" empty-text="暂无密钥数据">
+        <el-table-column label="名称" min-width="150">
+          <template #default="{ row }">
+            <strong>{{ row.keyName || '未命名' }}</strong>
+            <div class="admin-table-sub muted">{{ row.keyMasked || '—' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="keyStatusType(row.status)" effect="light">{{ keyStatusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="分组" min-width="130">
+          <template #default="{ row }">
+            <span>{{ row.groupName || '—' }}</span>
+            <div v-if="row.groupPlatform" class="admin-table-sub muted">{{ row.groupPlatform }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="用量" min-width="210">
+          <template #default="{ row }">
+            <div class="admin-quota-cell">
+              <!-- Sub2API：列表额度恒为 0，用量取自 api-keys-usage，total 为近 30 天口径。 -->
+              <template v-if="row.platformType === 'sub2api'">
+                <div class="admin-quota-row is-accent">
+                  <span class="admin-quota-label">今日</span>
+                  <span class="admin-quota-value">{{ formatMoney4(keyMetric(asApiKey(row), 'today_actual_cost')) }}</span>
+                </div>
+                <div class="admin-quota-row">
+                  <span class="admin-quota-label">30日</span>
+                  <span class="admin-quota-value">{{ formatMoney4(row.usedQuota) }}</span>
+                </div>
+              </template>
+              <!-- New API：used_quota 为累计已用额度；unlimited_quota 只影响剩余额度展示。 -->
+              <template v-else>
+                <div class="admin-quota-row is-accent">
+                  <span class="admin-quota-label">已用</span>
+                  <span class="admin-quota-value">{{ formatMoney4(row.usedQuota) }}</span>
+                </div>
+                <div class="admin-quota-row">
+                  <span class="admin-quota-label">剩余</span>
+                  <span v-if="row.unlimitedQuota" class="admin-quota-value is-unlimited">不限额度</span>
+                  <span v-else class="admin-quota-value">{{ formatMoney4(row.remainQuota) }}</span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近使用" min-width="150">
+          <template #default="{ row }">
+            <span>{{ row.lastUsedAt ? formatDate(row.lastUsedAt) : '—' }}</span>
+            <div class="admin-table-sub muted">{{ row.expiresAt ? `过期 ${formatDate(row.expiresAt)}` : '永不过期' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canWrite !== false" label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" :loading="revealingId === row.id" @click="revealKey(asApiKey(row))">查看明文</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="revealedKey" class="admin-key-secret">
+        <span class="muted">完整密钥（仅管理员可见）</span>
+        <code>{{ revealedKey }}</code>
+      </div>
+    </el-drawer>
   </section>
 </template>
 
@@ -172,19 +232,68 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { Monitor, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { createAccountRecord, deleteAccountRecord, updateAccountRecord, type CreateAccountInput, type UpdateAccountInput } from '../api/accounts'
-import type { Account, Platform, UsageDashboard } from '../types'
+import { createAccountRecord, deleteAccountRecord, revealApiKeyRecord, updateAccountRecord, type CreateAccountInput, type UpdateAccountInput } from '../api/accounts'
+import type { Account, ApiKey, Platform, UsageDashboard } from '../types'
 
-const props = defineProps<{ accounts: Account[]; platforms: Platform[]; usageDashboards: UsageDashboard[]; canWrite?: boolean }>()
+const props = defineProps<{ accounts: Account[]; platforms: Platform[]; usageDashboards: UsageDashboard[]; apiKeys: ApiKey[]; canWrite?: boolean }>()
 const emit = defineEmits<{ collect: [account: Account]; saved: [account: Account]; deleted: [accountId: number]; refresh: []; 'manage-platforms': [] }>()
 
 const keyword = ref('')
-const selectedPlatformId = ref(0)
+const selectedPlatformId = ref<number | null>(null)
 const statusFilter = ref('')
 const showForm = ref(false)
 const saving = ref(false)
 const editingAccount = ref<Account | null>(null)
 const form = reactive<{ platformId: number | null } & CreateAccountInput>({ platformId: null, displayName: '', loginName: '', password: '' })
+
+const showKeys = ref(false)
+const keysAccount = ref<Account | null>(null)
+const revealedKey = ref('')
+const revealingId = ref<number | null>(null)
+
+const currentKeys = computed(() => keysAccount.value
+  ? props.apiKeys.filter(key => key.accountId === keysAccount.value?.id)
+  : [])
+const keysTitle = computed(() => keysAccount.value ? `${keysAccount.value.displayName} · API 密钥` : 'API 密钥')
+
+function keyCount(account: Account) {
+  return props.apiKeys.filter(key => key.accountId === account.id).length
+}
+
+function openKeys(account: Account) {
+  keysAccount.value = account
+  revealedKey.value = ''
+  showKeys.value = true
+}
+
+async function revealKey(apiKey: ApiKey) {
+  revealingId.value = apiKey.id
+  try {
+    revealedKey.value = await revealApiKeyRecord(apiKey)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '获取明文密钥失败')
+  } finally {
+    revealingId.value = null
+  }
+}
+
+function asApiKey(row: unknown): ApiKey { return row as ApiKey }
+
+function keyStatusType(status: string) {
+  if (status === 'ACTIVE') return 'success'
+  if (status === 'EXPIRED' || status === 'EXHAUSTED') return 'warning'
+  if (status === 'DISABLED') return 'danger'
+  return 'info'
+}
+
+function keyStatusLabel(status: string) {
+  return ({ ACTIVE: '启用', DISABLED: '禁用', EXPIRED: '已过期', EXHAUSTED: '已耗尽', UNKNOWN: '未知' } as Record<string, string>)[status] || status
+}
+
+function keyMetric(apiKey: ApiKey, key: string): number | null {
+  const value = apiKey.metrics?.[key]
+  return typeof value === 'number' ? value : null
+}
 
 const selectedPlatform = computed(() => props.platforms.find(platform => platform.id === form.platformId) ?? null)
 const platformHint = computed(() => {
@@ -198,12 +307,6 @@ const platformHint = computed(() => {
 /** 当前聚焦的平台；为 null 表示「全部平台」。 */
 const activePlatform = computed(() => props.platforms.find(platform => platform.id === selectedPlatformId.value) ?? null)
 
-const emptyText = computed(() => {
-  if (!props.platforms.length) return '还没有平台，请先到「平台管理」添加平台'
-  if (activePlatform.value) return `平台「${activePlatform.value.name}」下还没有账号，点击上方「为该平台添加账号」`
-  return '暂无账号数据'
-})
-
 const filteredAccounts = computed(() => props.accounts.filter(account => {
   const keywordMatched = !keyword.value || `${account.displayName} ${account.loginName} ${account.platformName}`.toLowerCase().includes(keyword.value.toLowerCase())
   const platformMatched = !selectedPlatformId.value || account.platformId === selectedPlatformId.value
@@ -211,12 +314,17 @@ const filteredAccounts = computed(() => props.accounts.filter(account => {
   return keywordMatched && platformMatched && statusMatched
 }))
 
-/**
- * 切换平台：只筛选展示，并同步新增账号表单的预选平台。
- * 平台本身不在此处创建，保证「平台单独添加」的流程。
- */
-function selectPlatform(platformId: number) {
-  selectedPlatformId.value = platformId
+const successCount = computed(() => filteredAccounts.value.filter(account => account.lastCollectStatus === 'SUCCESS').length)
+const failedCount = computed(() => filteredAccounts.value.filter(account => account.lastCollectStatus === 'FAILED' || account.lastCollectStatus === 'PARTIAL').length)
+
+const emptyText = computed(() => {
+  if (!props.platforms.length) return '还没有平台，请先到「平台管理」添加平台'
+  if (keyword.value || statusFilter.value || selectedPlatformId.value) return '当前筛选条件下没有账号'
+  return '暂无账号数据'
+})
+
+/** 切换平台筛选，并同步新增表单的预选平台。 */
+function onPlatformChange(platformId: number | null) {
   if (platformId) form.platformId = platformId
 }
 
@@ -252,7 +360,7 @@ defineExpose({ openCreateForm })
 
 watch(() => props.platforms, list => {
   if (selectedPlatformId.value && !list.some(platform => platform.id === selectedPlatformId.value)) {
-    selectedPlatformId.value = 0
+    selectedPlatformId.value = null
   }
 }, { deep: true })
 
@@ -311,6 +419,8 @@ async function remove(account: Account) {
   }
 }
 
+function asAccount(row: unknown): Account { return row as Account }
+
 const usageMap = computed(() => new Map(props.usageDashboards.map(item => [item.accountId, item])))
 
 function usageOf(account: Account): UsageDashboard | undefined {
@@ -326,13 +436,16 @@ function formatMoney(value: number | null | undefined) {
   return value == null ? '—' : `$${Number(value).toFixed(2)}`
 }
 
+/** 密钥用量保留四位小数，避免小额消耗被四舍五入成 0.00。 */
+function formatMoney4(value: number | null | undefined) {
+  return value == null ? '—' : `$${Number(value).toFixed(4)}`
+}
+
 function formatNumberOrDash(value: number | null | undefined) {
   return value == null ? '—' : new Intl.NumberFormat('zh-CN').format(Number(value))
 }
 
-/**
- * 额度消耗率仅在 newapi 口径下有意义：sub2api 不返回额度字段，界面改为展示用量快照。
- */
+/** 额度消耗率仅在 newapi 口径下有意义。 */
 function usagePercent(account: Account) {
   const total = Number(account.quota || 0) + Number(account.usedQuota || 0)
   if (!total) return 0

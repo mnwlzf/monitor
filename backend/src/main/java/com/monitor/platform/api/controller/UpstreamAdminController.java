@@ -1,6 +1,7 @@
 package com.monitor.platform.api.controller;
 
 import com.monitor.platform.api.dto.AccountResponse;
+import com.monitor.platform.api.dto.AccountApiKeyResponse;
 import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.CreateAccountRequest;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
@@ -134,6 +135,32 @@ public class UpstreamAdminController {
     @GetMapping("/instances/{instanceId}/groups")
     public ApiResponse<List<UpstreamGroupResponse>> listGroups(@PathVariable Integer instanceId) {
         return ApiResponse.of(upstreamAdminService.listGroups(instanceId), null);
+    }
+
+    /**
+     * 查询平台下所有账号的 API Key（仅脱敏信息）。
+     *
+     * @param instanceId 平台 ID
+     * @return 密钥列表
+     */
+    @GetMapping("/instances/{instanceId}/api-keys")
+    public ApiResponse<List<AccountApiKeyResponse>> listApiKeys(@PathVariable Integer instanceId) {
+        return ApiResponse.of(upstreamAdminService.listApiKeys(instanceId), null);
+    }
+
+    /**
+     * 解密获取指定密钥的完整明文，仅管理员可调用。
+     *
+     * @param instanceId 平台 ID
+     * @param accountId  账号 ID
+     * @param keyId      密钥主键
+     * @return 完整明文密钥
+     */
+    @PostMapping("/instances/{instanceId}/accounts/{accountId}/api-keys/{keyId}/reveal")
+    public ApiResponse<String> revealApiKey(@PathVariable Integer instanceId,
+                                            @PathVariable Integer accountId,
+                                            @PathVariable Long keyId) {
+        return ApiResponse.of(upstreamAdminService.revealApiKeySecret(instanceId, accountId, keyId), null);
     }
 
     /**

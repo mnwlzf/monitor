@@ -5,6 +5,8 @@ import com.monitor.platform.adapter.newapi.model.NewApiGroupsResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginRequest;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiTokenKeyResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiTokensResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -155,6 +157,47 @@ public class NewApiAdapter {
     }
 
     /**
+     * 分页获取当前用户的密钥列表。
+     *
+     * @param baseUrl  New API 服务地址
+     * @param username 登录用户名
+     * @param password 登录密码，仅当访问令牌不存在时用于重新登录
+     * @param page     页码，从 1 开始
+     * @param size     每页记录数
+     * @return New API 密钥列表响应
+     */
+    public NewApiTokensResponse fetchTokens(String baseUrl, String username, String password,
+                                            int page, int size) {
+        String accessToken = resolveAccessToken(baseUrl, username, password, "");
+        NewApiTokensResponse response = newApiClient.fetchTokens(baseUrl, accessToken, page, size);
+        validateTokensResponse(baseUrl, username, response);
+
+        int count = response.data().items() == null ? 0 : response.data().items().size();
+        log.info("{} {} 获取 New API 密钥列表成功，page={}, size={}, count={}",
+                baseUrl, username, page, size, count);
+        return response;
+    }
+
+    /**
+     * 获取指定密钥的完整明文，用于加密落库与轮换检测。
+     *
+     * @param baseUrl  New API 服务地址
+     * @param username 登录用户名
+     * @param password 登录密码，仅当访问令牌不存在时用于重新登录
+     * @param tokenId  密钥 ID
+     * @return 完整明文密钥
+     */
+    public String fetchTokenKey(String baseUrl, String username, String password, Long tokenId) {
+        String accessToken = resolveAccessToken(baseUrl, username, password, "");
+        NewApiTokenKeyResponse response = newApiClient.fetchTokenKey(baseUrl, accessToken, tokenId);
+        if (response == null || !response.success() || response.data() == null
+                || StrUtil.isEmpty(response.data().key())) {
+            throw new IllegalStateException("获取 New API 完整密钥失败: tokenId=" + tokenId);
+        }
+        return response.data().key();
+    }
+
+    /**
      * 校验登录参数，避免向上游发送明显无效的请求。
      */
     private void validateLoginArguments(String baseUrl, String username, String password) {
@@ -236,6 +279,28 @@ public class NewApiAdapter {
         if (response.data() == null) {
             log.error("{} {} 获取 New API 分组失败：未返回 data", baseUrl, username);
             throw new IllegalStateException("获取 New API 分组失败：未返回 data");
+        }
+    }
+
+    /**
+     * 校验密钥列表响应。
+     */
+    private void validateTokensResponse(String baseUrl, String username,
+                                        NewApiTokensResponse response) {
+        if (response == null) {
+            log.error("{} {} 获取 New API 密钥列表失败：响应为空", baseUrl, username);
+            throw new IllegalStateException("获取 New API 密钥列表失败：响应为空");
+        }
+
+        if (!response.success()) {
+            log.error("{} {} 获取 New API 密钥列表失败：message={}",
+                    baseUrl, username, response.message());
+            throw new IllegalStateException("获取 New API 密钥列表失败：" + response.message());
+        }
+
+        if (response.data() == null) {
+            log.error("{} {} 获取 New API 密钥列表失败：未返回 data", baseUrl, username);
+            throw new IllegalStateException("获取 New API 密钥列表失败：未返回 data");
         }
     }
 

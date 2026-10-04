@@ -74,6 +74,7 @@
           :accounts="accountList"
           :platforms="platformList"
           :usage-dashboards="usageDashboards"
+          :api-keys="apiKeys"
           :can-write="isAdmin"
           @collect="collectAccount"
           @saved="handleAccountSaved"
@@ -100,10 +101,10 @@ import ChangesView from './views/ChangesView.vue'
 import ChannelsView from './views/ChannelsView.vue'
 import ScheduledTasksView from './views/ScheduledTasksView.vue'
 import LoginView from './views/LoginView.vue'
-import { collectAccountRecord, listAccountRecords, listChangeRecords, listGroupRecords, listPlatformRecords, listUsageDashboardRecords } from './api/accounts'
+import { collectAccountRecord, listAccountRecords, listApiKeyRecords, listChangeRecords, listGroupRecords, listPlatformRecords, listUsageDashboardRecords } from './api/accounts'
 import { fetchCurrentUser, logout as logoutRequest } from './api/auth'
 import { isUnauthorized } from './api/client'
-import type { Account, ChangeEvent, Channel, CurrentUser, MetricPoint, Platform, UsageDashboard } from './types'
+import type { Account, ApiKey, ChangeEvent, Channel, CurrentUser, MetricPoint, Platform, UsageDashboard } from './types'
 
 type PageKey = 'overview' | 'platforms' | 'accounts' | 'channels' | 'changes' | 'schedules'
 
@@ -127,6 +128,7 @@ const channels = ref<Channel[]>([])
 const changes = ref<ChangeEvent[]>([])
 const metricSeries = ref<Record<number, MetricPoint[]>>({})
 const usageDashboards = ref<UsageDashboard[]>([])
+const apiKeys = ref<ApiKey[]>([])
 const lastUpdated = ref(formatTime(new Date()))
 
 const isAdmin = computed(() => currentUser.value?.admin === true)
@@ -202,6 +204,8 @@ async function loadRemoteData() {
     changes.value = changeGroups.flat().sort((a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime())
     const usageGroups = await Promise.all(platformList.value.map(platform => listUsageDashboardRecords(platform)))
     usageDashboards.value = usageGroups.flat()
+    const apiKeyGroups = await Promise.all(platformList.value.map(platform => listApiKeyRecords(platform)))
+    apiKeys.value = apiKeyGroups.flat()
     selectedAccountId.value = accountList.value[0]?.id ?? 0
     lastUpdated.value = formatTime(new Date())
   } catch (error) {

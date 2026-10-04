@@ -6,12 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.adapter.newapi.NewApiAdapter;
 import com.monitor.platform.adapter.newapi.model.NewApiGroupsResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiTokensResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiUser;
 import com.monitor.platform.adapter.sub2api.Sub2ApiAdapter;
+import com.monitor.platform.adapter.sub2api.model.Sub2ApiKeysUsageResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
+import com.monitor.platform.collector.repository.AccountApiKeyRepository;
+import com.monitor.platform.collector.repository.AccountApiKeySnapshotRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.AccountUsageDashboardSnapshotRepository;
 import com.monitor.platform.collector.repository.CollectionRunRepository;
@@ -20,6 +25,8 @@ import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
 import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.UpstreamGroupSnapshotRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
+import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
+import com.monitor.platform.collector.repository.entity.AccountApiKeySnapshotEntity;
 import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.CollectionRunEntity;
@@ -27,6 +34,7 @@ import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamGroupSnapshotEntity;
+import com.monitor.platform.collector.security.CredentialCipher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -37,6 +45,7 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -74,6 +83,17 @@ public class CollectionService {
     private static final String CHANGE_RATE_CHANGED = "RATE_CHANGED";
     private static final String CHANGE_BASE_RATE_CHANGED = "BASE_RATE_CHANGED";
     private static final String CHANGE_STATUS_CHANGED = "STATUS_CHANGED";
+    private static final String ENTITY_TYPE_API_KEY = "API_KEY";
+    private static final String CHANGE_API_KEY_ADDED = "API_KEY_ADDED";
+    private static final String CHANGE_API_KEY_REMOVED = "API_KEY_REMOVED";
+    private static final String CHANGE_API_KEY_UPDATED = "API_KEY_UPDATED";
+    private static final String CHANGE_API_KEY_ROTATED = "API_KEY_ROTATED";
+    /** 额度统一展示单位。 */
+    private static final String QUOTA_UNIT_USD = "USD";
+    /** New API 密钥列表每页条数。 */
+    private static final int NEW_API_TOKEN_PAGE_SIZE = 100;
+    /** New API 密钥列表最大翻页数，避免上游分页异常导致死循环。 */
+    private static final int NEW_API_TOKEN_MAX_PAGES = 100;
     /** 采集成功后的默认下次采集间隔。 */
     private static final Duration DEFAULT_COLLECT_INTERVAL = Duration.ofMinutes(10);
     /** New API 中 1 USD 对应的内部额度数量。 */
@@ -89,6 +109,9 @@ public class CollectionService {
     private final UpstreamGroupRepository groupRepository;
     private final UpstreamGroupSnapshotRepository groupSnapshotRepository;
     private final UpstreamChangeEventRepository changeEventRepository;
+    private final AccountApiKeyRepository apiKeyRepository;
+    private final AccountApiKeySnapshotRepository apiKeySnapshotRepository;
+    private final CredentialCipher credentialCipher;
     private final NewApiAdapter newApiAdapter;
     private final Sub2ApiAdapter sub2ApiAdapter;
     private final ObjectMapper objectMapper;
@@ -103,6 +126,9 @@ public class CollectionService {
                              UpstreamGroupRepository groupRepository,
                              UpstreamGroupSnapshotRepository groupSnapshotRepository,
                              UpstreamChangeEventRepository changeEventRepository,
+                             AccountApiKeyRepository apiKeyRepository,
+                             AccountApiKeySnapshotRepository apiKeySnapshotRepository,
+                             CredentialCipher credentialCipher,
                              NewApiAdapter newApiAdapter,
                              Sub2ApiAdapter sub2ApiAdapter,
                              ObjectMapper objectMapper,
@@ -116,6 +142,9 @@ public class CollectionService {
         this.groupRepository = groupRepository;
         this.groupSnapshotRepository = groupSnapshotRepository;
         this.changeEventRepository = changeEventRepository;
+        this.apiKeyRepository = apiKeyRepository;
+        this.apiKeySnapshotRepository = apiKeySnapshotRepository;
+        this.credentialCipher = credentialCipher;
         this.newApiAdapter = newApiAdapter;
         this.sub2ApiAdapter = sub2ApiAdapter;
         this.objectMapper = objectMapper;
@@ -291,6 +320,8 @@ public class CollectionService {
 
         NewApiGroupsResponse groupsResponse = newApiAdapter.fetchGroups(baseUrl, username, password);
         syncNewApiGroups(account, platform.getPlatformType(), collectionRunId, groupsResponse);
+
+        syncNewApiApiKeys(account, platform.getPlatformType(), collectionRunId, baseUrl, username, password);
     }
 
     /**
@@ -321,6 +352,8 @@ public class CollectionService {
         Sub2UsageDashboardResponse usageResponse =
                 sub2ApiAdapter.fetchUsageDashboardStats(baseUrl, email, password);
         saveSub2UsageDashboard(account, collectionRunId, profileResponse, usageResponse);
+
+        syncSub2ApiApiKeys(account, platform.getPlatformType(), collectionRunId, baseUrl, email, password);
     }
 
     private void saveNewApiMetric(AccountEntity account, Long collectionRunId,
@@ -706,6 +739,502 @@ public class CollectionService {
         snapshot.setRawData(rawData);
         snapshot.setContentHash(sha256(rawData));
         groupSnapshotRepository.save(snapshot);
+    }
+
+    /**
+     * 同步 New API 密钥：分页拉全量列表、按 id 获取完整明文并加密存储，最后做增量对比。
+     */
+    private void syncNewApiApiKeys(AccountEntity account, String platformType, Long collectionRunId,
+                                   String baseUrl, String username, String password) {
+        List<NewApiTokensResponse.Item> items = new ArrayList<>();
+        int page = 1;
+        int total = Integer.MAX_VALUE;
+        while (page <= NEW_API_TOKEN_MAX_PAGES && items.size() < total) {
+            NewApiTokensResponse response = newApiAdapter.fetchTokens(
+                    baseUrl, username, password, page, NEW_API_TOKEN_PAGE_SIZE);
+            NewApiTokensResponse.Data data = response.data();
+            if (data == null || data.items() == null || data.items().isEmpty()) {
+                break;
+            }
+            items.addAll(data.items());
+            total = data.total() == null ? items.size() : data.total();
+            page++;
+        }
+
+        Map<String, AccountApiKeyEntity> existing = activeApiKeyMap(account.getId());
+        Set<String> activeExternalIds = new HashSet<>();
+        OffsetDateTime now = OffsetDateTime.now();
+        int added = 0;
+        int updated = 0;
+
+        for (NewApiTokensResponse.Item item : items) {
+            if (item.id() == null) {
+                continue;
+            }
+            String externalKeyId = String.valueOf(item.id());
+            activeExternalIds.add(externalKeyId);
+
+            AccountApiKeyEntity entity = existing.get(externalKeyId);
+            boolean isNew = entity == null;
+            if (isNew) {
+                entity = newApiKey(account, platformType, externalKeyId, now);
+            }
+
+            boolean rotated = applyFullKey(entity, isNew,
+                    fetchNewApiFullKey(baseUrl, username, password, item.id()));
+
+            String status = normalizeNewApiTokenStatus(item.status());
+            BigDecimal remainQuota = newApiUsd(item.remainQuota());
+            BigDecimal usedQuota = newApiUsd(item.usedQuota());
+            boolean changed = isNew || rotated;
+            if (!isNew) {
+                changed = recordApiKeyChanges(account, platformType, collectionRunId, entity,
+                        item.name(), status, item.group()) || changed;
+            }
+
+            entity.setKeyName(item.name());
+            entity.setKeyMasked(item.key());
+            entity.setStatus(status);
+            entity.setUpstreamStatus(item.status() == null ? null : String.valueOf(item.status()));
+            entity.setGroupName(item.group());
+            entity.setUnlimitedQuota(item.unlimitedQuota());
+            entity.setRemainQuota(remainQuota);
+            entity.setUsedQuota(usedQuota);
+            entity.setQuotaUnit(QUOTA_UNIT_USD);
+            entity.setModelLimitsEnabled(item.modelLimitsEnabled());
+            entity.setModelLimits(item.modelLimits());
+            entity.setAllowIps(item.allowIps());
+            entity.setExpiresAt(toOffsetDateTime(item.expiredTime()));
+            entity.setUpstreamCreatedAt(toOffsetDateTime(item.createdTime()));
+            entity.setLastUsedAt(toOffsetDateTime(item.accessedTime()));
+            entity.setIsActive(true);
+            entity.setLastSeenAt(now);
+            entity.setMetrics(toJson(newApiKeyMetrics(item)));
+            entity.setRawData(toJson(item));
+            if (changed) {
+                entity.setLastChangedAt(now);
+            }
+            apiKeyRepository.save(entity);
+
+            if (isNew) {
+                added++;
+                recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_ADDED,
+                        null, null, entity.getRawData(), "密钥新增: " + displayKeyName(entity));
+            } else if (rotated) {
+                updated++;
+                recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_ROTATED,
+                        "key", null, null, "密钥已轮换: " + displayKeyName(entity));
+            } else if (changed) {
+                updated++;
+            }
+
+            saveApiKeySnapshot(entity, collectionRunId, now);
+        }
+
+        int removed = deactivateMissingApiKeys(account, platformType, collectionRunId, existing, activeExternalIds, now);
+        log.info("New API 密钥同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
+                account.getId(), items.size(), added, updated, removed);
+    }
+
+    /**
+     * 同步 Sub2API 密钥：列表接口直接返回完整 key，加密后落库并做增量对比。
+     */
+    private void syncSub2ApiApiKeys(AccountEntity account, String platformType, Long collectionRunId,
+                                    String baseUrl, String email, String password) {
+        List<Sub2KeysResponse.KeyItem> items = sub2ApiAdapter.fetchAllKeys(baseUrl, email, password);
+        Map<String, Sub2ApiKeysUsageResponse.Stat> usageStats = fetchSub2KeyUsage(baseUrl, email, password, items);
+        Map<String, AccountApiKeyEntity> existing = activeApiKeyMap(account.getId());
+        Set<String> activeExternalIds = new HashSet<>();
+        OffsetDateTime now = OffsetDateTime.now();
+        int added = 0;
+        int updated = 0;
+
+        for (Sub2KeysResponse.KeyItem item : items) {
+            if (item.id() == null) {
+                continue;
+            }
+            String externalKeyId = String.valueOf(item.id());
+            activeExternalIds.add(externalKeyId);
+
+            AccountApiKeyEntity entity = existing.get(externalKeyId);
+            boolean isNew = entity == null;
+            if (isNew) {
+                entity = newApiKey(account, platformType, externalKeyId, now);
+            }
+
+            String fullKey = item.key();
+            boolean rotated = applyFullKey(entity, isNew,
+                    fullKey == null || fullKey.isBlank() || fullKey.contains("*") ? null : fullKey);
+
+            String status = normalizeSub2KeyStatus(item.status());
+            boolean changed = isNew || rotated;
+            if (!isNew) {
+                changed = recordApiKeyChanges(account, platformType, collectionRunId, entity,
+                        item.name(), status, item.group() == null ? null : item.group().name()) || changed;
+            }
+
+            entity.setKeyName(item.name());
+            entity.setKeyMasked(maskKey(fullKey));
+            entity.setStatus(status);
+            entity.setUpstreamStatus(item.status());
+            entity.setGroupName(item.group() == null ? null : item.group().name());
+            entity.setGroupPlatform(item.group() == null ? null : item.group().platform());
+            Sub2ApiKeysUsageResponse.Stat usage = usageStats.get(externalKeyId);
+            entity.setUnlimitedQuota(null);
+            entity.setRemainQuota(null);
+            // 列表 quota_used 恒为 0，只有批量用量接口才有真实值；取不到时留空而非记 0。
+            entity.setUsedQuota(usage == null ? null : usage.totalActualCost());
+            entity.setQuotaUnit(QUOTA_UNIT_USD);
+            entity.setExpiresAt(parseIsoDateTime(item.expiresAt()));
+            entity.setUpstreamCreatedAt(parseIsoDateTime(item.createdAt()));
+            entity.setLastUsedAt(parseIsoDateTime(item.lastUsedAt()));
+            entity.setIsActive(true);
+            entity.setLastSeenAt(now);
+            entity.setMetrics(toJson(sub2KeyMetrics(item, usage)));
+            entity.setRawData(toJson(item));
+            if (changed) {
+                entity.setLastChangedAt(now);
+            }
+            apiKeyRepository.save(entity);
+
+            if (isNew) {
+                added++;
+                recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_ADDED,
+                        null, null, entity.getRawData(), "密钥新增: " + displayKeyName(entity));
+            } else if (rotated) {
+                updated++;
+                recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_ROTATED,
+                        "key", null, null, "密钥已轮换: " + displayKeyName(entity));
+            } else if (changed) {
+                updated++;
+            }
+
+            saveApiKeySnapshot(entity, collectionRunId, now);
+        }
+
+        int removed = deactivateMissingApiKeys(account, platformType, collectionRunId, existing, activeExternalIds, now);
+        log.info("Sub2API 密钥同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
+                account.getId(), items.size(), added, updated, removed);
+    }
+
+    /**
+     * 获取 New API 完整明文密钥；失败时返回 null，保留上一轮密文，不影响采集主流程。
+     */
+    private String fetchNewApiFullKey(String baseUrl, String username, String password, Long tokenId) {
+        try {
+            return newApiAdapter.fetchTokenKey(baseUrl, username, password, tokenId);
+        } catch (Exception ex) {
+            log.warn("获取 New API 完整密钥失败，跳过本轮加密: baseUrl={}, tokenId={}, error={}",
+                    baseUrl, tokenId, ex.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 加密并写入完整密钥；哈希变化时判定为轮换。
+     *
+     * @return 密钥是否发生轮换
+     */
+    private boolean applyFullKey(AccountApiKeyEntity entity, boolean isNew, String fullKey) {
+        if (fullKey == null || fullKey.isBlank()) {
+            return false;
+        }
+        String hash = sha256(fullKey);
+        boolean rotated = !isNew && entity.getKeyHash() != null && !entity.getKeyHash().equals(hash);
+        if (isNew || rotated || entity.getKeyHash() == null) {
+            CredentialCipher.EncryptedCredential encrypted = credentialCipher.encrypt(fullKey);
+            entity.setKeyEncryptionAlgorithm(encrypted.algorithm());
+            entity.setKeyEncryptedPayload(encrypted.encryptedPayload());
+            entity.setKeyInitializationVector(encrypted.initializationVector());
+            entity.setKeyKeyVersion(encrypted.keyVersion());
+            entity.setKeyHash(hash);
+        }
+        return rotated;
+    }
+
+    /**
+     * 查询账号当前有效密钥，并以上游密钥 ID 建立索引，便于本轮采集做增量对比。
+     */
+    private Map<String, AccountApiKeyEntity> activeApiKeyMap(Integer accountId) {
+        Map<String, AccountApiKeyEntity> result = new HashMap<>();
+        for (AccountApiKeyEntity key : apiKeyRepository.findByAccount(accountId, true)) {
+            result.put(key.getExternalKeyId(), key);
+        }
+        return result;
+    }
+
+    /**
+     * 创建新发现的密钥实体，并初始化首次发现和最后可见时间。
+     */
+    private AccountApiKeyEntity newApiKey(AccountEntity account, String platformType,
+                                          String externalKeyId, OffsetDateTime now) {
+        AccountApiKeyEntity entity = new AccountApiKeyEntity();
+        entity.setAccountId(account.getId());
+        entity.setPlatformType(platformType);
+        entity.setExternalKeyId(externalKeyId);
+        entity.setIsActive(true);
+        entity.setFirstSeenAt(now);
+        entity.setLastSeenAt(now);
+        entity.setLastChangedAt(now);
+        return entity;
+    }
+
+    /**
+     * 对比密钥名称、状态和所属分组，逐字段写入变更事件；额度类指标不参与比较。
+     *
+     * @return 是否至少发生一项变更
+     */
+    private boolean recordApiKeyChanges(AccountEntity account, String platformType, Long collectionRunId,
+                                        AccountApiKeyEntity entity, String keyName, String status,
+                                        String groupName) {
+        boolean changed = false;
+        if (!Objects.equals(entity.getKeyName(), keyName)) {
+            recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
+                    "name", entity.getKeyName(), keyName, "密钥名称变化: " + entity.getExternalKeyId());
+            changed = true;
+        }
+        if (!Objects.equals(entity.getStatus(), status)) {
+            recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
+                    "status", entity.getStatus(), status, "密钥状态变化: " + entity.getExternalKeyId());
+            changed = true;
+        }
+        if (!Objects.equals(entity.getGroupName(), groupName)) {
+            recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
+                    "group", entity.getGroupName(), groupName, "密钥分组变化: " + entity.getExternalKeyId());
+            changed = true;
+        }
+        return changed;
+    }
+
+    /**
+     * 将本轮上游未返回的密钥标记为失效，并记录事件与快照。
+     *
+     * @return 本轮失效的密钥数量
+     */
+    private int deactivateMissingApiKeys(AccountEntity account, String platformType, Long collectionRunId,
+                                         Map<String, AccountApiKeyEntity> existing,
+                                         Set<String> activeExternalIds, OffsetDateTime now) {
+        int removed = 0;
+        for (AccountApiKeyEntity key : existing.values()) {
+            if (activeExternalIds.contains(key.getExternalKeyId())) {
+                continue;
+            }
+            key.setIsActive(false);
+            key.setLastChangedAt(now);
+            apiKeyRepository.save(key);
+            recordApiKeyChange(account, platformType, collectionRunId, key, CHANGE_API_KEY_REMOVED,
+                    "is_active", true, false, "密钥已失效: " + displayKeyName(key));
+            saveApiKeySnapshot(key, collectionRunId, now);
+            removed++;
+        }
+        return removed;
+    }
+
+    /**
+     * 保存一次密钥状态快照，用于历史查询。
+     */
+    private void saveApiKeySnapshot(AccountApiKeyEntity entity, Long collectionRunId, OffsetDateTime now) {
+        AccountApiKeySnapshotEntity snapshot = new AccountApiKeySnapshotEntity();
+        snapshot.setApiKeyId(entity.getId());
+        snapshot.setAccountId(entity.getAccountId());
+        snapshot.setCollectionRunId(collectionRunId);
+        snapshot.setPlatformType(entity.getPlatformType());
+        snapshot.setExternalKeyId(entity.getExternalKeyId());
+        snapshot.setKeyName(entity.getKeyName());
+        snapshot.setStatus(entity.getStatus());
+        snapshot.setGroupName(entity.getGroupName());
+        snapshot.setUnlimitedQuota(entity.getUnlimitedQuota());
+        snapshot.setRemainQuota(entity.getRemainQuota());
+        snapshot.setUsedQuota(entity.getUsedQuota());
+        snapshot.setQuotaUnit(entity.getQuotaUnit());
+        snapshot.setMetrics(entity.getMetrics());
+        snapshot.setRawData(entity.getRawData());
+        snapshot.setCollectedAt(now);
+        apiKeySnapshotRepository.save(snapshot);
+    }
+
+    /**
+     * 写入 API Key 变更事件。
+     */
+    private void recordApiKeyChange(AccountEntity account, String platformType, Long collectionRunId,
+                                    AccountApiKeyEntity entity, String changeType,
+                                    String fieldName, Object oldValue, Object newValue,
+                                    String message) {
+        UpstreamChangeEventEntity event = new UpstreamChangeEventEntity();
+        event.setAccountId(account.getId());
+        event.setPlatformType(platformType);
+        event.setCollectionRunId(collectionRunId);
+        event.setEntityType(ENTITY_TYPE_API_KEY);
+        event.setEntityId(entity.getId());
+        event.setEntityKey(entity.getExternalKeyId());
+        event.setChangeType(changeType);
+        event.setFieldName(fieldName);
+        event.setOldValue(toJson(oldValue));
+        event.setNewValue(toJson(newValue));
+        event.setSeverity("INFO");
+        event.setMessage(message);
+        event.setDetectedAt(OffsetDateTime.now());
+        event.setMetadata("{}");
+        log.info("记录密钥变更事件: accountId={}, runId={}, platformType={}, changeType={}, field={}, keyId={}",
+                account.getId(), collectionRunId, platformType, changeType, fieldName, entity.getExternalKeyId());
+        changeEventRepository.save(event);
+    }
+
+    /**
+     * New API 状态码归一化。
+     */
+    private String normalizeNewApiTokenStatus(Integer status) {
+        if (status == null) {
+            return "UNKNOWN";
+        }
+        return switch (status) {
+            case 1 -> "ACTIVE";
+            case 2 -> "DISABLED";
+            case 3 -> "EXPIRED";
+            case 4 -> "EXHAUSTED";
+            default -> "UNKNOWN";
+        };
+    }
+
+    /**
+     * Sub2API 状态归一化。
+     */
+    private String normalizeSub2KeyStatus(String status) {
+        if (StrUtil.isBlank(status)) {
+            return "UNKNOWN";
+        }
+        return switch (status.trim().toLowerCase()) {
+            case "active", "enabled", "1" -> "ACTIVE";
+            case "disabled", "inactive", "0" -> "DISABLED";
+            case "expired" -> "EXPIRED";
+            case "exhausted" -> "EXHAUSTED";
+            default -> status.trim().toUpperCase();
+        };
+    }
+
+    /**
+     * Unix 秒转 OffsetDateTime；-1 或非正数表示无该时间（如永不过期）。
+     */
+    private OffsetDateTime toOffsetDateTime(Long epochSeconds) {
+        if (epochSeconds == null || epochSeconds <= 0) {
+            return null;
+        }
+        return OffsetDateTime.ofInstant(Instant.ofEpochSecond(epochSeconds), java.time.ZoneOffset.UTC);
+    }
+
+    /**
+     * ISO-8601 时间字符串转 OffsetDateTime，解析失败返回 null。
+     */
+    private OffsetDateTime parseIsoDateTime(String value) {
+        if (StrUtil.isBlank(value)) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value);
+        } catch (Exception ex) {
+            log.debug("密钥时间字段解析失败，忽略: {}", value);
+            return null;
+        }
+    }
+
+    /**
+     * 密钥脱敏展示：保留前 6 位与后 4 位。
+     */
+    private String maskKey(String key) {
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+        if (key.contains("*") || key.length() <= 12) {
+            return key;
+        }
+        return key.substring(0, 6) + "****" + key.substring(key.length() - 4);
+    }
+
+    /**
+     * 密钥展示名称：优先名称，其次脱敏值，最后上游 ID。
+     */
+    private String displayKeyName(AccountApiKeyEntity entity) {
+        if (StrUtil.isNotEmpty(entity.getKeyName())) {
+            return entity.getKeyName();
+        }
+        if (StrUtil.isNotEmpty(entity.getKeyMasked())) {
+            return entity.getKeyMasked();
+        }
+        return entity.getExternalKeyId();
+    }
+
+    /**
+     * New API 密钥特有明细。额度保留上游原始 quota，quota_per_usd 供前端换算。
+     */
+    private Map<String, Object> newApiKeyMetrics(NewApiTokensResponse.Item item) {
+        Map<String, Object> metrics = new LinkedHashMap<>();
+        metrics.put("user_id", item.userId());
+        metrics.put("remain_quota_raw", item.remainQuota());
+        metrics.put("used_quota_raw", item.usedQuota());
+        metrics.put("quota_per_usd", NEW_API_QUOTA_PER_USD);
+        metrics.put("cross_group_retry", item.crossGroupRetry());
+        metrics.put("group_route_config", item.groupRouteConfig());
+        metrics.put("group_route_sticky", item.groupRouteSticky());
+        return metrics;
+    }
+
+    /**
+     * 批量获取 Sub2API 密钥用量；失败时降级为空 Map，不阻断采集。
+     */
+    private Map<String, Sub2ApiKeysUsageResponse.Stat> fetchSub2KeyUsage(String baseUrl, String email,
+                                                                         String password,
+                                                                         List<Sub2KeysResponse.KeyItem> items) {
+        List<Long> ids = new ArrayList<>();
+        for (Sub2KeysResponse.KeyItem item : items) {
+            if (item.id() != null) {
+                ids.add(item.id());
+            }
+        }
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            return sub2ApiAdapter.fetchKeysUsage(baseUrl, email, password, ids);
+        } catch (Exception ex) {
+            log.warn("获取 Sub2API 密钥用量失败，本轮仅记录密钥基础信息: baseUrl={}, error={}",
+                    baseUrl, ex.getMessage());
+            return Map.of();
+        }
+    }
+
+    /**
+     * Sub2API 密钥特有明细：真实用量、窗口用量、速率限制、并发与分组配置。
+     */
+    private Map<String, Object> sub2KeyMetrics(Sub2KeysResponse.KeyItem item,
+                                               Sub2ApiKeysUsageResponse.Stat usage) {
+        Map<String, Object> metrics = new LinkedHashMap<>();
+        metrics.put("quota", item.quota());
+        metrics.put("quota_used", item.quotaUsed());
+        if (usage != null) {
+            metrics.put("today_actual_cost", usage.todayActualCost());
+            metrics.put("total_actual_cost", usage.totalActualCost());
+        }
+        metrics.put("usage_5h", item.usage5h());
+        metrics.put("usage_1d", item.usage1d());
+        metrics.put("usage_7d", item.usage7d());
+        metrics.put("rate_limit_5h", item.rateLimit5h());
+        metrics.put("rate_limit_1d", item.rateLimit1d());
+        metrics.put("rate_limit_7d", item.rateLimit7d());
+        metrics.put("current_concurrency", item.currentConcurrency());
+        metrics.put("window_5h_start", item.window5hStart());
+        metrics.put("window_1d_start", item.window1dStart());
+        metrics.put("window_7d_start", item.window7dStart());
+        metrics.put("last_used_ip", item.lastUsedIp());
+        metrics.put("ip_whitelist", item.ipWhitelist());
+        metrics.put("ip_blacklist", item.ipBlacklist());
+        if (item.group() != null) {
+            metrics.put("group_id", item.group().id());
+            metrics.put("group_rate_multiplier", item.group().rateMultiplier());
+            metrics.put("daily_limit_usd", item.group().dailyLimitUsd());
+            metrics.put("weekly_limit_usd", item.group().weeklyLimitUsd());
+            metrics.put("monthly_limit_usd", item.group().monthlyLimitUsd());
+        }
+        return metrics;
     }
 
     private void recordChange(AccountEntity account, String platformType, Long collectionRunId,

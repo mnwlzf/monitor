@@ -59,6 +59,41 @@ export interface ChangeEvent {
   detectedAt: string
   message: string
 }
+
+/**
+ * 账号下的 API Key。
+ *
+ * 完整明文不随列表下发，仅返回脱敏值；平台特有明细放在 metrics 中。
+ */
+export interface ApiKey {
+  id: number
+  accountId: number
+  platformId: number
+  accountName: string
+  platformType: PlatformType
+  externalKeyId: string
+  keyName: string | null
+  keyMasked: string | null
+  status: string
+  upstreamStatus: string | null
+  groupName: string | null
+  groupPlatform: string | null
+  unlimitedQuota: boolean | null
+  remainQuota: number | null
+  usedQuota: number | null
+  quotaUnit: string | null
+  modelLimitsEnabled: boolean | null
+  modelLimits: string | null
+  allowIps: string | null
+  expiresAt: string | null
+  upstreamCreatedAt: string | null
+  lastUsedAt: string | null
+  active: boolean
+  firstSeenAt: string | null
+  lastSeenAt: string | null
+  lastChangedAt: string | null
+  metrics: Record<string, unknown>
+}
 /**
  * 账号用量看板快照。
  *

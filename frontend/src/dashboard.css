@@ -1,16 +1,48 @@
+/* ============================================================
+   小清新配色（浅薄荷 + 天空蓝 + 柔和暖色）
+   ============================================================ */
 :root {
-  --monitor-ink: #1f2f33;
-  --monitor-muted: #7a8a8f;
-  --monitor-line: #e5ecea;
-  --monitor-bg: #f4f7f6;
+  --monitor-ink: #2f4a48;
+  --monitor-muted: #8aa5a1;
+  --monitor-line: #e6f1ee;
+  --monitor-bg: #f4fbf9;
   --monitor-panel: #ffffff;
-  --monitor-green: #1f7a69;
-  --monitor-green-soft: #e4f3ee;
-  --monitor-blue: #5574a8;
-  --monitor-orange: #c58136;
-  --monitor-red: #b85c4d;
-  --el-color-primary: #1f7a69;
-  --el-border-radius-base: 8px;
+  --monitor-green: #3fb59f;
+  --monitor-green-soft: #e7f7f3;
+  --monitor-blue: #6cb4e8;
+  --monitor-orange: #efb45f;
+  --monitor-red: #f08d7c;
+
+  --fresh-mint: #3fb59f;
+  --fresh-mint-dark: #32917f;
+  --fresh-mint-soft: #e7f7f3;
+  --fresh-sky: #6cb4e8;
+  --fresh-sky-soft: #eaf4fc;
+  --fresh-amber: #efb45f;
+  --fresh-amber-soft: #fdf4e6;
+  --fresh-coral: #f08d7c;
+  --fresh-coral-soft: #fdeeeb;
+  --fresh-bg: #f4fbf9;
+  --fresh-line: #e6f1ee;
+  --fresh-ink: #2f4a48;
+
+  --el-color-primary: #3fb59f;
+  --el-color-primary-light-3: #79cbbc;
+  --el-color-primary-light-5: #9fdacf;
+  --el-color-primary-light-7: #c5e9e2;
+  --el-color-primary-light-8: #d9f0ec;
+  --el-color-primary-light-9: #ecf8f5;
+  --el-color-primary-dark-2: #32917f;
+  --el-color-success: #3fb59f;
+  --el-color-success-light-9: #ecf8f5;
+  --el-color-warning: #efb45f;
+  --el-color-warning-light-9: #fdf4e6;
+  --el-color-danger: #f08d7c;
+  --el-color-danger-light-9: #fdeeeb;
+  --el-color-error: #f08d7c;
+  --el-color-info: #9db3b0;
+  --el-border-radius-base: 10px;
+  --el-border-radius-small: 8px;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--monitor-bg); color: var(--monitor-ink); }
@@ -406,4 +438,375 @@ button, select, input { font: inherit; }
   color: #64748b;
   background: #f5f7f8;
   font-size: 14px;
+}
+
+/* ============================================================
+   列表页通用：工具栏 / 摘要 / 表格 / 差异展示
+   ============================================================ */
+
+.admin-page-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-toolbar-select {
+  width: 160px;
+  flex: none;
+}
+
+.admin-summary-line {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e8efec;
+  font-size: 12px;
+  color: #7b8b87;
+}
+
+.admin-summary-line strong {
+  color: #1f2f33;
+  font-size: 13px;
+}
+
+.admin-summary-line .ok { color: #1f7a69; }
+.admin-summary-line .bad { color: #b85c4d; }
+
+.admin-table-card .el-card__body {
+  padding: 0;
+}
+
+.admin-table {
+  width: 100%;
+}
+
+.admin-table.el-table {
+  --el-table-border-color: #edf2f0;
+  --el-table-header-bg-color: #f8fbfa;
+  --el-table-header-text-color: #61736f;
+  --el-table-row-hover-bg-color: #f5faf8;
+  font-size: 13px;
+}
+
+.admin-table .el-table__header th.el-table__cell {
+  height: 44px;
+  font-weight: 600;
+}
+
+.admin-table .el-table__row td.el-table__cell {
+  padding: 12px 0;
+}
+
+.admin-table .cell {
+  line-height: 1.5;
+}
+
+.admin-table-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-table-identity-text strong {
+  display: block;
+  font-size: 13px;
+  color: #1f2f33;
+}
+
+.admin-table-identity-text small {
+  display: block;
+  margin-top: 2px;
+  color: #8b9895;
+  font-size: 11px;
+}
+
+.admin-table-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #8b9895;
+}
+
+.admin-table-stack {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.admin-table-stack small {
+  color: #8b9895;
+  font-size: 11px;
+}
+
+.admin-num {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+.admin-num.positive { color: #1f7a69; }
+.admin-num.cost { color: #c58136; }
+.admin-num.warn { color: #b85c4d; }
+.admin-num.ok { color: #1f7a69; }
+
+.admin-table .muted,
+.muted { color: #9aa8a4; }
+
+/* 变更前后对比 */
+.admin-diff-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-diff-old,
+.admin-diff-new {
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+
+.admin-diff-old {
+  background: #fdf1ee;
+  color: #a4553f;
+}
+
+.admin-diff-new {
+  background: #e9f6f1;
+  color: #1f7a69;
+}
+
+.admin-diff-arrow {
+  color: #b6c3bf;
+  font-size: 11px;
+}
+
+/* 平台筛选下拉在窄屏下自适应 */
+@media (max-width: 1180px) {
+  .admin-toolbar,
+  .admin-toolbar-compact {
+    flex-wrap: wrap;
+  }
+
+  .admin-toolbar-select {
+    width: 100%;
+  }
+}
+
+/* ============================================================
+   小清新主题覆盖：柔和底色 / 圆角 / 轻阴影
+   ============================================================ */
+
+body {
+  background: var(--fresh-bg);
+  color: var(--fresh-ink);
+}
+
+.admin-shell,
+.monitor-shell {
+  background: var(--fresh-bg) !important;
+}
+
+/* ---------- 侧栏 ---------- */
+.admin-sidebar,
+.monitor-sidebar {
+  background: linear-gradient(180deg, #f9fefd 0%, #eef8f5 100%) !important;
+  border-right: 1px solid var(--fresh-line) !important;
+}
+
+.admin-brand-mark,
+.monitor-brand > span {
+  background: linear-gradient(135deg, var(--fresh-mint), #6fd3bd) !important;
+  box-shadow: 0 10px 22px rgba(63, 181, 159, .26) !important;
+}
+
+.admin-menu .el-menu-item,
+.monitor-menu .el-menu-item {
+  border-radius: 10px;
+  color: #6c8a85;
+}
+
+.admin-menu .el-menu-item:hover,
+.monitor-menu .el-menu-item:hover {
+  background: #eef8f5 !important;
+  color: var(--fresh-mint-dark) !important;
+}
+
+.admin-menu .el-menu-item.is-active,
+.monitor-menu .el-menu-item.is-active {
+  background: var(--fresh-mint-soft) !important;
+  color: var(--fresh-mint-dark) !important;
+  font-weight: 700;
+}
+
+.admin-sidebar-status,
+.monitor-sidebar-foot {
+  border-top: 1px solid var(--fresh-line);
+}
+
+/* ---------- 顶栏 ---------- */
+.admin-header,
+.monitor-topbar {
+  background: rgba(255, 255, 255, .88) !important;
+  border-bottom: 1px solid var(--fresh-line) !important;
+  backdrop-filter: blur(10px);
+}
+
+/* ---------- 卡片 ---------- */
+.admin-card,
+.monitor-panel,
+.monitor-metric,
+.monitor-platform-card,
+.admin-channel-card {
+  border-color: var(--fresh-line) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 6px 20px rgba(63, 140, 122, .055) !important;
+}
+
+.admin-card .el-card__header {
+  border-bottom-color: #eef6f3 !important;
+}
+
+/* 指标卡：白底 + 柔和渐隐 */
+.monitor-metric {
+  background: #ffffff;
+}
+
+.monitor-metric.positive {
+  background: linear-gradient(158deg, #ffffff 35%, var(--fresh-mint-soft) 100%);
+}
+
+.monitor-metric.warning {
+  background: linear-gradient(158deg, #ffffff 35%, var(--fresh-amber-soft) 100%);
+}
+
+.monitor-metric.danger {
+  background: linear-gradient(158deg, #ffffff 35%, var(--fresh-coral-soft) 100%);
+}
+
+.monitor-metric span,
+.monitor-metric small {
+  color: var(--monitor-muted);
+}
+
+.monitor-metric strong {
+  color: var(--fresh-ink);
+}
+
+.monitor-metric.positive strong { color: var(--fresh-mint-dark); }
+.monitor-metric.warning strong { color: #c98f2c; }
+.monitor-metric.danger strong { color: #d4735f; }
+
+/* ---------- 工具栏 ---------- */
+.admin-toolbar-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fdfb 100%);
+}
+
+.admin-eyebrow {
+  color: #7fb3a8 !important;
+}
+
+/* ---------- 表格 ---------- */
+.admin-table.el-table {
+  --el-table-border-color: var(--fresh-line);
+  --el-table-header-bg-color: #f3fbf8;
+  --el-table-header-text-color: #5d7a75;
+  --el-table-row-hover-bg-color: #f2faf7;
+  --el-table-tr-bg-color: #ffffff;
+}
+
+.admin-table .el-table__header th.el-table__cell {
+  font-weight: 600;
+}
+
+/* ---------- 标签与按钮微调 ---------- */
+.el-tag {
+  border-radius: 7px;
+}
+
+.el-button {
+  border-radius: 9px;
+}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d3e8e2;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b8dcd3;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 登录状态校验页 ---------- */
+.admin-boot {
+  background: linear-gradient(160deg, #f4fbf9 0%, #eaf6fb 100%) !important;
+  color: #7d9a95;
+}
+
+/* ---------- API 密钥明文展示 ---------- */
+.admin-quota-cell {
+  display: inline-grid;
+  min-width: 150px;
+  gap: 6px;
+}
+
+.admin-quota-row {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.admin-quota-label {
+  color: #8aa5a1;
+  font-size: 11px;
+}
+
+.admin-quota-value {
+  color: #2f4a48;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* 今日/剩余行用强调色，与 30日/已用行区分。 */
+.admin-quota-row.is-accent .admin-quota-label,
+.admin-quota-row.is-accent .admin-quota-value {
+  color: #32917f;
+}
+
+.admin-quota-value.is-unlimited {
+  color: #9aa8a4;
+  font-weight: 400;
+}
+
+.admin-key-secret {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px dashed #cfe4dc;
+  border-radius: 10px;
+  background: #f6fbf9;
+  word-break: break-all;
+}
+
+.admin-key-secret code {
+  color: #1f6f60;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
 }

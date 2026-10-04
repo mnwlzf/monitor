@@ -7,6 +7,7 @@ import com.monitor.platform.api.dto.PlatformResponse;
 import com.monitor.platform.api.dto.UpdatePlatformRequest;
 import com.monitor.platform.collector.application.AccountCredentialService;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
+import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.AccountUsageDashboardSnapshotRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
@@ -15,6 +16,7 @@ import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.collector.security.CredentialCipher;
 import com.monitor.platform.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,7 +49,9 @@ class UpstreamAdminServicePlatformTest {
     @Mock private AccountUsageDashboardSnapshotRepository usageDashboardRepository;
     @Mock private UpstreamGroupRepository groupRepository;
     @Mock private UpstreamChangeEventRepository changeEventRepository;
+    @Mock private AccountApiKeyRepository apiKeyRepository;
     @Mock private AccountCredentialService credentialService;
+    @Mock private CredentialCipher credentialCipher;
 
     private UpstreamAdminService service;
 
@@ -60,7 +64,9 @@ class UpstreamAdminServicePlatformTest {
                 usageDashboardRepository,
                 groupRepository,
                 changeEventRepository,
+                apiKeyRepository,
                 credentialService,
+                credentialCipher,
                 new ObjectMapper()
         );
     }

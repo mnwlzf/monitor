@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.collector.repository.mapper.AccountApiKeySnapshotMapper">
+
+    <insert id="insertSnapshot" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO account_api_key_snapshots (
+            api_key_id, account_id, collection_run_id, platform_type, external_key_id,
+            key_name, status, group_name, unlimited_quota, remain_quota, used_quota, quota_unit,
+            metrics, raw_data, collected_at
+        ) VALUES (
+            #{apiKeyId}, #{accountId}, #{collectionRunId}, #{platformType}, #{externalKeyId},
+            #{keyName}, #{status}, #{groupName}, #{unlimitedQuota}, #{remainQuota}, #{usedQuota}, #{quotaUnit},
+            #{metrics,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            #{rawData,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            #{collectedAt}
+        )
+    </insert>
+</mapper>

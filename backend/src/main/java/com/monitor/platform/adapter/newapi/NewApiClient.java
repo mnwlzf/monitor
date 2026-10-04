@@ -4,6 +4,8 @@ import com.monitor.platform.adapter.newapi.model.NewApiGroupsResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginRequest;
 import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiTokenKeyResponse;
+import com.monitor.platform.adapter.newapi.model.NewApiTokensResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -20,6 +22,8 @@ public class NewApiClient {
     private static final String LOGIN_PATH = "/api/user/login";
     private static final String SELF_PATH = "/api/user/self";
     private static final String GROUPS_PATH = "/api/user/self/groups";
+    private static final String TOKENS_PATH = "/api/token/";
+    private static final String TOKEN_KEY_PATH = "/api/token/{tokenId}/key";
 
     private final RestClient restClient;
 
@@ -86,5 +90,40 @@ public class NewApiClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(NewApiGroupsResponse.class);
+    }
+
+    /**
+     * 分页获取当前用户的密钥列表。
+     *
+     * @param baseUrl     New API 服务地址
+     * @param accessToken 登录后获得的访问令牌
+     * @param page        页码，从 1 开始
+     * @param size        每页记录数
+     * @return New API 密钥列表响应
+     */
+    public NewApiTokensResponse fetchTokens(String baseUrl, String accessToken, int page, int size) {
+        return restClient.get()
+                .uri(baseUrl + TOKENS_PATH + "?p={page}&size={size}", page, size)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .body(NewApiTokensResponse.class);
+    }
+
+    /**
+     * 获取指定密钥的完整明文。
+     *
+     * <p>上游该路由只注册了 POST，GET 会被 New API 的兜底路由当作未知地址返回 404。</p>
+     *
+     * @param baseUrl     New API 服务地址
+     * @param accessToken 登录后获得的访问令牌
+     * @param tokenId     密钥 ID
+     * @return New API 完整密钥响应
+     */
+    public NewApiTokenKeyResponse fetchTokenKey(String baseUrl, String accessToken, Long tokenId) {
+        return restClient.post()
+                .uri(baseUrl + TOKEN_KEY_PATH, tokenId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .body(NewApiTokenKeyResponse.class);
     }
 }

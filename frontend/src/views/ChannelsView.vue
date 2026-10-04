@@ -1,54 +1,87 @@
 <template>
   <section class="admin-page">
     <div class="admin-page-heading">
-      <div><p class="admin-eyebrow">CHANNELS</p><h2>渠道监控</h2><p>按平台实例查看渠道倍率、账号归属和当前状态。</p></div>
+      <div>
+        <p class="admin-eyebrow">CHANNELS</p>
+        <h2>渠道监控</h2>
+        <p>按平台实例查看渠道倍率、账号归属和当前状态。</p>
+      </div>
       <el-tag effect="plain">{{ uniqueChannelCount }} 个渠道</el-tag>
     </div>
 
     <el-card shadow="never" class="admin-card admin-toolbar-card">
       <div class="admin-toolbar">
-        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索渠道名称" />
-        <el-select v-model="instanceFilter" clearable placeholder="全部平台实例">
+        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索渠道名称或账号" />
+        <el-select v-model="instanceFilter" clearable placeholder="全部平台实例" class="admin-toolbar-select">
           <el-option v-for="name in platformNames" :key="name" :label="name" :value="name" />
         </el-select>
-        <el-select v-model="providerFilter" clearable placeholder="全部上游类型">
+        <el-select v-model="providerFilter" clearable placeholder="全部上游类型" class="admin-toolbar-select">
           <el-option v-for="provider in providers" :key="provider" :label="provider" :value="provider" />
         </el-select>
-        <el-select v-model="statusFilter" clearable placeholder="全部状态">
+        <el-select v-model="statusFilter" clearable placeholder="全部状态" class="admin-toolbar-select">
           <el-option label="可用" value="active" />
           <el-option label="停用" value="inactive" />
         </el-select>
       </div>
+      <div class="admin-summary-line">
+        <span>筛选后 <strong>{{ filteredRows.length }}</strong> 个渠道</span>
+        <span class="muted">已按「渠道名 + 上游类型」去重</span>
+      </div>
     </el-card>
 
-    <div v-if="groupedChannels.length" class="admin-channel-groups">
-      <section v-for="group in groupedChannels" :key="group.platformId" class="admin-channel-group">
-        <div class="admin-channel-group-head">
-          <el-tag size="small" :type="group.platformType === 'newapi' ? 'primary' : 'success'" effect="dark">{{ group.platformType }}</el-tag>
-          <strong>{{ group.platformName }}</strong>
-          <span>{{ group.channels.length }} 个渠道</span>
-        </div>
-        <div class="admin-channel-grid">
-          <el-card v-for="channel in group.channels" :key="channel.id" shadow="hover" class="admin-channel-card">
-            <div class="admin-channel-head">
-              <div><h3>{{ channel.name }}</h3><p>{{ channel.accountName }}</p></div>
-              <el-tag size="small" :type="channel.status.toLowerCase() === 'active' ? 'success' : 'info'" effect="light">{{ channel.status }}</el-tag>
-            </div>
-            <div class="admin-channel-context">
-              <span>{{ channel.platformName }}</span>
-              <i></i>
-              <span>{{ channel.platform || 'unknown' }}</span>
-            </div>
-            <div class="admin-channel-ratio">
-              <div><span>当前</span><strong>{{ channel.ratio.toFixed(2) }}</strong></div>
-              <div><span>基础</span><strong>{{ channel.baseRatio == null ? '—' : channel.baseRatio.toFixed(2) }}</strong></div>
-            </div>
-            <div class="admin-channel-foot"><span>ID {{ channel.id }}</span><span>{{ channel.accountName }}</span></div>
-          </el-card>
-        </div>
-      </section>
-    </div>
-    <el-card v-else shadow="never" class="admin-card"><el-empty description="暂无渠道数据" /></el-card>
+    <el-card shadow="never" class="admin-card admin-table-card">
+      <el-table
+        v-if="filteredRows.length"
+        :data="filteredRows"
+        row-key="id"
+        stripe
+        class="admin-table"
+        :default-sort="{ prop: 'ratio', order: 'descending' }"
+      >
+        <el-table-column prop="name" label="渠道名称" min-width="220" fixed show-overflow-tooltip>
+          <template #default="{ row }">
+            <strong>{{ row.name }}</strong>
+            <div class="admin-table-sub muted">ID {{ row.id }}</div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="平台实例" min-width="170">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.platformType === 'newapi' ? 'primary' : 'success'" effect="plain">{{ row.platformName }}</el-tag>
+            <div class="admin-table-sub muted">{{ row.accountName }}</div>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="platform" label="上游类型" min-width="130" sortable />
+
+        <el-table-column prop="ratio" label="当前倍率" min-width="120" sortable align="right">
+          <template #default="{ row }">
+            <strong class="admin-num">{{ row.ratio.toFixed(2) }}</strong>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="baseRatio" label="基础倍率" min-width="120" sortable align="right">
+          <template #default="{ row }">
+            <span class="admin-num">{{ row.baseRatio == null ? '—' : row.baseRatio.toFixed(2) }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="倍率差" min-width="110" align="right">
+          <template #default="{ row }">
+            <span v-if="row.baseRatio == null" class="muted">—</span>
+            <span v-else class="admin-num" :class="ratioDeltaClass(asChannel(row))">{{ ratioDelta(asChannel(row)) }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="状态" min-width="110">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.status.toLowerCase() === 'active' ? 'success' : 'info'" effect="light">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-empty v-else description="暂无渠道数据" />
+    </el-card>
   </section>
 </template>
 
@@ -65,26 +98,44 @@ const statusFilter = ref('')
 
 const platformNames = computed(() => [...new Set(props.channels.map(channel => channel.platformName).filter(Boolean))])
 const providers = computed(() => [...new Set(props.channels.map(channel => channel.platform).filter(Boolean))])
-const filteredChannels = computed(() => props.channels.filter(channel => {
-  const keywordMatched = !keyword.value || channel.name.toLowerCase().includes(keyword.value.toLowerCase())
+
+/** 同一平台下多个账号会采到相同渠道，按「渠道名 + 上游类型」去重后只展示一次。 */
+const dedupedChannels = computed(() => {
+  const seen = new Set<string>()
+  const rows: Channel[] = []
+  for (const channel of props.channels) {
+    const key = `${channel.platformId}::${channel.name}::${channel.platform}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    rows.push(channel)
+  }
+  return rows
+})
+
+const filteredRows = computed(() => dedupedChannels.value.filter(channel => {
+  const text = `${channel.name} ${channel.accountName} ${channel.platformName}`.toLowerCase()
+  const keywordMatched = !keyword.value || text.includes(keyword.value.trim().toLowerCase())
   const instanceMatched = !instanceFilter.value || channel.platformName === instanceFilter.value
   const providerMatched = !providerFilter.value || channel.platform === providerFilter.value
   const statusMatched = !statusFilter.value || channel.status.toLowerCase() === statusFilter.value
   return keywordMatched && instanceMatched && providerMatched && statusMatched
 }))
-const groupedChannels = computed(() => {
-  const groups = new Map<number, { platformId: number; platformName: string; platformType: Channel['platformType']; channels: Channel[] }>()
-  const seenKeys = new Set<string>()
-  for (const channel of filteredChannels.value) {
-    // 同一平台下多个账号会采到相同渠道，按「渠道名 + 上游类型」去重，只展示一次。
-    const dedupeKey = `${channel.platformId}::${channel.name}::${channel.platform}`
-    if (seenKeys.has(dedupeKey)) continue
-    seenKeys.add(dedupeKey)
-    const groupKey = channel.platformId
-    if (!groups.has(groupKey)) groups.set(groupKey, { platformId: channel.platformId, platformName: channel.platformName, platformType: channel.platformType, channels: [] })
-    groups.get(groupKey)!.channels.push(channel)
-  }
-  return [...groups.values()]
-})
-const uniqueChannelCount = computed(() => groupedChannels.value.reduce((sum, group) => sum + group.channels.length, 0))
+
+const uniqueChannelCount = computed(() => dedupedChannels.value.length)
+
+function asChannel(row: unknown): Channel { return row as Channel }
+
+function ratioDelta(channel: Channel): string {
+  if (channel.baseRatio == null) return '—'
+  const delta = channel.ratio - channel.baseRatio
+  return `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`
+}
+
+function ratioDeltaClass(channel: Channel): string {
+  if (channel.baseRatio == null) return ''
+  const delta = channel.ratio - channel.baseRatio
+  if (delta > 0) return 'warn'
+  if (delta < 0) return 'ok'
+  return ''
+}
 </script>

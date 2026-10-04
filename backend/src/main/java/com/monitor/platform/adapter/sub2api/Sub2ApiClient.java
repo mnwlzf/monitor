@@ -2,13 +2,18 @@ package com.monitor.platform.adapter.sub2api;
 
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2ApiKeysUsageResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * Sub2API HTTP 客户端。
@@ -25,9 +30,11 @@ public class Sub2ApiClient {
     private static final String LOGIN_PATH = "/api/v1/auth/login";
     private static final String PROFILE_PATH = "/api/v1/auth/me";
     private static final String KEYS_PATH = "/api/v1/keys";
+    private static final String KEYS_USAGE_PATH = "/api/v1/usage/dashboard/api-keys-usage";
     private static final String AVAILABLE_GROUPS_PATH = "/api/v1/groups/available";
     private static final String USAGE_DASHBOARD_STATS_PATH = "/api/v1/usage/dashboard/stats";
     private static final String TIME_ZONE = "Asia/Shanghai";
+    private static final int DEFAULT_KEY_PAGE_SIZE = 100;
 
     private final RestClient restClient;
 
@@ -64,13 +71,46 @@ public class Sub2ApiClient {
      * 获取当前账号的密钥列表。
      */
     public Sub2KeysResponse fetchKeys(String baseUrl, String accessToken) {
+        return fetchKeys(baseUrl, accessToken, 1, DEFAULT_KEY_PAGE_SIZE);
+    }
+
+    /**
+     * 按页获取当前账号的密钥列表。
+     *
+     * @param baseUrl     Sub2API 服务地址
+     * @param accessToken 登录令牌
+     * @param page        页码，从 1 开始
+     * @param pageSize    每页记录数
+     * @return Sub2API 密钥列表响应
+     */
+    public Sub2KeysResponse fetchKeys(String baseUrl, String accessToken, int page, int pageSize) {
         return restClient.get()
                 .uri(baseUrl + KEYS_PATH
                                 + "?page={page}&page_size={size}&sort_by={sortBy}&sort_order={order}&timezone={tz}",
-                        1, 40, "created_at", "desc", TIME_ZONE)
+                        page, pageSize, "created_at", "desc", TIME_ZONE)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(Sub2KeysResponse.class);
+    }
+
+    /**
+     * 批量获取密钥用量。
+     *
+     * <p>密钥列表不返回真实用量，每密钥的今日/累计实际消耗只能通过该接口按 ID 批量查询。</p>
+     *
+     * @param baseUrl     Sub2API 服务地址
+     * @param accessToken 登录令牌
+     * @param apiKeyIds   密钥 ID 列表
+     * @return Sub2API 密钥用量响应
+     */
+    public Sub2ApiKeysUsageResponse fetchKeysUsage(String baseUrl, String accessToken, List<Long> apiKeyIds) {
+        return restClient.post()
+                .uri(baseUrl + KEYS_USAGE_PATH)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("api_key_ids", apiKeyIds))
+                .retrieve()
+                .body(Sub2ApiKeysUsageResponse.class);
     }
 
     /**
