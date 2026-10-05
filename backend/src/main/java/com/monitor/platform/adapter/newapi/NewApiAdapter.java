@@ -389,6 +389,7 @@ public class NewApiAdapter {
         String refreshCacheKey = refreshKey(baseUrl, username);
         String refreshToken = stringRedisTemplate.opsForValue().get(refreshCacheKey);
         if (StrUtil.isEmpty(refreshToken)) {
+            log.info("{} {} 未缓存 refresh token，无法续期，只能重新登录", baseUrl, username);
             return false;
         }
 
@@ -429,9 +430,12 @@ public class NewApiAdapter {
         if (StrUtil.isNotEmpty(session.refreshToken())) {
             stringRedisTemplate.opsForValue().set(refreshCacheKey, session.refreshToken(),
                     resolveRefreshTtl(data));
+            log.info("{} {} 已缓存 refresh token，access token 过期后将自动续期", baseUrl, username);
         } else {
             // 上游未下发 refresh token（旧版本），清掉可能残留的旧值，避免误用。
             stringRedisTemplate.delete(refreshCacheKey);
+            log.warn("{} {} 上游响应未下发 refresh token，access token 过期后只能重新登录",
+                    baseUrl, username);
         }
     }
 
