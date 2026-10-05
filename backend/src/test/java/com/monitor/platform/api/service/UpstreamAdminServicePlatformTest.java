@@ -261,4 +261,42 @@ class UpstreamAdminServicePlatformTest {
         assertEquals("平台下仍有 2 个账号，请先删除账号再删除平台", ex.getMessage());
         verify(platformRepository, never()).softDelete(ArgumentMatchers.anyInt());
     }
+
+    @Test
+    void shouldRevealAccountPassword() {
+        AccountEntity account = new AccountEntity();
+        account.setId(10);
+        account.setPlatformId(1);
+        account.setUsername("user@example.com");
+        when(accountRepository.findById(10)).thenReturn(Optional.of(account));
+        when(credentialService.resolvePassword(10)).thenReturn("s3cret");
+
+        assertEquals("s3cret", service.revealAccountPassword(1, 10, "admin"));
+    }
+
+    @Test
+    void shouldRejectRevealWhenAccountHasNoCredential() {
+        AccountEntity account = new AccountEntity();
+        account.setId(10);
+        account.setPlatformId(1);
+        when(accountRepository.findById(10)).thenReturn(Optional.of(account));
+        when(credentialService.resolvePassword(10))
+                .thenThrow(new IllegalStateException("账号未配置可用密码凭证: 10"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.revealAccountPassword(1, 10, "admin"));
+
+        assertEquals("该账号没有可用的密码凭证，无法查看明文", ex.getMessage());
+    }
+
+    @Test
+    void shouldRejectRevealWhenAccountBelongsToAnotherPlatform() {
+        AccountEntity account = new AccountEntity();
+        account.setId(10);
+        account.setPlatformId(2);
+        when(accountRepository.findById(10)).thenReturn(Optional.of(account));
+
+        assertThrows(BusinessException.class, () -> service.revealAccountPassword(1, 10, "admin"));
+        verify(credentialService, never()).resolvePassword(ArgumentMatchers.anyInt());
+    }
 }

@@ -127,10 +127,11 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="320" fixed="right">
+        <el-table-column label="操作" width="410" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canWrite !== false" size="small" :loading="row.lastCollectStatus === 'RUNNING'" @click="emit('collect', asAccount(row))">采集</el-button>
             <el-button size="small" @click="openKeys(asAccount(row))">密钥{{ keyCount(asAccount(row)) ? `(${keyCount(asAccount(row))})` : '' }}</el-button>
+            <el-button v-if="canWrite !== false" size="small" :loading="revealingPasswordId === row.id" @click="revealPassword(asAccount(row))">查看密码</el-button>
             <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="openEdit(asAccount(row))">编辑</el-button>
             <el-popconfirm v-if="canWrite !== false" title="确认删除该账号？" @confirm="remove(asAccount(row))">
               <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
@@ -247,6 +248,20 @@
         <el-button type="primary" @click="showSecret = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="showPassword" title="账号登录密码" width="560px" destroy-on-close append-to-body>
+      <p class="admin-key-secret-tip">明文密码（仅管理员可见），查看操作会记录审计日志。</p>
+      <div class="admin-key-secret">
+        <span v-if="passwordAccount" class="admin-key-secret-label">
+          {{ passwordAccount.displayName }} · {{ passwordAccount.loginName || '未填写登录账号' }}
+        </span>
+        <code>{{ revealedPassword }}</code>
+      </div>
+      <template #footer>
+        <el-button @click="copyRevealedPassword">复制</el-button>
+        <el-button type="primary" @click="showPassword = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -254,7 +269,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { Monitor, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { createAccountRecord, deleteAccountRecord, revealApiKeyRecord, updateAccountRecord, type CreateAccountInput, type UpdateAccountInput } from '../api/accounts'
+import { createAccountRecord, deleteAccountRecord, revealAccountPasswordRecord, revealApiKeyRecord, updateAccountRecord, type CreateAccountInput, type UpdateAccountInput } from '../api/accounts'
 import type { Account, ApiKey, Platform, UsageDashboard } from '../types'
 
 const props = defineProps<{ accounts: Account[]; platforms: Platform[]; usageDashboards: UsageDashboard[]; apiKeys: ApiKey[]; canWrite?: boolean }>()
@@ -275,6 +290,11 @@ const revealedKey = ref('')
 const revealedKeyLabel = ref('')
 const showSecret = ref(false)
 const revealingId = ref<number | null>(null)
+
+const showPassword = ref(false)
+const revealedPassword = ref('')
+const passwordAccount = ref<Account | null>(null)
+const revealingPasswordId = ref<number | null>(null)
 
 const currentKeys = computed(() => keysAccount.value
   ? props.apiKeys.filter(key => key.accountId === keysAccount.value?.id)
@@ -312,6 +332,30 @@ async function copyRevealedKey() {
   try {
     await navigator.clipboard.writeText(revealedKey.value)
     ElMessage.success('密钥已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择复制')
+  }
+}
+
+/** 查看账号登录密码明文，属于敏感操作，仅管理员可用。 */
+async function revealPassword(account: Account) {
+  revealingPasswordId.value = account.id
+  try {
+    revealedPassword.value = await revealAccountPasswordRecord(account)
+    passwordAccount.value = account
+    showPassword.value = true
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '获取密码明文失败')
+  } finally {
+    revealingPasswordId.value = null
+  }
+}
+
+async function copyRevealedPassword() {
+  if (!revealedPassword.value) return
+  try {
+    await navigator.clipboard.writeText(revealedPassword.value)
+    ElMessage.success('密码已复制')
   } catch {
     ElMessage.error('复制失败，请手动选择复制')
   }

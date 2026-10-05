@@ -401,6 +401,32 @@ public class UpstreamAdminService {
     }
 
     /**
+     * 解密并返回账号的登录密码明文。
+     *
+     * <p>属于敏感操作，仅管理员可调用。密码是采集登录上游所必需的凭证，
+     * 这里复用与采集相同的解密路径，并记录操作人以便审计。</p>
+     *
+     * @param platformId 平台 ID
+     * @param accountId  账号 ID
+     * @param operator   操作人，用于审计日志
+     * @return 明文密码
+     */
+    public String revealAccountPassword(Integer platformId, Integer accountId, String operator) {
+        AccountEntity account = findAccount(platformId, accountId);
+
+        String password;
+        try {
+            password = credentialService.resolvePassword(account.getId());
+        } catch (IllegalStateException ex) {
+            throw BusinessException.of("该账号没有可用的密码凭证，无法查看明文");
+        }
+
+        log.warn("查看账号密码明文: operator={}, platformId={}, accountId={}, loginName={}",
+                operator, platformId, accountId, account.getUsername());
+        return password;
+    }
+
+    /**
      * 将密钥实体转换为接口响应。
      */
     private AccountApiKeyResponse toApiKeyResponse(AccountEntity account, AccountApiKeyEntity entity) {

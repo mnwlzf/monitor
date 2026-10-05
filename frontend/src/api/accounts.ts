@@ -411,3 +411,13 @@ export async function revealApiKeyRecord(apiKey: ApiKey): Promise<string> {
     { method: 'POST' },
   )
 }
+
+/**
+ * 解密获取账号登录密码明文（仅管理员可用）。
+ */
+export async function revealAccountPasswordRecord(account: Account): Promise<string> {
+  return apiRequest<string>(
+    `/api/v1/upstream/instances/${account.platformId}/accounts/${account.id}/credential/reveal`,
+    { method: 'POST' },
+  )
+}

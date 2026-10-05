@@ -14,6 +14,7 @@ import com.monitor.platform.api.service.UpstreamAdminService;
 import com.monitor.platform.collector.application.CollectionService;
 import com.monitor.platform.common.response.ApiResponse;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -161,6 +162,23 @@ public class UpstreamAdminController {
                                             @PathVariable Integer accountId,
                                             @PathVariable Long keyId) {
         return ApiResponse.of(upstreamAdminService.revealApiKeySecret(instanceId, accountId, keyId), null);
+    }
+
+    /**
+     * 解密获取账号登录密码明文，仅管理员可调用。
+     *
+     * @param instanceId     平台 ID
+     * @param accountId      账号 ID
+     * @param authentication 当前登录用户，用于审计日志
+     * @return 明文密码
+     */
+    @PostMapping("/instances/{instanceId}/accounts/{accountId}/credential/reveal")
+    public ApiResponse<String> revealAccountPassword(@PathVariable Integer instanceId,
+                                                     @PathVariable Integer accountId,
+                                                     Authentication authentication) {
+        String operator = authentication == null ? "unknown" : authentication.getName();
+        return ApiResponse.of(
+                upstreamAdminService.revealAccountPassword(instanceId, accountId, operator), null);
     }
 
     /**
