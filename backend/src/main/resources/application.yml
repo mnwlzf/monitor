@@ -48,6 +48,9 @@ mybatis-plus:
     banner: false
 
 monitor:
+  # 上游请求伪装：默认使用内置的浏览器 User-Agent / Accept-Language，
+  # 可用 MONITOR_UPSTREAM_USER_AGENT、MONITOR_UPSTREAM_ACCEPT_LANGUAGE 环境变量覆盖。
+  upstream: {}
   # 登录与权限：ADMIN 可读写，VIEWER 只读
   security:
     enabled: ${MONITOR_SECURITY_ENABLED:true}
