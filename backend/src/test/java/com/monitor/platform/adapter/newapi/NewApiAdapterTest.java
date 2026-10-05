@@ -122,6 +122,27 @@ class NewApiAdapterTest {
     }
 
     @Test
+    void shouldKeepCachedUserIdWhenRefreshResponseOmitsUser() {
+        long expiresAt = Instant.now().getEpochSecond() + 900;
+        NewApiLoginResponse withoutUser = new NewApiLoginResponse(
+                new NewApiLoginResponse.LoginData(expiresAt, "refreshed-token", null, "Bearer", null),
+                "",
+                true
+        );
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn(null, "refreshed-token");
+        when(valueOperations.get(REFRESH_CACHE_KEY)).thenReturn("refresh-token");
+        when(valueOperations.get(USER_ID_CACHE_KEY)).thenReturn("647");
+        when(newApiClient.refreshAuth(BASE_URL, "refresh-token"))
+                .thenReturn(new NewApiClient.AuthSession(withoutUser, "rotated-refresh-token"));
+        when(newApiClient.fetchGroups(BASE_URL, "refreshed-token")).thenReturn(groupsResponse());
+
+        adapter.fetchGroups(BASE_URL, USERNAME, PASSWORD);
+
+        verify(newApiClient, never()).login(any(), any(), any());
+        verify(valueOperations).set(eq(USER_ID_CACHE_KEY), eq("647"), any(Duration.class));
+    }
+
+    @Test
     void shouldFallBackToLoginWhenRefreshTokenIsRejected() {
         long expiresAt = Instant.now().getEpochSecond() + 900;
         when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn(null, "access-token");

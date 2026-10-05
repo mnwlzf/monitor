@@ -11,6 +11,8 @@ import org.springframework.web.client.RestClient;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 全局 HTTP 客户端配置。
@@ -29,6 +31,26 @@ public class RestClientConfig {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
     private static final int RETRY_MAX_ATTEMPTS = 3;
     private static final long RETRY_BACKOFF_MILLIS = 500L;
+
+    /**
+     * Chromium 系浏览器固定发送的客户端提示头。
+     *
+     * <p>与默认 User-Agent 的版本号保持一致，避免 UA 与 sec-ch-ua 互相矛盾反而更可疑。
+     * 刻意不含 {@code Accept-Encoding}：JDK HttpClient 不自动解压，声明了 br/zstd 会解析失败。</p>
+     */
+    private static final Map<String, String> CHROMIUM_CLIENT_HINTS = chromiumClientHints();
+
+    private static Map<String, String> chromiumClientHints() {
+        Map<String, String> hints = new LinkedHashMap<>();
+        hints.put("sec-ch-ua", "\"Chromium\";v=\"154\", \"Not A(Brand\";v=\"99\", \"Google Chrome\";v=\"154\"");
+        hints.put("sec-ch-ua-mobile", "?0");
+        hints.put("sec-ch-ua-platform", "\"Windows\"");
+        hints.put("sec-fetch-dest", "empty");
+        hints.put("sec-fetch-mode", "cors");
+        hints.put("sec-fetch-site", "same-origin");
+        hints.put("priority", "u=1, i");
+        return hints;
+    }
 
     /**
      * 创建上游采集共用的 RestClient。
@@ -61,6 +83,7 @@ public class RestClientConfig {
         addDefaultHeader(builder, HttpHeaders.USER_AGENT, properties.getUserAgent());
         addDefaultHeader(builder, HttpHeaders.ACCEPT, properties.getAccept());
         addDefaultHeader(builder, HttpHeaders.ACCEPT_LANGUAGE, properties.getAcceptLanguage());
+        CHROMIUM_CLIENT_HINTS.forEach((name, value) -> addDefaultHeader(builder, name, value));
         return builder;
     }
 

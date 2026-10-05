@@ -18,13 +18,13 @@ public class UpstreamHttpProperties {
     /** User-Agent，默认伪装成桌面版 Chrome。 */
     private String userAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    + "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+                    + "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 
     /** Accept，与浏览器 fetch/XHR 请求一致。 */
     private String accept = "application/json, text/plain, */*";
 
     /** Accept-Language，与中文浏览器默认值一致。 */
-    private String acceptLanguage = "zh-CN,zh;q=0.9,en;q=0.8";
+    private String acceptLanguage = "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6";
 
     public String getUserAgent() {
         return userAgent;

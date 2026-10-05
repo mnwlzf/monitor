@@ -16,8 +16,10 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 
 /**
  * New API 采集适配器。
@@ -102,8 +104,8 @@ public class NewApiAdapter {
         validateLoginResponse(baseUrl, username, session.response());
         cacheSession(baseUrl, username, session);
 
-        log.info("{} {} New API 登录成功，用户 ID: {}",
-                baseUrl, username, session.response().data().user().id());
+        log.info("{} {} New API 登录成功，用户 ID: {}，新建登录会话 sid={}",
+                baseUrl, username, session.response().data().user().id(), sessionId(session));
     }
 
     /**
@@ -230,6 +232,41 @@ public class NewApiAdapter {
         log.error("{} {} New API 登录失败：HTTP {} {}", baseUrl, username, status, body);
         return new BusinessException("UPSTREAM_LOGIN_FAILED",
                 "上游 New API 登录失败（HTTP " + status + "），请检查账号密码与平台地址是否正确");
+    }
+
+    /**
+     * 校验续期响应：只要求拿到新的 access_token。
+     *
+     * <p>续期复用已有会话，user 不是必需字段：旧版本只回 access_token 与
+     * access_expires_at，缺少 user 时不应判定为失败。</p>
+     */
+    private void validateRefreshResponse(String baseUrl, String username,
+                                         NewApiLoginResponse response) {
+        if (response == null) {
+            log.error("{} {} New API 续期失败：响应为空", baseUrl, username);
+            throw new IllegalStateException("New API 续期失败：响应为空");
+        }
+
+        if (!response.success()) {
+            log.error("{} {} New API 续期失败：message={}", baseUrl, username, response.message());
+            throw new IllegalStateException("New API 续期失败：" + response.message());
+        }
+
+        if (response.data() == null || StrUtil.isEmpty(response.data().accessToken())) {
+            log.error("{} {} New API 续期失败：未返回 access_token", baseUrl, username);
+            throw new IllegalStateException("New API 续期失败：未返回 access_token");
+        }
+    }
+
+    /**
+     * 登录/续期响应里的会话 ID，用于确认续期是否沿用了同一个会话。
+     */
+    private String sessionId(NewApiClient.AuthSession session) {
+        NewApiLoginResponse.LoginData data = session.response().data();
+        if (data == null || data.session() == null || StrUtil.isBlank(data.session().sid())) {
+            return "unknown";
+        }
+        return data.session().sid();
     }
 
     /**
@@ -396,9 +433,10 @@ public class NewApiAdapter {
         log.info("{} {} New API access token 已过期，尝试用 refresh token 续期", baseUrl, username);
         try {
             NewApiClient.AuthSession session = newApiClient.refreshAuth(baseUrl, refreshToken);
-            validateLoginResponse(baseUrl, username, session.response());
+            validateRefreshResponse(baseUrl, username, session.response());
             cacheSession(baseUrl, username, session);
-            log.info("{} {} New API access token 续期成功", baseUrl, username);
+            log.info("{} {} New API access token 续期成功，沿用登录会话 sid={}",
+                    baseUrl, username, sessionId(session));
             return true;
         } catch (RestClientResponseException ex) {
             // 上游明确拒绝（token 失效、被吊销、接口不存在）才丢弃 refresh token；
@@ -418,13 +456,22 @@ public class NewApiAdapter {
 
     /**
      * 缓存一次登录/续期的结果。refresh token 只在响应带 Set-Cookie 时才会更新。
+     *
+     * <p>部分版本（含部署中的旧版本）续期响应只返回 access_token，不带 user，
+     * 此时沿用缓存里的用户 ID，避免因为缺少 user 而回退到重新登录。</p>
      */
     private void cacheSession(String baseUrl, String username, NewApiClient.AuthSession session) {
         NewApiLoginResponse.LoginData data = session.response().data();
         Duration accessTtl = resolveTokenTtl(data.accessExpiresAt());
         stringRedisTemplate.opsForValue().set(tokenKey(baseUrl, username), data.accessToken(), accessTtl);
-        stringRedisTemplate.opsForValue().set(userIdKey(baseUrl, username),
-                String.valueOf(data.user().id()), accessTtl);
+
+        String userIdCacheKey = userIdKey(baseUrl, username);
+        String userId = data.user() == null || data.user().id() == null
+                ? stringRedisTemplate.opsForValue().get(userIdCacheKey)
+                : String.valueOf(data.user().id());
+        if (StrUtil.isNotEmpty(userId)) {
+            stringRedisTemplate.opsForValue().set(userIdCacheKey, userId, accessTtl);
+        }
 
         String refreshCacheKey = refreshKey(baseUrl, username);
         if (StrUtil.isNotEmpty(session.refreshToken())) {
@@ -434,9 +481,29 @@ public class NewApiAdapter {
         } else {
             // 上游未下发 refresh token（旧版本），清掉可能残留的旧值，避免误用。
             stringRedisTemplate.delete(refreshCacheKey);
-            log.warn("{} {} 上游响应未下发 refresh token，access token 过期后只能重新登录",
-                    baseUrl, username);
+            log.warn("{} {} 上游响应未下发 refresh token（Set-Cookie: {}），access token 过期后只能重新登录",
+                    baseUrl, username, maskSetCookies(session.setCookieHeaders()));
         }
+    }
+
+    /**
+     * 脱敏后的 Set-Cookie 概要，用于区分"上游根本没下发"和"下发了但格式没解析出来"。
+     */
+    private String maskSetCookies(List<String> setCookies) {
+        if (setCookies == null || setCookies.isEmpty()) {
+            return "<无 Set-Cookie 响应头>";
+        }
+        return setCookies.stream().map(this::maskSetCookie).collect(Collectors.joining(" | "));
+    }
+
+    private String maskSetCookie(String setCookie) {
+        int equals = setCookie.indexOf('=');
+        if (equals < 0) {
+            return setCookie;
+        }
+        int semicolon = setCookie.indexOf(';');
+        int valueEnd = semicolon < 0 ? setCookie.length() : semicolon;
+        return setCookie.substring(0, equals + 1) + "***" + setCookie.substring(valueEnd);
     }
 
     /**

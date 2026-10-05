@@ -6,6 +6,8 @@ import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiTokenKeyResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiTokensResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -22,6 +24,8 @@ import java.util.List;
  */
 @Component
 public class NewApiClient {
+
+    private static final Logger log = LoggerFactory.getLogger(NewApiClient.class);
 
     private static final String LOGIN_PATH = "/api/user/login";
     private static final String REFRESH_PATH = "/api/user/auth/refresh";
@@ -49,8 +53,36 @@ public class NewApiClient {
      *
      * @param response     登录或续期的响应体
      * @param refreshToken 新的 refresh token，上游未下发时为 null
+     * @param setCookieHeaders 原始 Set-Cookie 响应头，仅用于排查上游未下发的情况
      */
-    public record AuthSession(NewApiLoginResponse response, String refreshToken) {
+    public record AuthSession(NewApiLoginResponse response, String refreshToken,
+                              List<String> setCookieHeaders) {
+
+        /** 便于测试构造不含原始响应头的会话。 */
+        public AuthSession(NewApiLoginResponse response, String refreshToken) {
+            this(response, refreshToken, null);
+        }
+    }
+
+    /**
+     * 拼接上游地址，避免平台地址以斜杠结尾时产生 {@code //api/...} 双斜杠路径。
+     */
+    private String url(String baseUrl, String path) {
+        if (baseUrl.endsWith("/") && path.startsWith("/")) {
+            return baseUrl + path.substring(1);
+        }
+        if (!baseUrl.endsWith("/") && !path.startsWith("/")) {
+            return baseUrl + "/" + path;
+        }
+        return baseUrl + path;
+    }
+
+    /**
+     * 打印拼接后的完整请求地址，便于确认实际请求的 URL。
+     */
+    private String logRequest(String method, String requestUrl) {
+        log.info("New API 请求: {} {}", method, requestUrl);
+        return requestUrl;
     }
 
     /**
@@ -73,14 +105,17 @@ public class NewApiClient {
      * @return 登录响应体与 refresh token
      */
     public AuthSession login(String baseUrl, NewApiLoginRequest request, String turnstile) {
+        String requestUrl = logRequest("POST",
+                url(baseUrl, LOGIN_PATH) + "?turnstile=" + (turnstile == null ? "" : turnstile));
         ResponseEntity<NewApiLoginResponse> entity = restClient.post()
-                .uri(baseUrl + LOGIN_PATH + "?turnstile={turnstile}",
-                        turnstile == null ? "" : turnstile)
+                .uri(requestUrl)
                 .header(HttpHeaders.ORIGIN, resolveOrigin(baseUrl))
+                .header(HttpHeaders.REFERER, resolveOrigin(baseUrl) + "/")
                 .body(request)
                 .retrieve()
                 .toEntity(NewApiLoginResponse.class);
-        return new AuthSession(entity.getBody(), extractRefreshToken(entity.getHeaders()));
+        return new AuthSession(entity.getBody(), extractRefreshToken(entity.getHeaders()),
+                entity.getHeaders().get(HttpHeaders.SET_COOKIE));
     }
 
     /**
@@ -95,17 +130,24 @@ public class NewApiClient {
      * @return 续期响应体与轮换后的 refresh token
      */
     public AuthSession refreshAuth(String baseUrl, String refreshToken) {
+        String requestUrl = logRequest("POST", url(baseUrl, REFRESH_PATH));
         ResponseEntity<NewApiLoginResponse> entity = restClient.post()
-                .uri(baseUrl + REFRESH_PATH)
+                .uri(requestUrl)
                 .header(HttpHeaders.COOKIE, REFRESH_COOKIE_NAME + "=" + refreshToken)
                 .header(HttpHeaders.ORIGIN, resolveOrigin(baseUrl))
+                .header(HttpHeaders.REFERER, resolveOrigin(baseUrl) + "/")
                 .retrieve()
                 .toEntity(NewApiLoginResponse.class);
-        return new AuthSession(entity.getBody(), extractRefreshToken(entity.getHeaders()));
+        return new AuthSession(entity.getBody(), extractRefreshToken(entity.getHeaders()),
+                entity.getHeaders().get(HttpHeaders.SET_COOKIE));
     }
 
     /**
      * 从响应头里取出 refresh token。
+     *
+     * <p>同一个响应里可能出现多条 {@code new_api_refresh}（例如先清空旧值再写入新值，
+     * 或者同时下发 host-only 与 Domain 两个版本），因此遇到空值要继续往后找，
+     * 不能直接判定为"上游未下发"。</p>
      */
     private String extractRefreshToken(HttpHeaders headers) {
         List<String> setCookies = headers.get(HttpHeaders.SET_COOKIE);
@@ -117,7 +159,9 @@ public class NewApiClient {
                 String attribute = part.trim();
                 if (attribute.startsWith(REFRESH_COOKIE_NAME + "=")) {
                     String value = attribute.substring(REFRESH_COOKIE_NAME.length() + 1);
-                    return value.isBlank() ? null : value;
+                    if (!value.isBlank()) {
+                        return value;
+                    }
                 }
             }
         }
@@ -151,8 +195,9 @@ public class NewApiClient {
      * @return New API 原始用户信息响应
      */
     public NewApiSelfResponse fetchSelf(String baseUrl, String accessToken) {
+        String requestUrl = logRequest("GET", url(baseUrl, SELF_PATH));
         return restClient.get()
-                .uri(baseUrl + SELF_PATH)
+                .uri(requestUrl)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(NewApiSelfResponse.class);
@@ -166,8 +211,9 @@ public class NewApiClient {
      * @return New API 原始分组响应
      */
     public NewApiGroupsResponse fetchGroups(String baseUrl, String accessToken) {
+        String requestUrl = logRequest("GET", url(baseUrl, GROUPS_PATH));
         return restClient.get()
-                .uri(baseUrl + GROUPS_PATH)
+                .uri(requestUrl)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(NewApiGroupsResponse.class);
@@ -183,8 +229,10 @@ public class NewApiClient {
      * @return New API 密钥列表响应
      */
     public NewApiTokensResponse fetchTokens(String baseUrl, String accessToken, int page, int size) {
+        String requestUrl = logRequest("GET",
+                url(baseUrl, TOKENS_PATH) + "?p=" + page + "&size=" + size);
         return restClient.get()
-                .uri(baseUrl + TOKENS_PATH + "?p={page}&size={size}", page, size)
+                .uri(requestUrl)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(NewApiTokensResponse.class);
@@ -201,8 +249,10 @@ public class NewApiClient {
      * @return New API 完整密钥响应
      */
     public NewApiTokenKeyResponse fetchTokenKey(String baseUrl, String accessToken, Long tokenId) {
+        String requestUrl = logRequest("POST",
+                url(baseUrl, TOKEN_KEY_PATH.replace("{tokenId}", String.valueOf(tokenId))));
         return restClient.post()
-                .uri(baseUrl + TOKEN_KEY_PATH, tokenId)
+                .uri(requestUrl)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(NewApiTokenKeyResponse.class);

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * refresh token 的真实 HTTP 往返测试。
@@ -59,11 +60,37 @@ class NewApiClientCookieTest {
 
             NewApiClient.AuthSession login = client.login(baseUrl, new NewApiLoginRequest("u", "p"));
             assertEquals("sid-1.secret-1", login.refreshToken());
+            assertTrue(login.setCookieHeaders().stream().anyMatch(cookie -> cookie.startsWith("new_api_refresh=")),
+                    "应保留原始 Set-Cookie 头用于排查，实际: " + login.setCookieHeaders());
 
             NewApiClient.AuthSession refreshed = client.refreshAuth(baseUrl, login.refreshToken());
             assertEquals("new_api_refresh=sid-1.secret-1", refreshRequestHeaders.get("cookie"));
             assertEquals(baseUrl, refreshRequestHeaders.get("origin"));
             assertEquals("sid-1.secret-2", refreshed.refreshToken());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldSkipClearedCookieAndPickTheRealRefreshToken() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/user/login", exchange -> {
+            var headers = exchange.getResponseHeaders();
+            headers.add("Set-Cookie", "new_api_refresh=; Path=/api/user/auth; Max-Age=0; HttpOnly; Secure; SameSite=Strict");
+            headers.add("Set-Cookie", "new_api_has_session=1; Path=/; HttpOnly=false; Secure; SameSite=Strict");
+            headers.add("Set-Cookie", "new_api_refresh=sid-2.secret-2; Path=/api/user/auth; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict");
+            respond(exchange, LOGIN_BODY);
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            RestClient restClient = new RestClientConfig().restClient(new UpstreamHttpProperties());
+            NewApiClient client = new NewApiClient(restClient);
+
+            NewApiClient.AuthSession login = client.login(baseUrl, new NewApiLoginRequest("u", "p"));
+
+            assertEquals("sid-2.secret-2", login.refreshToken());
         } finally {
             server.stop(0);
         }
