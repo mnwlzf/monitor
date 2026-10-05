@@ -7,13 +7,17 @@ import com.monitor.platform.adapter.newapi.model.NewApiLoginResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiTokenKeyResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiTokensResponse;
+import com.monitor.platform.common.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * New API 采集适配器。
@@ -32,8 +36,17 @@ public class NewApiAdapter {
     /** 提前过期时间，避免 Redis 中的令牌刚取出就失效。 */
     private static final long TOKEN_EXPIRY_SKEW_SECONDS = 30L;
 
+    /** 上游未返回会话过期时间时，refresh token 的兜底缓存时长。 */
+    private static final Duration FALLBACK_REFRESH_TTL = Duration.ofDays(7);
+
+    /** 上游账号登录会话数超限时的业务错误码。 */
+    private static final String CODE_AUTH_SESSION_LIMIT = "UPSTREAM_AUTH_SESSION_LIMIT";
+
     private final NewApiClient newApiClient;
     private final StringRedisTemplate stringRedisTemplate;
+
+    /** 同一账号的登录与续期必须串行，避免 refresh token 轮换被并发使用导致会话被吊销。 */
+    private final ConcurrentMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
 
     /**
      * @param newApiClient        New API HTTP 客户端
@@ -75,22 +88,22 @@ public class NewApiAdapter {
         }
 
         // 两个缓存键必须同时存在，避免只缓存了部分登录上下文。
+        // 注意不要顺带清掉 refresh token：登录失败时它可能仍然有效，可留作下次续期。
         clearCachedSession(tokenCacheKey, userIdCacheKey);
         log.info("{} {} 缓存的 New API 登录凭证已失效，重新登录", baseUrl, username);
 
         NewApiLoginRequest request = new NewApiLoginRequest(username, password);
-        NewApiLoginResponse response = newApiClient.login(baseUrl, request, turnstile);
-        validateLoginResponse(baseUrl, username, response);
+        NewApiClient.AuthSession session;
+        try {
+            session = newApiClient.login(baseUrl, request, turnstile);
+        } catch (RestClientResponseException ex) {
+            throw translateLoginError(baseUrl, username, ex);
+        }
+        validateLoginResponse(baseUrl, username, session.response());
+        cacheSession(baseUrl, username, session);
 
-        NewApiLoginResponse.LoginData loginData = response.data();
-        String accessToken = loginData.accessToken();
-        String userId = String.valueOf(loginData.user().id());
-        Duration tokenTtl = resolveTokenTtl(loginData.accessExpiresAt());
-
-        stringRedisTemplate.opsForValue().set(tokenCacheKey, accessToken, tokenTtl);
-        stringRedisTemplate.opsForValue().set(userIdCacheKey, userId, tokenTtl);
-
-        log.info("{} {} New API 登录成功，用户 ID: {}", baseUrl, username, userId);
+        log.info("{} {} New API 登录成功，用户 ID: {}",
+                baseUrl, username, session.response().data().user().id());
     }
 
     /**
@@ -195,6 +208,28 @@ public class NewApiAdapter {
             throw new IllegalStateException("获取 New API 完整密钥失败: tokenId=" + tokenId);
         }
         return response.data().key();
+    }
+
+    /**
+     * 把上游登录的 HTTP 错误翻译成可读的业务异常。
+     *
+     * <p>New API 限制同一账号的并发登录会话数，超限时返回 409 与
+     * {@code AUTH_SESSION_LIMIT}。不处理会一路冒泡成 500「服务器内部错误」，
+     * 这里转成带处理建议的业务异常，便于直接在界面上提示。</p>
+     */
+    private BusinessException translateLoginError(String baseUrl, String username,
+                                                  RestClientResponseException ex) {
+        int status = ex.getStatusCode().value();
+        String body = ex.getResponseBodyAsString();
+        if (status == 409 && body != null && body.contains("AUTH_SESSION_LIMIT")) {
+            log.error("{} {} New API 登录失败：登录会话数已达上游上限", baseUrl, username);
+            return new BusinessException(CODE_AUTH_SESSION_LIMIT,
+                    "上游账号的登录会话数已达上限，无法建立新的登录会话。请先登录 " + baseUrl
+                            + " 退出其他登录会话（或联系上游管理员调整会话上限）后重试。");
+        }
+        log.error("{} {} New API 登录失败：HTTP {} {}", baseUrl, username, status, body);
+        return new BusinessException("UPSTREAM_LOGIN_FAILED",
+                "上游 New API 登录失败（HTTP " + status + "），请检查账号密码与平台地址是否正确");
     }
 
     /**
@@ -305,7 +340,11 @@ public class NewApiAdapter {
     }
 
     /**
-     * 解析访问令牌；缓存不存在时先登录，再重新读取缓存。
+     * 解析访问令牌：命中缓存直接返回；access token 缺失时优先用 refresh token
+     * 续期，续期不可用或失败才重新登录。
+     *
+     * <p>重新登录会在上游新建一个登录会话，受会话数上限约束；续期只是轮换当前
+     * 会话的令牌，不占用新的会话配额。</p>
      */
     private String resolveAccessToken(String baseUrl, String username, String password,
                                       String turnstile) {
@@ -316,20 +355,103 @@ public class NewApiAdapter {
             throw new IllegalArgumentException("New API 用户名不能为空");
         }
 
-        String cacheKey = tokenKey(baseUrl, username);
-        String accessToken = stringRedisTemplate.opsForValue().get(cacheKey);
-        if (StrUtil.isNotEmpty(accessToken)) {
+        synchronized (sessionLock(baseUrl, username)) {
+            String cacheKey = tokenKey(baseUrl, username);
+            String accessToken = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (StrUtil.isNotEmpty(accessToken)) {
+                return accessToken;
+            }
+
+            if (refreshSession(baseUrl, username)) {
+                accessToken = stringRedisTemplate.opsForValue().get(cacheKey);
+                if (StrUtil.isNotEmpty(accessToken)) {
+                    return accessToken;
+                }
+            }
+
+            log.info("{} {} New API token 不存在，先执行登录", baseUrl, username);
+            login(baseUrl, username, password, turnstile);
+
+            accessToken = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (StrUtil.isEmpty(accessToken)) {
+                throw new IllegalStateException("New API 登录后仍无法获取 token: " + baseUrl);
+            }
             return accessToken;
         }
+    }
 
-        log.info("{} {} New API token 不存在，先执行登录", baseUrl, username);
-        login(baseUrl, username, password, turnstile);
-
-        accessToken = stringRedisTemplate.opsForValue().get(cacheKey);
-        if (StrUtil.isEmpty(accessToken)) {
-            throw new IllegalStateException("New API 登录后仍无法获取 token: " + baseUrl);
+    /**
+     * 用缓存的 refresh token 续期，避免重新登录占用上游会话配额。
+     *
+     * @return 是否续期成功；refresh token 不存在、已失效或上游不支持时返回 false
+     */
+    private boolean refreshSession(String baseUrl, String username) {
+        String refreshCacheKey = refreshKey(baseUrl, username);
+        String refreshToken = stringRedisTemplate.opsForValue().get(refreshCacheKey);
+        if (StrUtil.isEmpty(refreshToken)) {
+            return false;
         }
-        return accessToken;
+
+        log.info("{} {} New API access token 已过期，尝试用 refresh token 续期", baseUrl, username);
+        try {
+            NewApiClient.AuthSession session = newApiClient.refreshAuth(baseUrl, refreshToken);
+            validateLoginResponse(baseUrl, username, session.response());
+            cacheSession(baseUrl, username, session);
+            log.info("{} {} New API access token 续期成功", baseUrl, username);
+            return true;
+        } catch (RestClientResponseException ex) {
+            // 上游明确拒绝（token 失效、被吊销、接口不存在）才丢弃 refresh token；
+            // 网络类错误保留凭证，避免把仍然有效的 refresh token 误删。
+            log.warn("{} {} New API access token 续期失败：HTTP {}，回退到重新登录",
+                    baseUrl, username, ex.getStatusCode().value());
+            if (ex.getStatusCode().is4xxClientError()) {
+                clearCachedSession(refreshCacheKey);
+            }
+            return false;
+        } catch (RuntimeException ex) {
+            log.warn("{} {} New API access token 续期失败，回退到重新登录: {}",
+                    baseUrl, username, ex.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 缓存一次登录/续期的结果。refresh token 只在响应带 Set-Cookie 时才会更新。
+     */
+    private void cacheSession(String baseUrl, String username, NewApiClient.AuthSession session) {
+        NewApiLoginResponse.LoginData data = session.response().data();
+        Duration accessTtl = resolveTokenTtl(data.accessExpiresAt());
+        stringRedisTemplate.opsForValue().set(tokenKey(baseUrl, username), data.accessToken(), accessTtl);
+        stringRedisTemplate.opsForValue().set(userIdKey(baseUrl, username),
+                String.valueOf(data.user().id()), accessTtl);
+
+        String refreshCacheKey = refreshKey(baseUrl, username);
+        if (StrUtil.isNotEmpty(session.refreshToken())) {
+            stringRedisTemplate.opsForValue().set(refreshCacheKey, session.refreshToken(),
+                    resolveRefreshTtl(data));
+        } else {
+            // 上游未下发 refresh token（旧版本），清掉可能残留的旧值，避免误用。
+            stringRedisTemplate.delete(refreshCacheKey);
+        }
+    }
+
+    /**
+     * refresh token 的缓存时长跟随上游登录会话，取不到时使用兜底值。
+     */
+    private Duration resolveRefreshTtl(NewApiLoginResponse.LoginData data) {
+        Long sessionExpiresAt = data.session() == null ? null : data.session().expiresAt();
+        if (sessionExpiresAt == null) {
+            return FALLBACK_REFRESH_TTL;
+        }
+        long expiresInSeconds = sessionExpiresAt - Instant.now().getEpochSecond();
+        return Duration.ofSeconds(Math.max(1L, expiresInSeconds - TOKEN_EXPIRY_SKEW_SECONDS));
+    }
+
+    /**
+     * 同一账号的登录/续期互斥锁。
+     */
+    private Object sessionLock(String baseUrl, String username) {
+        return sessionLocks.computeIfAbsent(baseUrl + "|" + username, key -> new Object());
     }
 
     /**
@@ -360,9 +482,10 @@ public class NewApiAdapter {
     /**
      * 清理不完整的登录凭证。
      */
-    private void clearCachedSession(String tokenCacheKey, String userIdCacheKey) {
-        stringRedisTemplate.delete(tokenCacheKey);
-        stringRedisTemplate.delete(userIdCacheKey);
+    private void clearCachedSession(String... cacheKeys) {
+        for (String cacheKey : cacheKeys) {
+            stringRedisTemplate.delete(cacheKey);
+        }
     }
 
     /**
@@ -377,5 +500,12 @@ public class NewApiAdapter {
      */
     private String userIdKey(String baseUrl, String username) {
         return "newapi:user-id:" + baseUrl + ":" + username;
+    }
+
+    /**
+     * refresh token 缓存键按服务地址和用户名隔离。
+     */
+    private String refreshKey(String baseUrl, String username) {
+        return "newapi:refresh-token:" + baseUrl + ":" + username;
     }
 }

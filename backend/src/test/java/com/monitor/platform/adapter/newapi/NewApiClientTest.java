@@ -38,6 +38,7 @@ class NewApiClientTest {
 
         server.expect(requestTo(BASE_URL + "/api/user/login?turnstile="))
                 .andExpect(method(HttpMethod.POST))
+                .andExpect(header(HttpHeaders.ORIGIN, BASE_URL))
                 .andExpect(jsonPath("$.username").value(USERNAME))
                 .andExpect(jsonPath("$.password").value("password"))
                 .andRespond(withSuccess("""
@@ -54,17 +55,59 @@ class NewApiClientTest {
                           "message": "",
                           "success": true
                         }
-                        """, MediaType.APPLICATION_JSON));
+                        """, MediaType.APPLICATION_JSON).headers(refreshCookieHeaders("sid-1.secret-1")));
 
-        NewApiLoginResponse response = client.login(
+        NewApiClient.AuthSession session = client.login(
                 BASE_URL,
                 new NewApiLoginRequest(USERNAME, "password")
         );
 
-        assertTrue(response.success());
-        assertEquals("access-token", response.data().accessToken());
-        assertEquals(647L, response.data().user().id());
+        assertTrue(session.response().success());
+        assertEquals("access-token", session.response().data().accessToken());
+        assertEquals(647L, session.response().data().user().id());
+        assertEquals("sid-1.secret-1", session.refreshToken());
         server.verify();
+    }
+
+    @Test
+    void shouldRefreshWithCookieHeaderAndReturnRotatedRefreshToken() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        NewApiClient client = new NewApiClient(builder.build());
+
+        server.expect(requestTo(BASE_URL + "/api/user/auth/refresh"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(HttpHeaders.COOKIE, "new_api_refresh=sid-1.secret-1"))
+                .andExpect(header(HttpHeaders.ORIGIN, BASE_URL))
+                .andRespond(withSuccess("""
+                        {
+                          "data": {
+                            "access_expires_at": 1790732536,
+                            "access_token": "refreshed-token",
+                            "token_type": "Bearer",
+                            "user": {
+                              "id": 647,
+                              "username": "user@example.com"
+                            }
+                          },
+                          "message": "",
+                          "success": true
+                        }
+                        """, MediaType.APPLICATION_JSON).headers(refreshCookieHeaders("sid-1.secret-2")));
+
+        NewApiClient.AuthSession session = client.refreshAuth(BASE_URL, "sid-1.secret-1");
+
+        assertTrue(session.response().success());
+        assertEquals("refreshed-token", session.response().data().accessToken());
+        assertEquals("sid-1.secret-2", session.refreshToken());
+        server.verify();
+    }
+
+    private HttpHeaders refreshCookieHeaders(String refreshToken) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.SET_COOKIE,
+                "new_api_refresh=" + refreshToken + "; Path=/api/user/auth; HttpOnly; SameSite=Strict");
+        return headers;
     }
 
     @Test

@@ -13,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -22,7 +23,9 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -38,6 +41,7 @@ class NewApiAdapterTest {
     private static final String PASSWORD = "password";
     private static final String TOKEN_CACHE_KEY = "newapi:token:" + BASE_URL + ":" + USERNAME;
     private static final String USER_ID_CACHE_KEY = "newapi:user-id:" + BASE_URL + ":" + USERNAME;
+    private static final String REFRESH_CACHE_KEY = "newapi:refresh-token:" + BASE_URL + ":" + USERNAME;
 
     @Mock
     private NewApiClient newApiClient;
@@ -61,13 +65,14 @@ class NewApiAdapterTest {
         long expiresAt = Instant.now().getEpochSecond() + 900;
         NewApiLoginResponse response = successResponse(expiresAt);
         when(newApiClient.login(BASE_URL, new NewApiLoginRequest(USERNAME, PASSWORD), ""))
-                .thenReturn(response);
+                .thenReturn(new NewApiClient.AuthSession(response, "refresh-token"));
 
         adapter.login(BASE_URL, USERNAME, PASSWORD);
 
         ArgumentCaptor<Duration> ttlCaptor = ArgumentCaptor.forClass(Duration.class);
         verify(valueOperations).set(eq(TOKEN_CACHE_KEY), eq("access-token"), ttlCaptor.capture());
         verify(valueOperations).set(eq(USER_ID_CACHE_KEY), eq("647"), ttlCaptor.capture());
+        verify(valueOperations).set(eq(REFRESH_CACHE_KEY), eq("refresh-token"), ttlCaptor.capture());
 
         List<Duration> ttls = ttlCaptor.getAllValues();
         assertTrue(ttls.get(0).getSeconds() > 0);
@@ -93,10 +98,45 @@ class NewApiAdapterTest {
                 false
         );
         when(newApiClient.login(BASE_URL, new NewApiLoginRequest(USERNAME, PASSWORD), ""))
-                .thenReturn(response);
+                .thenReturn(new NewApiClient.AuthSession(response, null));
 
         assertThrows(IllegalStateException.class,
                 () -> adapter.login(BASE_URL, USERNAME, PASSWORD));
+    }
+
+    @Test
+    void shouldRefreshAccessTokenInsteadOfLoggingInWhenRefreshTokenExists() {
+        long expiresAt = Instant.now().getEpochSecond() + 900;
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn(null, "refreshed-token");
+        when(valueOperations.get(REFRESH_CACHE_KEY)).thenReturn("refresh-token");
+        when(newApiClient.refreshAuth(BASE_URL, "refresh-token"))
+                .thenReturn(new NewApiClient.AuthSession(successResponse(expiresAt), "rotated-refresh-token"));
+        when(newApiClient.fetchGroups(BASE_URL, "refreshed-token")).thenReturn(groupsResponse());
+
+        adapter.fetchGroups(BASE_URL, USERNAME, PASSWORD);
+
+        verify(newApiClient, never()).login(any(), any(), any());
+        verify(newApiClient).refreshAuth(BASE_URL, "refresh-token");
+        verify(valueOperations).set(eq(REFRESH_CACHE_KEY), eq("rotated-refresh-token"), any(Duration.class));
+        verify(newApiClient).fetchGroups(BASE_URL, "refreshed-token");
+    }
+
+    @Test
+    void shouldFallBackToLoginWhenRefreshTokenIsRejected() {
+        long expiresAt = Instant.now().getEpochSecond() + 900;
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn(null, "access-token");
+        when(valueOperations.get(REFRESH_CACHE_KEY)).thenReturn("stale-refresh-token");
+        when(newApiClient.refreshAuth(BASE_URL, "stale-refresh-token"))
+                .thenThrow(new RestClientResponseException("unauthorized", 401, "Unauthorized", null, null, null));
+        when(newApiClient.login(BASE_URL, new NewApiLoginRequest(USERNAME, PASSWORD), ""))
+                .thenReturn(new NewApiClient.AuthSession(successResponse(expiresAt), "refresh-token"));
+        when(newApiClient.fetchGroups(BASE_URL, "access-token")).thenReturn(groupsResponse());
+
+        adapter.fetchGroups(BASE_URL, USERNAME, PASSWORD);
+
+        verify(newApiClient).refreshAuth(BASE_URL, "stale-refresh-token");
+        verify(newApiClient).login(BASE_URL, new NewApiLoginRequest(USERNAME, PASSWORD), "");
+        verify(newApiClient).fetchGroups(BASE_URL, "access-token");
     }
 
     @Test
@@ -116,8 +156,9 @@ class NewApiAdapterTest {
         long expiresAt = Instant.now().getEpochSecond() + 900;
         when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn(null, "access-token");
         when(valueOperations.get(USER_ID_CACHE_KEY)).thenReturn(null);
+        when(valueOperations.get(REFRESH_CACHE_KEY)).thenReturn(null);
         when(newApiClient.login(BASE_URL, new NewApiLoginRequest(USERNAME, PASSWORD), ""))
-                .thenReturn(successResponse(expiresAt));
+                .thenReturn(new NewApiClient.AuthSession(successResponse(expiresAt), "refresh-token"));
         when(newApiClient.fetchGroups(BASE_URL, "access-token")).thenReturn(groupsResponse());
 
         adapter.fetchGroups(BASE_URL, USERNAME, PASSWORD);

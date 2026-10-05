@@ -7,8 +7,12 @@ import com.monitor.platform.adapter.newapi.model.NewApiSelfResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiTokenKeyResponse;
 import com.monitor.platform.adapter.newapi.model.NewApiTokensResponse;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+
+import java.net.URI;
+import java.util.List;
 
 /**
  * New API HTTP 客户端。
@@ -20,10 +24,14 @@ import org.springframework.web.client.RestClient;
 public class NewApiClient {
 
     private static final String LOGIN_PATH = "/api/user/login";
+    private static final String REFRESH_PATH = "/api/user/auth/refresh";
     private static final String SELF_PATH = "/api/user/self";
     private static final String GROUPS_PATH = "/api/user/self/groups";
     private static final String TOKENS_PATH = "/api/token/";
     private static final String TOKEN_KEY_PATH = "/api/token/{tokenId}/key";
+
+    /** New API 用 HttpOnly Cookie 下发 refresh token，响应体里拿不到。 */
+    private static final String REFRESH_COOKIE_NAME = "new_api_refresh";
 
     private final RestClient restClient;
 
@@ -35,13 +43,24 @@ public class NewApiClient {
     }
 
     /**
+     * 登录/续期的返回：响应体，以及需要调用方自行保管的 refresh token。
+     *
+     * <p>refresh token 不在响应体里，只能从 {@code Set-Cookie} 中提取。</p>
+     *
+     * @param response     登录或续期的响应体
+     * @param refreshToken 新的 refresh token，上游未下发时为 null
+     */
+    public record AuthSession(NewApiLoginResponse response, String refreshToken) {
+    }
+
+    /**
      * 调用 New API 登录接口，不传 Turnstile 校验值。
      *
      * @param baseUrl New API 服务地址
      * @param request 登录请求体
-     * @return New API 原始登录响应
+     * @return 登录响应体与 refresh token
      */
-    public NewApiLoginResponse login(String baseUrl, NewApiLoginRequest request) {
+    public AuthSession login(String baseUrl, NewApiLoginRequest request) {
         return login(baseUrl, request, "");
     }
 
@@ -51,15 +70,77 @@ public class NewApiClient {
      * @param baseUrl   New API 服务地址
      * @param request   登录请求体
      * @param turnstile Turnstile 校验值，可为空
-     * @return New API 原始登录响应
+     * @return 登录响应体与 refresh token
      */
-    public NewApiLoginResponse login(String baseUrl, NewApiLoginRequest request, String turnstile) {
-        return restClient.post()
+    public AuthSession login(String baseUrl, NewApiLoginRequest request, String turnstile) {
+        ResponseEntity<NewApiLoginResponse> entity = restClient.post()
                 .uri(baseUrl + LOGIN_PATH + "?turnstile={turnstile}",
                         turnstile == null ? "" : turnstile)
+                .header(HttpHeaders.ORIGIN, resolveOrigin(baseUrl))
                 .body(request)
                 .retrieve()
-                .body(NewApiLoginResponse.class);
+                .toEntity(NewApiLoginResponse.class);
+        return new AuthSession(entity.getBody(), extractRefreshToken(entity.getHeaders()));
+    }
+
+    /**
+     * 用 refresh token 换取新的 access token。
+     *
+     * <p>上游只从 Cookie {@code new_api_refresh} 读取 refresh token；开启安全
+     * Cookie 时还会校验 Origin，因此这里同时带上 Origin 头。续期成功后上游会
+     * 轮换 refresh token，必须用返回值里的新 token 覆盖旧的。</p>
+     *
+     * @param baseUrl      New API 服务地址
+     * @param refreshToken 上次登录/续期拿到的 refresh token
+     * @return 续期响应体与轮换后的 refresh token
+     */
+    public AuthSession refreshAuth(String baseUrl, String refreshToken) {
+        ResponseEntity<NewApiLoginResponse> entity = restClient.post()
+                .uri(baseUrl + REFRESH_PATH)
+                .header(HttpHeaders.COOKIE, REFRESH_COOKIE_NAME + "=" + refreshToken)
+                .header(HttpHeaders.ORIGIN, resolveOrigin(baseUrl))
+                .retrieve()
+                .toEntity(NewApiLoginResponse.class);
+        return new AuthSession(entity.getBody(), extractRefreshToken(entity.getHeaders()));
+    }
+
+    /**
+     * 从响应头里取出 refresh token。
+     */
+    private String extractRefreshToken(HttpHeaders headers) {
+        List<String> setCookies = headers.get(HttpHeaders.SET_COOKIE);
+        if (setCookies == null) {
+            return null;
+        }
+        for (String setCookie : setCookies) {
+            for (String part : setCookie.split(";")) {
+                String attribute = part.trim();
+                if (attribute.startsWith(REFRESH_COOKIE_NAME + "=")) {
+                    String value = attribute.substring(REFRESH_COOKIE_NAME.length() + 1);
+                    return value.isBlank() ? null : value;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 取服务地址的 Origin（scheme://host[:port]），用于通过上游的 Origin 校验。
+     */
+    private String resolveOrigin(String baseUrl) {
+        try {
+            URI uri = URI.create(baseUrl);
+            String scheme = uri.getScheme() == null ? "https" : uri.getScheme();
+            String host = uri.getHost();
+            if (host == null) {
+                return baseUrl;
+            }
+            return uri.getPort() > 0
+                    ? scheme + "://" + host + ":" + uri.getPort()
+                    : scheme + "://" + host;
+        } catch (IllegalArgumentException ex) {
+            return baseUrl;
+        }
     }
 
     /**
