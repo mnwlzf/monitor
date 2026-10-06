@@ -4,27 +4,30 @@
 
     <resultMap id="MailRecipientResultMap" type="com.monitor.platform.mail.MailRecipientEntity">
         <id column="id" property="id"/>
+        <result column="scene" property="scene"/>
         <result column="email" property="email"/>
         <result column="name" property="name"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
-    <select id="selectAll" resultMap="MailRecipientResultMap">
-        SELECT id, email, name, created_at
+    <select id="selectByScene" resultMap="MailRecipientResultMap">
+        SELECT id, scene, email, name, created_at
         FROM mail_recipients
+        WHERE scene = #{scene}
         ORDER BY id ASC
     </select>
 
-    <select id="selectByEmail" resultMap="MailRecipientResultMap">
-        SELECT id, email, name, created_at
+    <select id="selectBySceneAndEmail" resultMap="MailRecipientResultMap">
+        SELECT id, scene, email, name, created_at
         FROM mail_recipients
-        WHERE lower(email) = lower(#{email})
+        WHERE scene = #{scene}
+          AND lower(email) = lower(#{email})
         LIMIT 1
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO mail_recipients (email, name, created_at)
-        VALUES (#{email}, #{name}, #{createdAt})
+        INSERT INTO mail_recipients (scene, email, name, created_at)
+        VALUES (#{scene}, #{email}, #{name}, #{createdAt})
     </insert>
 
     <delete id="deleteById">

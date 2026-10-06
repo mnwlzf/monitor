@@ -75,7 +75,7 @@ class BalanceAlertServiceTest {
         when(accountRepository.findEnabledByPlatformId(1)).thenReturn(List.of(account));
         when(metricSnapshotRepository.findLatest(7)).thenReturn(Optional.of(snapshot));
         when(notificationSettingsRepository.get()).thenReturn(settings);
-        when(mailRecipientRepository.findAll()).thenReturn(List.of(recipient));
+        when(mailRecipientRepository.findByScene(MailScene.BALANCE_ALERT)).thenReturn(List.of(recipient));
         when(smtpConfigProvider.load()).thenReturn(smtpConfig);
     }
 

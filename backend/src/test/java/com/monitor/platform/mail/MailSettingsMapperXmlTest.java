@@ -32,7 +32,7 @@ class MailSettingsMapperXmlTest {
 
         assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailSettingsMapper.selectSettings"));
         assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailSettingsMapper.upsertSettings"));
-        assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailRecipientMapper.selectAll"));
+        assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailRecipientMapper.selectByScene"));
         assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailRecipientMapper.insert"));
         assertTrue(configuration.hasStatement("com.monitor.platform.mail.NotificationSettingsMapper.selectSettings"));
         assertTrue(configuration.hasStatement("com.monitor.platform.mail.NotificationSettingsMapper.upsertSettings"));

@@ -179,10 +179,16 @@ export interface MailSettings {
 }
 
 /**
- * 余额提醒收件人。
+ * 邮件事件场景：不同事件使用各自的收件人。
+ */
+export type MailScene = 'BALANCE_ALERT' | 'DAILY_REPORT'
+
+/**
+ * 邮件收件人（按事件场景区分）。
  */
 export interface MailRecipient {
   id: number
+  scene: MailScene
   email: string
   name: string | null
   createdAt: string | null
@@ -195,6 +201,5 @@ export interface NotificationSettings {
   balanceAlertEnabled: boolean
   balanceThreshold: number
   alertIntervalMinutes: number
-  recipientCount: number
   updatedAt: string | null
 }

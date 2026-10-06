@@ -17,14 +17,14 @@ public class MailRecipientRepository {
         this.mailRecipientMapper = mailRecipientMapper;
     }
 
-    /** 查询全部收件人。 */
-    public List<MailRecipientEntity> findAll() {
-        return mailRecipientMapper.selectAll();
+    /** 查询指定场景下的全部收件人。 */
+    public List<MailRecipientEntity> findByScene(MailScene scene) {
+        return mailRecipientMapper.selectByScene(scene.name());
     }
 
-    /** 按邮箱查询，用于重复校验（忽略大小写）。 */
-    public Optional<MailRecipientEntity> findByEmail(String email) {
-        return Optional.ofNullable(mailRecipientMapper.selectByEmail(email));
+    /** 按场景与邮箱查询，用于重复校验（忽略大小写）。 */
+    public Optional<MailRecipientEntity> findBySceneAndEmail(MailScene scene, String email) {
+        return Optional.ofNullable(mailRecipientMapper.selectBySceneAndEmail(scene.name(), email));
     }
 
     /** 新增收件人。 */

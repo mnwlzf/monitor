@@ -7,6 +7,7 @@ import com.monitor.platform.api.dto.NotificationSettingsResponse;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.mail.MailRecipientEntity;
 import com.monitor.platform.mail.MailRecipientRepository;
+import com.monitor.platform.mail.MailScene;
 import com.monitor.platform.mail.NotificationSettingsEntity;
 import com.monitor.platform.mail.NotificationSettingsRepository;
 import org.springframework.stereotype.Service;
@@ -18,7 +19,7 @@ import java.util.List;
 /**
  * 邮件通知设置管理服务。
  *
- * <p>负责余额提醒开关/阈值，以及收件人（一个或多个）的增删查。</p>
+ * <p>负责余额提醒开关/阈值/间隔，以及按事件场景维护收件人（一个或多个）。</p>
  */
 @Service
 public class NotificationAdminService {
@@ -55,20 +56,21 @@ public class NotificationAdminService {
         return toResponse(entity);
     }
 
-    /** 查询全部收件人。 */
-    public List<MailRecipientResponse> listRecipients() {
-        return mailRecipientRepository.findAll().stream().map(this::toResponse).toList();
+    /** 查询指定事件场景下的收件人。 */
+    public List<MailRecipientResponse> listRecipients(MailScene scene) {
+        return mailRecipientRepository.findByScene(scene).stream().map(this::toResponse).toList();
     }
 
-    /** 新增收件人，邮箱不可重复。 */
+    /** 新增收件人，同一场景下邮箱不可重复。 */
     @Transactional
     public MailRecipientResponse addRecipient(MailRecipientRequest request) {
         String email = request.email().trim();
-        mailRecipientRepository.findByEmail(email).ifPresent(existing -> {
-            throw BusinessException.of("收件人已存在: " + email);
+        mailRecipientRepository.findBySceneAndEmail(request.scene(), email).ifPresent(existing -> {
+            throw BusinessException.of("该事件下收件人已存在: " + email);
         });
 
         MailRecipientEntity entity = new MailRecipientEntity();
+        entity.setScene(request.scene().name());
         entity.setEmail(email);
         entity.setName(trimToNull(request.name()));
         entity.setCreatedAt(OffsetDateTime.now());
@@ -91,13 +93,13 @@ public class NotificationAdminService {
                 entity.getAlertIntervalMinutes() == null || entity.getAlertIntervalMinutes() <= 0
                         ? NotificationSettingsRepository.DEFAULT_ALERT_INTERVAL_MINUTES
                         : entity.getAlertIntervalMinutes(),
-                mailRecipientRepository.findAll().size(),
                 entity.getUpdatedAt());
     }
 
     private MailRecipientResponse toResponse(MailRecipientEntity entity) {
         return new MailRecipientResponse(
                 entity.getId(),
+                entity.getScene(),
                 entity.getEmail(),
                 entity.getName(),
                 entity.getCreatedAt());

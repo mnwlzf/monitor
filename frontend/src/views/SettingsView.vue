@@ -4,7 +4,7 @@
       <div>
         <p class="admin-eyebrow">SYSTEM SETTINGS</p>
         <h2>系统设置</h2>
-        <p>配置 SMTP 邮件服务，用于发送验证码与监控通知。</p>
+        <p>配置 SMTP 邮件服务、余额提醒与各事件的邮件接收人。</p>
       </div>
     </div>
 
@@ -141,37 +141,25 @@
           </el-form-item>
         </div>
       </el-form>
+
+      <el-divider content-position="left">该事件的收件人</el-divider>
+      <RecipientEditor scene="BALANCE_ALERT" :can-write="canWrite" />
     </el-card>
 
     <el-card shadow="never" class="admin-card">
       <template #header>
         <div class="admin-card-header">
           <div>
-            <h3>收件人</h3>
-            <p>余额提醒邮件的接收人，可配置一个或多个</p>
+            <h3>每日余额消耗报表</h3>
+            <p>每天凌晨发送前一天各平台、各账号的余额消耗报表</p>
           </div>
         </div>
       </template>
 
-      <div v-if="canWrite !== false" class="settings-recipient-add">
-        <el-input v-model="recipientForm.email" placeholder="someone@example.com" />
-        <el-input v-model="recipientForm.name" placeholder="名称（可选）" />
-        <el-button type="primary" :loading="addingRecipient" @click="addRecipient">添加收件人</el-button>
-      </div>
+      <small class="admin-form-hint">发送时间与启停在「定时任务」页配置（任务：每日余额消耗报表）。</small>
 
-      <el-table :data="recipients" v-loading="loadingRecipients" empty-text="暂未配置收件人" size="small">
-        <el-table-column prop="email" label="邮箱" min-width="240" />
-        <el-table-column label="名称" min-width="160">
-          <template #default="{ row }">{{ row.name || '—' }}</template>
-        </el-table-column>
-        <el-table-column v-if="canWrite !== false" label="操作" width="100" align="right">
-          <template #default="{ row }">
-            <el-popconfirm title="确认删除该收件人？" @confirm="removeRecipient(asRecipient(row))">
-              <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
-            </el-popconfirm>
-          </template>
-        </el-table-column>
-      </el-table>
+      <el-divider content-position="left">该事件的收件人</el-divider>
+      <RecipientEditor scene="DAILY_REPORT" :can-write="canWrite" />
     </el-card>
   </section>
 </template>
@@ -179,21 +167,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import RecipientEditor from '../components/RecipientEditor.vue'
 import {
-  addMailRecipient,
-  deleteMailRecipient,
   getMailSettings,
   getNotificationSettings,
-  listMailRecipients,
   saveMailSettings,
   saveNotificationSettings,
   sendTestMail,
   testMailConnection,
-  type MailRecipientInput,
   type MailSettingsInput,
   type NotificationSettingsInput,
 } from '../api/settings'
-import type { MailRecipient } from '../types'
 
 defineProps<{ canWrite?: boolean }>()
 
@@ -288,31 +272,23 @@ async function sendTestEmail() {
   }
 }
 
-const notification = reactive<NotificationSettingsInput>({ balanceAlertEnabled: true, balanceThreshold: 5, alertIntervalMinutes: 360 })
-const recipients = ref<MailRecipient[]>([])
-const recipientForm = reactive<MailRecipientInput>({ email: '', name: '' })
+const notification = reactive<NotificationSettingsInput>({
+  balanceAlertEnabled: true,
+  balanceThreshold: 5,
+  alertIntervalMinutes: 360,
+})
 const savingNotification = ref(false)
-const loadingRecipients = ref(false)
-const addingRecipient = ref(false)
-
-function asRecipient(row: unknown): MailRecipient {
-  return row as MailRecipient
-}
 
 async function loadNotification() {
-  loadingRecipients.value = true
   try {
-    const [settings, list] = await Promise.all([getNotificationSettings(), listMailRecipients()])
+    const settings = await getNotificationSettings()
     Object.assign(notification, {
       balanceAlertEnabled: settings.balanceAlertEnabled,
       balanceThreshold: settings.balanceThreshold ?? 5,
       alertIntervalMinutes: settings.alertIntervalMinutes ?? 360,
     })
-    recipients.value = list
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '加载通知设置失败')
-  } finally {
-    loadingRecipients.value = false
   }
 }
 
@@ -330,34 +306,6 @@ async function saveNotification() {
     ElMessage.error(error instanceof Error ? error.message : '保存失败')
   } finally {
     savingNotification.value = false
-  }
-}
-
-async function addRecipient() {
-  if (!recipientForm.email) {
-    ElMessage.warning('请填写收件人邮箱')
-    return
-  }
-  addingRecipient.value = true
-  try {
-    recipients.value.push(await addMailRecipient({ email: recipientForm.email, name: recipientForm.name }))
-    recipientForm.email = ''
-    recipientForm.name = ''
-    ElMessage.success('收件人已添加')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '添加收件人失败')
-  } finally {
-    addingRecipient.value = false
-  }
-}
-
-async function removeRecipient(recipient: MailRecipient) {
-  try {
-    await deleteMailRecipient(recipient.id)
-    recipients.value = recipients.value.filter(item => item.id !== recipient.id)
-    ElMessage.success('收件人已删除')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '删除收件人失败')
   }
 }
 
@@ -392,11 +340,5 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   align-items: center;
-}
-
-.settings-recipient-add {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 14px;
 }
 </style>

@@ -92,7 +92,7 @@ public class BalanceAlertService {
                 return;
             }
 
-            List<MailRecipientEntity> recipients = mailRecipientRepository.findAll();
+            List<MailRecipientEntity> recipients = mailRecipientRepository.findByScene(MailScene.BALANCE_ALERT);
             if (recipients.isEmpty()) {
                 log.info("检测到低余额平台但未配置收件人，暂不发送: platformCount={}", lowPlatforms.size());
                 return;

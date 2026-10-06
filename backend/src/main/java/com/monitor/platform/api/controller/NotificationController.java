@@ -6,6 +6,7 @@ import com.monitor.platform.api.dto.NotificationSettingsRequest;
 import com.monitor.platform.api.dto.NotificationSettingsResponse;
 import com.monitor.platform.api.service.NotificationAdminService;
 import com.monitor.platform.common.response.ApiResponse;
+import com.monitor.platform.mail.MailScene;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,12 +15,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
 /**
- * 邮件通知设置接口（余额提醒开关、阈值与收件人）。
+ * 邮件通知设置接口（余额提醒开关/阈值/间隔，以及按事件区分的收件人）。
  *
  * <p>仅 ADMIN 可访问（见 {@code SecurityConfig} 的 {@code /api/v1/settings/**} 规则）。</p>
  */
@@ -46,13 +48,13 @@ public class NotificationController {
         return ApiResponse.of(notificationAdminService.saveSettings(request), null);
     }
 
-    /** 查询全部收件人。 */
+    /** 查询指定事件场景的收件人。 */
     @GetMapping("/recipients")
-    public ApiResponse<List<MailRecipientResponse>> listRecipients() {
-        return ApiResponse.of(notificationAdminService.listRecipients(), null);
+    public ApiResponse<List<MailRecipientResponse>> listRecipients(@RequestParam MailScene scene) {
+        return ApiResponse.of(notificationAdminService.listRecipients(scene), null);
     }
 
-    /** 新增收件人。 */
+    /** 新增指定事件的收件人。 */
     @PostMapping("/recipients")
     public ApiResponse<MailRecipientResponse> addRecipient(
             @Valid @RequestBody MailRecipientRequest request) {

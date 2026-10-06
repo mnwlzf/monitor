@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { MailRecipient, MailSettings, NotificationSettings } from '../types'
+import type { MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -51,6 +51,7 @@ export interface NotificationSettingsInput {
 
 /** 新增收件人的表单载荷。 */
 export interface MailRecipientInput {
+  scene: MailScene
   email: string
   name: string
 }
@@ -68,12 +69,12 @@ export async function saveNotificationSettings(input: NotificationSettingsInput)
   })
 }
 
-/** 查询余额提醒收件人。 */
-export async function listMailRecipients(): Promise<MailRecipient[]> {
-  return apiRequest<MailRecipient[]>('/api/v1/settings/notification/recipients')
+/** 查询指定事件场景的收件人。 */
+export async function listMailRecipients(scene: MailScene): Promise<MailRecipient[]> {
+  return apiRequest<MailRecipient[]>(`/api/v1/settings/notification/recipients?scene=${scene}`)
 }
 
-/** 新增余额提醒收件人。 */
+/** 新增指定事件的收件人。 */
 export async function addMailRecipient(input: MailRecipientInput): Promise<MailRecipient> {
   return apiRequest<MailRecipient>('/api/v1/settings/notification/recipients', {
     method: 'POST',
