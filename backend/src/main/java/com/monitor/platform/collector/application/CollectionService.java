@@ -58,6 +58,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 上游采集业务服务。
@@ -188,12 +189,22 @@ public class CollectionService {
     }
 
     /**
-     * 并发采集所有启用平台下的全部启用账号。
-     *
-     * <p>与到期采集不同，本方法每轮会把所有启用账号提交到
-     * {@code collectionTaskExecutor} 并发执行；单个账号失败只记录日志，不影响其他账号。</p>
+     * 并发采集所有启用平台下的全部启用账号（全量：余额 + 分组 + API Key）。
      */
     public void collectAllAccounts() {
+        collectAllAccounts(CollectionScope.FULL);
+    }
+
+    /**
+     * 按指定范围并发采集所有启用平台下的全部启用账号。
+     *
+     * <p>每轮把所有启用账号提交到 {@code collectionTaskExecutor} 并发执行；单个账号失败只记录日志，
+     * 不影响其他账号。不同范围对应上游互不重叠的接口请求集合，拆成独立任务后可分别控制频率。</p>
+     *
+     * @param scope 采集范围，为空时按全量处理
+     */
+    public void collectAllAccounts(CollectionScope scope) {
+        CollectionScope effectiveScope = scope == null ? CollectionScope.FULL : scope;
         List<AccountEntity> accounts = new ArrayList<>();
         for (PlatformEntity platform : platformRepository.findEnabled()) {
             List<AccountEntity> platformAccounts = accountRepository.findEnabledByPlatformId(platform.getId());
@@ -202,49 +213,91 @@ public class CollectionService {
                     platform.getId(), platform.getPlatformName(), platformAccounts.size());
         }
         if (accounts.isEmpty()) {
-            log.info("没有需要采集的账号");
+            log.info("没有需要采集的账号: scope={}", effectiveScope);
             return;
         }
 
         AtomicInteger successCount = new AtomicInteger();
         AtomicInteger failureCount = new AtomicInteger();
-        log.info("开始并发采集全部账号: accountCount={}", accounts.size());
+        AtomicReference<String> firstError = new AtomicReference<>();
+        log.info("开始并发采集全部账号: scope={}, accountCount={}", effectiveScope, accounts.size());
 
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         for (AccountEntity account : accounts) {
             futures.add(CompletableFuture.runAsync(
-                    () -> collectSafely(account.getId(), successCount, failureCount),
+                    () -> collectSafely(account, effectiveScope, successCount, failureCount, firstError),
                     collectionTaskExecutor));
         }
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        log.info("全部账号并发采集结束: total={}, success={}, failure={}",
-                accounts.size(), successCount.get(), failureCount.get());
-    }
 
-    /**
-     * 捕获单账号采集异常，保证并发任务不会因个别账号失败而中断。
-     */
-    private void collectSafely(Integer accountId, AtomicInteger successCount, AtomicInteger failureCount) {
-        try {
-            collectAccount(accountId);
-            successCount.incrementAndGet();
-        } catch (Exception ex) {
-            failureCount.incrementAndGet();
-            log.error("账号并发采集失败: accountId={}", accountId, ex);
+        int success = successCount.get();
+        int failure = failureCount.get();
+        log.info("全部账号并发采集结束: scope={}, total={}, success={}, failure={}",
+                effectiveScope, accounts.size(), success, failure);
+
+        if (failure > 0) {
+            // 抛出让定时任务框架把状态标记为 FAILED，并把汇总错误展示到任务页面
+            throw new IllegalStateException(String.format(
+                    "共 %d 个账号，成功 %d，失败 %d；首个错误：%s",
+                    accounts.size(), success, failure, firstError.get()));
         }
     }
 
     /**
-     * 采集单个账号，并写入指标、渠道、快照和变更事件。
+     * 捕获单账号采集异常，保证并发任务不会因个别账号失败而中断；
+     * 同时记录首个失败原因，供任务页面展示。
+     */
+    private void collectSafely(AccountEntity account, CollectionScope scope,
+                               AtomicInteger successCount, AtomicInteger failureCount,
+                               AtomicReference<String> firstError) {
+        try {
+            collectAccount(null, account.getId(), scope);
+            successCount.incrementAndGet();
+        } catch (Exception ex) {
+            failureCount.incrementAndGet();
+            String display = StrUtil.blankToDefault(account.getUsername(), account.getEmail());
+            if (StrUtil.isBlank(display)) {
+                display = "账号 " + account.getId();
+            }
+            firstError.compareAndSet(null, display + "：" + rootMessage(ex));
+            log.error("账号并发采集失败: accountId={}, scope={}", account.getId(), scope, ex);
+        }
+    }
+
+    /**
+     * 取最深层原因的可读信息，避免只看到「账号采集失败: 1」这类外层包装。
+     */
+    private String rootMessage(Throwable ex) {
+        Throwable current = ex;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return StrUtil.isBlank(message) ? current.getClass().getSimpleName() : message;
+    }
+
+    /**
+     * 采集单个账号（全量：余额 + 分组 + API Key），并写入指标、渠道、快照和变更事件。
      */
     public void collectAccount(Integer accountId) {
         collectAccount(null, accountId);
     }
 
     /**
-     * 采集指定平台下的单个账号。
+     * 采集指定平台下的单个账号（全量）。
      */
     public void collectAccount(Integer platformId, Integer accountId) {
+        collectAccount(platformId, accountId, CollectionScope.FULL);
+    }
+
+    /**
+     * 按指定范围采集单个账号。
+     *
+     * <p>只有包含余额的范围（BALANCE、FULL）才会更新账号的最近采集时间与健康状态，
+     * 分组、API Key 任务只写各自的批次记录，避免互相覆盖账号状态。</p>
+     */
+    public void collectAccount(Integer platformId, Integer accountId, CollectionScope scope) {
+        CollectionScope effectiveScope = scope == null ? CollectionScope.FULL : scope;
         AccountEntity account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new IllegalArgumentException("账号不存在: " + accountId));
         if (platformId != null && !platformId.equals(account.getPlatformId())) {
@@ -254,24 +307,26 @@ public class CollectionService {
                 .orElseThrow(() -> new IllegalArgumentException("账号未关联平台: " + accountId));
 
         String platformType = platform.getPlatformType();
-        log.info("账号采集开始: accountId={}, platformId={}, platformType={}, account={}",
-                accountId, platform.getId(), platformType,
+        log.info("账号采集开始: accountId={}, platformId={}, platformType={}, scope={}, account={}",
+                accountId, platform.getId(), platformType, effectiveScope,
                 StrUtil.blankToDefault(account.getUsername(), account.getEmail()));
 
-        CollectionRunEntity run = collectionRunRepository.start(accountId, platformType, "{}");
-        log.info("采集批次已创建: accountId={}, runId={}", accountId, run.getId());
+        CollectionRunEntity run = collectionRunRepository.start(accountId, platformType, effectiveScope.name(), "{}");
+        log.info("采集批次已创建: accountId={}, runId={}, scope={}", accountId, run.getId(), effectiveScope);
         long startedMillis = System.currentTimeMillis();
 
         try {
             if (PLATFORM_NEW_API.equalsIgnoreCase(platformType)) {
-                collectNewApi(account, platform, run.getId());
+                collectNewApi(account, platform, run.getId(), effectiveScope);
             } else if (PLATFORM_SUB2_API.equalsIgnoreCase(platformType)) {
-                collectSub2Api(account, platform, run.getId());
+                collectSub2Api(account, platform, run.getId(), effectiveScope);
             } else {
                 throw new IllegalArgumentException("不支持的平台类型: " + platformType);
             }
 
-            markAccountSuccess(account);
+            if (effectiveScope.includesBalance()) {
+                markAccountSuccess(account);
+            }
             long durationMs = System.currentTimeMillis() - startedMillis;
             collectionRunRepository.finish(
                     run.getId(),
@@ -281,9 +336,12 @@ public class CollectionService {
                     null,
                     null
             );
-            log.info("账号采集成功: accountId={}, runId={}, durationMs={}", accountId, run.getId(), durationMs);
+            log.info("账号采集成功: accountId={}, runId={}, scope={}, durationMs={}",
+                    accountId, run.getId(), effectiveScope, durationMs);
         } catch (Exception ex) {
-            markAccountFailure(account, ex);
+            if (effectiveScope.includesBalance()) {
+                markAccountFailure(account, ex);
+            }
             long durationMs = System.currentTimeMillis() - startedMillis;
             collectionRunRepository.finish(
                     run.getId(),
@@ -293,45 +351,97 @@ public class CollectionService {
                     "COLLECTION_FAILED",
                     truncate(ex.getMessage(), MAX_ERROR_LENGTH)
             );
-            log.error("账号采集失败: accountId={}, runId={}, durationMs={}",
-                    accountId, run.getId(), durationMs, ex);
+            log.error("账号采集失败: accountId={}, runId={}, scope={}, durationMs={}",
+                    accountId, run.getId(), effectiveScope, durationMs, ex);
             throw new IllegalStateException("账号采集失败: " + accountId, ex);
         }
     }
 
     /**
-     * 采集 New API 账号：获取当前用户信息、保存指标与用量看板，再同步可用分组。
+     * 按范围采集 New API 账号：余额、分组、API Key 各自独立，避免重复请求上游。
      */
-    private void collectNewApi(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
+    private void collectNewApi(AccountEntity account, PlatformEntity platform, Long collectionRunId,
+                               CollectionScope scope) {
+        if (scope.includesBalance()) {
+            collectNewApiBalance(account, platform, collectionRunId);
+        }
+        if (scope.includesGroups()) {
+            collectNewApiGroups(account, platform, collectionRunId);
+        }
+        if (scope.includesApiKeys()) {
+            collectNewApiApiKeys(account, platform, collectionRunId);
+        }
+    }
+
+    /**
+     * New API 余额采集：{@code /api/user/self} 同时返回余额与用量看板，一次请求写两张快照。
+     */
+    private void collectNewApiBalance(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
         String password = credentialService.resolvePassword(account.getId());
         String username = StrUtil.blankToDefault(account.getUsername(), account.getEmail());
         String baseUrl = platform.getUrl();
-        log.info("New API 账号信息获取开始: accountId={}, baseUrl={}, username={}",
+        log.info("New API 余额采集开始: accountId={}, baseUrl={}, username={}",
                 account.getId(), baseUrl, username);
 
         NewApiSelfResponse selfResponse = newApiAdapter.fetchSelf(baseUrl, username, password);
         saveNewApiMetric(account, collectionRunId, selfResponse);
         saveNewApiUsageDashboard(account, collectionRunId, selfResponse);
-        log.info("New API 账号信息获取成功: accountId={}, userId={}, quota={}, usedQuota={}",
+        log.info("New API 余额采集成功: accountId={}, userId={}, quota={}, usedQuota={}",
                 account.getId(), selfResponse.data().id(), selfResponse.data().quota(), selfResponse.data().usedQuota());
         if (selfResponse.data().id() != null) {
             account.setExternalUserId(String.valueOf(selfResponse.data().id()));
         }
+    }
+
+    /**
+     * New API 分组/渠道倍率采集：{@code /api/user/self/groups}。
+     */
+    private void collectNewApiGroups(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
+        String password = credentialService.resolvePassword(account.getId());
+        String username = StrUtil.blankToDefault(account.getUsername(), account.getEmail());
+        String baseUrl = platform.getUrl();
+        log.info("New API 分组采集开始: accountId={}, baseUrl={}", account.getId(), baseUrl);
 
         NewApiGroupsResponse groupsResponse = newApiAdapter.fetchGroups(baseUrl, username, password);
         syncNewApiGroups(account, platform.getPlatformType(), collectionRunId, groupsResponse);
+    }
+
+    /**
+     * New API API Key 采集：{@code /api/token/}（分页）+ 每个 Key 的明文接口。
+     */
+    private void collectNewApiApiKeys(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
+        String password = credentialService.resolvePassword(account.getId());
+        String username = StrUtil.blankToDefault(account.getUsername(), account.getEmail());
+        String baseUrl = platform.getUrl();
+        log.info("New API API Key 采集开始: accountId={}, baseUrl={}", account.getId(), baseUrl);
 
         syncNewApiApiKeys(account, platform.getPlatformType(), collectionRunId, baseUrl, username, password);
     }
 
     /**
-     * 采集 Sub2API 账号：获取用户资料、保存指标、同步分组并写入用量看板。
+     * 按范围采集 Sub2API 账号：余额（含用量看板）、分组、API Key 各自独立。
      */
-    private void collectSub2Api(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
+    private void collectSub2Api(AccountEntity account, PlatformEntity platform, Long collectionRunId,
+                                CollectionScope scope) {
+        if (scope.includesBalance()) {
+            collectSub2ApiBalance(account, platform, collectionRunId);
+        }
+        if (scope.includesGroups()) {
+            collectSub2ApiGroups(account, platform, collectionRunId);
+        }
+        if (scope.includesApiKeys()) {
+            collectSub2ApiApiKeys(account, platform, collectionRunId);
+        }
+    }
+
+    /**
+     * Sub2API 余额采集：{@code /api/v1/auth/me} 取余额，{@code /api/v1/usage/dashboard/stats} 取用量看板。
+     */
+    private void collectSub2ApiBalance(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
         String password = credentialService.resolvePassword(account.getId());
         String email = account.getEmail();
         String baseUrl = platform.getUrl();
-        log.info("Sub2API 账号信息获取开始: accountId={}, baseUrl={}, email={}",
+        log.info("Sub2API 余额采集开始: accountId={}, baseUrl={}, email={}",
                 account.getId(), baseUrl, email);
 
         Sub2ProfileResponse profileResponse = sub2ApiAdapter.fetchProfile(baseUrl, email, password);
@@ -339,19 +449,39 @@ public class CollectionService {
             throw new IllegalStateException("Sub2API 个人信息响应缺少 data");
         }
         saveSub2Metric(account, collectionRunId, profileResponse);
-        log.info("Sub2API 账号信息获取成功: accountId={}, userId={}, balance={}, frozenBalance={}",
+        log.info("Sub2API 余额采集成功: accountId={}, userId={}, balance={}, frozenBalance={}",
                 account.getId(), profileResponse.data().id(),
                 profileResponse.data().balance(), profileResponse.data().frozenBalance());
         if (profileResponse.data().id() != null) {
             account.setExternalUserId(String.valueOf(profileResponse.data().id()));
         }
 
-        Sub2GroupsResponse groupsResponse = sub2ApiAdapter.fetchAvailableGroups(baseUrl, email, password);
-        syncSub2Groups(account, platform.getPlatformType(), collectionRunId, groupsResponse);
-
         Sub2UsageDashboardResponse usageResponse =
                 sub2ApiAdapter.fetchUsageDashboardStats(baseUrl, email, password);
         saveSub2UsageDashboard(account, collectionRunId, profileResponse, usageResponse);
+    }
+
+    /**
+     * Sub2API 分组/渠道倍率采集：{@code /api/v1/groups/available}。
+     */
+    private void collectSub2ApiGroups(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
+        String password = credentialService.resolvePassword(account.getId());
+        String email = account.getEmail();
+        String baseUrl = platform.getUrl();
+        log.info("Sub2API 分组采集开始: accountId={}, baseUrl={}", account.getId(), baseUrl);
+
+        Sub2GroupsResponse groupsResponse = sub2ApiAdapter.fetchAvailableGroups(baseUrl, email, password);
+        syncSub2Groups(account, platform.getPlatformType(), collectionRunId, groupsResponse);
+    }
+
+    /**
+     * Sub2API API Key 采集：{@code /api/v1/keys} + {@code /api/v1/usage/dashboard/api-keys-usage}。
+     */
+    private void collectSub2ApiApiKeys(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
+        String password = credentialService.resolvePassword(account.getId());
+        String email = account.getEmail();
+        String baseUrl = platform.getUrl();
+        log.info("Sub2API API Key 采集开始: accountId={}, baseUrl={}", account.getId(), baseUrl);
 
         syncSub2ApiApiKeys(account, platform.getPlatformType(), collectionRunId, baseUrl, email, password);
     }

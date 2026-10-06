@@ -21,6 +21,8 @@ public class CollectionRunEntity {
     private Integer accountId;
     /** 平台类型。 */
     private String platformType;
+    /** 采集范围：FULL、BALANCE、GROUPS、API_KEYS。 */
+    private String scope;
     /** 批次状态，例如 RUNNING、SUCCESS、FAILED。 */
     private String status;
     /** 开始时间。 */
@@ -43,6 +45,8 @@ public class CollectionRunEntity {
     public void setAccountId(Integer accountId) { this.accountId = accountId; }
     public String getPlatformType() { return platformType; }
     public void setPlatformType(String platformType) { this.platformType = platformType; }
+    public String getScope() { return scope; }
+    public void setScope(String scope) { this.scope = scope; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public OffsetDateTime getStartedAt() { return startedAt; }

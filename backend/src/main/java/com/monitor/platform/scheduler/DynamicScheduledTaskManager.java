@@ -129,12 +129,23 @@ public class DynamicScheduledTaskManager implements ApplicationRunner {
                         taskId, task.getTaskName(), System.currentTimeMillis() - started);
             } catch (Exception ex) {
                 scheduledTaskRepository.updateRunStatus(taskId, java.time.OffsetDateTime.now(), "FAILED",
-                        truncate(ex.getMessage(), 500));
+                        errorMessage(ex));
                 log.error("定时任务执行失败: taskId={}, taskName={}", taskId, task.getTaskName(), ex);
             }
         } finally {
             runningTaskIds.remove(taskId);
         }
+    }
+
+    /**
+     * 组装任务失败信息，message 为空时回退到异常类名，避免页面只显示空白。
+     */
+    private String errorMessage(Exception ex) {
+        String message = ex.getMessage();
+        if (message == null || message.isBlank()) {
+            message = ex.getClass().getSimpleName();
+        }
+        return truncate(message, 500);
     }
 
     private String truncate(String value, int maxLength) {

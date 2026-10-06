@@ -6,7 +6,10 @@
         <h2>定时任务</h2>
         <p>页面管理任务类型、Cron 表达式和启用状态，修改后即时生效，无需重启。</p>
       </div>
-      <el-button v-if="canWrite !== false" type="primary" :icon="Plus" @click="openCreate">新增任务</el-button>
+      <div class="admin-page-heading-actions">
+        <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
+        <el-button v-if="canWrite !== false" type="primary" :icon="Plus" @click="openCreate">新增任务</el-button>
+      </div>
     </div>
 
     <el-card shadow="never" class="admin-card">
@@ -22,15 +25,18 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="最近执行" min-width="200">
+        <el-table-column label="最近执行" min-width="260">
           <template #default="{ row }">
             <div class="admin-task-run">
               <span v-if="row.lastRunAt">{{ formatDate(row.lastRunAt) }}</span>
               <span v-else class="muted">—</span>
               <el-tag v-if="row.lastRunStatus" size="small" :type="statusType(row.lastRunStatus)">
-                {{ row.lastRunStatus }}
+                {{ statusLabel(row.lastRunStatus) }}
               </el-tag>
             </div>
+            <el-tooltip v-if="row.lastRunMessage" :content="row.lastRunMessage" placement="top" :show-after="150">
+              <div class="admin-task-error">{{ row.lastRunMessage }}</div>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
@@ -85,7 +91,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Delete, Plus, VideoPlay } from '@element-plus/icons-vue'
+import { Delete, Plus, Refresh, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { createScheduledTask, deleteScheduledTask, listScheduledTaskHandlers, listScheduledTasks, triggerScheduledTask, updateScheduledTask, type ScheduledTaskInput } from '../api/scheduledTasks'
 import type { ScheduledTask, ScheduledTaskHandler } from '../types'
@@ -217,6 +223,13 @@ async function load() {
   }
 }
 
+function statusLabel(status: string): string {
+  if (status === 'SUCCESS') return '成功'
+  if (status === 'FAILED') return '失败'
+  if (status === 'RUNNING') return '执行中'
+  return status
+}
+
 function statusType(status: string): 'success' | 'danger' | 'warning' | 'info' {
   if (status === 'SUCCESS') return 'success'
   if (status === 'FAILED') return 'danger'
@@ -231,3 +244,24 @@ function formatDate(value: string) {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.admin-task-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-task-error {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #c45656;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+  cursor: default;
+}
+</style>

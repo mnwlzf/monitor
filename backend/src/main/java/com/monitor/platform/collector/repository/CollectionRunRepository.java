@@ -21,12 +21,22 @@ public class CollectionRunRepository {
     }
 
     /**
-     * 创建 RUNNING 状态的采集批次。
+     * 创建 RUNNING 状态的采集批次（默认全量）。
      */
     public CollectionRunEntity start(Integer accountId, String platformType, String metadata) {
+        return start(accountId, platformType, "FULL", metadata);
+    }
+
+    /**
+     * 创建 RUNNING 状态的采集批次，并记录采集范围。
+     *
+     * @param scope 采集范围：FULL、BALANCE、GROUPS、API_KEYS
+     */
+    public CollectionRunEntity start(Integer accountId, String platformType, String scope, String metadata) {
         CollectionRunEntity entity = new CollectionRunEntity();
         entity.setAccountId(accountId);
         entity.setPlatformType(platformType);
+        entity.setScope(scope == null ? "FULL" : scope);
         entity.setStatus("RUNNING");
         entity.setStartedAt(OffsetDateTime.now());
         entity.setMetadata(metadata == null ? "{}" : metadata);
