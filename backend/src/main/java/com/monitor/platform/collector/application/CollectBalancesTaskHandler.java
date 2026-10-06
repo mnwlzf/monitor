@@ -1,6 +1,7 @@
 package com.monitor.platform.collector.application;
 
 import com.monitor.platform.common.schedule.ScheduledTaskHandler;
+import com.monitor.platform.mail.BalanceAlertService;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,9 +15,12 @@ import org.springframework.stereotype.Component;
 public class CollectBalancesTaskHandler implements ScheduledTaskHandler {
 
     private final CollectionService collectionService;
+    private final BalanceAlertService balanceAlertService;
 
-    public CollectBalancesTaskHandler(CollectionService collectionService) {
+    public CollectBalancesTaskHandler(CollectionService collectionService,
+                                      BalanceAlertService balanceAlertService) {
         this.collectionService = collectionService;
+        this.balanceAlertService = balanceAlertService;
     }
 
     @Override
@@ -36,6 +40,11 @@ public class CollectBalancesTaskHandler implements ScheduledTaskHandler {
 
     @Override
     public void execute() {
-        collectionService.collectAllAccounts(CollectionScope.BALANCE);
+        try {
+            collectionService.collectAllAccounts(CollectionScope.BALANCE);
+        } finally {
+            // 采集完成（含部分失败）后检查平台余额，按需发送提醒邮件
+            balanceAlertService.checkAndNotify();
+        }
     }
 }

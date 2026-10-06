@@ -22,7 +22,7 @@ class MailSettingsMapperXmlTest {
         Resource[] resources = new PathMatchingResourcePatternResolver()
                 .getResources("classpath*:/mapper/mail/*.xml");
 
-        assertEquals(1, resources.length);
+        assertEquals(3, resources.length);
         for (Resource resource : resources) {
             try (InputStream inputStream = resource.getInputStream()) {
                 new XMLMapperBuilder(inputStream, configuration, resource.getFilename(),
@@ -32,5 +32,9 @@ class MailSettingsMapperXmlTest {
 
         assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailSettingsMapper.selectSettings"));
         assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailSettingsMapper.upsertSettings"));
+        assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailRecipientMapper.selectAll"));
+        assertTrue(configuration.hasStatement("com.monitor.platform.mail.MailRecipientMapper.insert"));
+        assertTrue(configuration.hasStatement("com.monitor.platform.mail.NotificationSettingsMapper.selectSettings"));
+        assertTrue(configuration.hasStatement("com.monitor.platform.mail.NotificationSettingsMapper.upsertSettings"));
     }
 }

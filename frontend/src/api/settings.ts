@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { MailSettings } from '../types'
+import type { MailRecipient, MailSettings, NotificationSettings } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -40,4 +40,48 @@ export async function sendTestMail(to: string, settings?: MailSettingsInput): Pr
     method: 'POST',
     body: JSON.stringify({ to, settings: settings ?? null }),
   })
+}
+
+/** 保存余额提醒设置的表单载荷。 */
+export interface NotificationSettingsInput {
+  balanceAlertEnabled: boolean
+  balanceThreshold: number
+  alertIntervalMinutes: number
+}
+
+/** 新增收件人的表单载荷。 */
+export interface MailRecipientInput {
+  email: string
+  name: string
+}
+
+/** 读取余额提醒设置。 */
+export async function getNotificationSettings(): Promise<NotificationSettings> {
+  return apiRequest<NotificationSettings>('/api/v1/settings/notification')
+}
+
+/** 保存余额提醒设置。 */
+export async function saveNotificationSettings(input: NotificationSettingsInput): Promise<NotificationSettings> {
+  return apiRequest<NotificationSettings>('/api/v1/settings/notification', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+/** 查询余额提醒收件人。 */
+export async function listMailRecipients(): Promise<MailRecipient[]> {
+  return apiRequest<MailRecipient[]>('/api/v1/settings/notification/recipients')
+}
+
+/** 新增余额提醒收件人。 */
+export async function addMailRecipient(input: MailRecipientInput): Promise<MailRecipient> {
+  return apiRequest<MailRecipient>('/api/v1/settings/notification/recipients', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+/** 删除余额提醒收件人。 */
+export async function deleteMailRecipient(id: number): Promise<void> {
+  await apiRequest<void>(`/api/v1/settings/notification/recipients/${id}`, { method: 'DELETE' })
 }

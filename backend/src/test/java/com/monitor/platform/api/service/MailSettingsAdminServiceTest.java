@@ -7,6 +7,7 @@ import com.monitor.platform.mail.MailService;
 import com.monitor.platform.mail.MailSettingsEntity;
 import com.monitor.platform.mail.MailSettingsMapper;
 import com.monitor.platform.mail.MailSettingsRepository;
+import com.monitor.platform.mail.SmtpConfigProvider;
 import org.junit.jupiter.api.Test;
 
 import java.util.Base64;
@@ -23,7 +24,7 @@ class MailSettingsAdminServiceTest {
     private final MailSettingsRepository repository = new MailSettingsRepository(mapper);
     private final CredentialCipher cipher = new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32]));
     private final MailSettingsAdminService service =
-            new MailSettingsAdminService(repository, new MailService(), cipher);
+            new MailSettingsAdminService(repository, new MailService(), cipher, new SmtpConfigProvider(repository, cipher));
 
     @Test
     void savesAndEncryptsPasswordWithoutReturningIt() {

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Properties;
 
 /**
@@ -45,21 +46,31 @@ public class MailService {
     }
 
     /**
-     * 发送 HTML 邮件。
+     * 发送 HTML 邮件给单个收件人。
+     */
+    public void send(SmtpConfig config, String to, String subject, String htmlBody) {
+        send(config, List.of(to), subject, htmlBody);
+    }
+
+    /**
+     * 发送 HTML 邮件给多个收件人（收件人互相可见）。
      *
      * @param config    已解密的 SMTP 配置
-     * @param to        收件人地址
+     * @param to        收件人地址列表
      * @param subject   邮件主题
      * @param htmlBody  邮件正文（HTML）
      */
-    public void send(SmtpConfig config, String to, String subject, String htmlBody) {
+    public void send(SmtpConfig config, List<String> to, String subject, String htmlBody) {
         requireConfigured(config);
+        if (to == null || to.isEmpty()) {
+            throw BusinessException.of("邮件收件人为空");
+        }
         try {
             JavaMailSenderImpl sender = buildSender(config);
             MimeMessage message = sender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, StandardCharsets.UTF_8.name());
             helper.setFrom(config.resolveFrom(), config.fromName());
-            helper.setTo(to);
+            helper.setTo(to.toArray(new String[0]));
             helper.setSubject(subject);
             helper.setText(htmlBody, true);
             sender.send(message);

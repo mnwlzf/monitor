@@ -9,6 +9,7 @@ import com.monitor.platform.mail.MailService;
 import com.monitor.platform.mail.MailSettingsEntity;
 import com.monitor.platform.mail.MailSettingsRepository;
 import com.monitor.platform.mail.SmtpConfig;
+import com.monitor.platform.mail.SmtpConfigProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.HtmlUtils;
@@ -30,13 +31,16 @@ public class MailSettingsAdminService {
     private final MailSettingsRepository mailSettingsRepository;
     private final MailService mailService;
     private final CredentialCipher credentialCipher;
+    private final SmtpConfigProvider smtpConfigProvider;
 
     public MailSettingsAdminService(MailSettingsRepository mailSettingsRepository,
                                     MailService mailService,
-                                    CredentialCipher credentialCipher) {
+                                    CredentialCipher credentialCipher,
+                                    SmtpConfigProvider smtpConfigProvider) {
         this.mailSettingsRepository = mailSettingsRepository;
         this.mailService = mailService;
         this.credentialCipher = credentialCipher;
+        this.smtpConfigProvider = smtpConfigProvider;
     }
 
     /** 读取当前 SMTP 设置（不含密码明文）。 */
@@ -110,23 +114,7 @@ public class MailSettingsAdminService {
     }
 
     private SmtpConfig toConfig(MailSettingsEntity entity) {
-        String password = null;
-        if (entity.hasPassword()) {
-            password = credentialCipher.decrypt(
-                    entity.getPasswordEncryptedPayload(),
-                    entity.getPasswordInitializationVector(),
-                    entity.getPasswordEncryptionAlgorithm(),
-                    entity.getPasswordKeyVersion());
-        }
-        return new SmtpConfig(
-                Boolean.TRUE.equals(entity.getEnabled()),
-                entity.getHost(),
-                entity.getPort() == null ? DEFAULT_PORT : entity.getPort(),
-                entity.getUsername(),
-                password,
-                entity.getFromAddress(),
-                entity.getFromName(),
-                Boolean.TRUE.equals(entity.getUseTls()));
+        return smtpConfigProvider.toConfig(entity);
     }
 
     private MailSettingsResponse toResponse(MailSettingsEntity entity) {

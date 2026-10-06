@@ -1,5 +1,6 @@
 package com.monitor.platform.collector.application;
 
+import com.monitor.platform.mail.BalanceAlertService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -14,10 +15,11 @@ import static org.mockito.Mockito.verify;
 class CollectionTaskHandlerTest {
 
     private final CollectionService collectionService = mock(CollectionService.class);
+    private final BalanceAlertService balanceAlertService = mock(BalanceAlertService.class);
 
     @Test
     void handlersRouteToExpectedScope() {
-        new CollectBalancesTaskHandler(collectionService).execute();
+        new CollectBalancesTaskHandler(collectionService, balanceAlertService).execute();
         verify(collectionService).collectAllAccounts(CollectionScope.BALANCE);
 
         new CollectGroupsTaskHandler(collectionService).execute();
@@ -33,7 +35,7 @@ class CollectionTaskHandlerTest {
     @Test
     void handlerCodesAreDistinctAndStable() {
         List<String> codes = List.of(
-                new CollectBalancesTaskHandler(collectionService).code(),
+                new CollectBalancesTaskHandler(collectionService, balanceAlertService).code(),
                 new CollectGroupsTaskHandler(collectionService).code(),
                 new CollectApiKeysTaskHandler(collectionService).code(),
                 new CollectAllAccountsTaskHandler(collectionService).code());

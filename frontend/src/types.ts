@@ -177,3 +177,24 @@ export interface MailSettings {
   useTls: boolean
   updatedAt: string | null
 }
+
+/**
+ * 余额提醒收件人。
+ */
+export interface MailRecipient {
+  id: number
+  email: string
+  name: string | null
+  createdAt: string | null
+}
+
+/**
+ * 邮件通知设置（余额提醒）。
+ */
+export interface NotificationSettings {
+  balanceAlertEnabled: boolean
+  balanceThreshold: number
+  alertIntervalMinutes: number
+  recipientCount: number
+  updatedAt: string | null
+}

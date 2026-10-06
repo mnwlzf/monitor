@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.mail.NotificationSettingsMapper">
+
+    <resultMap id="NotificationSettingsResultMap" type="com.monitor.platform.mail.NotificationSettingsEntity">
+        <id column="id" property="id"/>
+        <result column="balance_alert_enabled" property="balanceAlertEnabled"/>
+        <result column="balance_threshold" property="balanceThreshold"/>
+        <result column="alert_interval_minutes" property="alertIntervalMinutes"/>
+        <result column="last_alert_at" property="lastAlertAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectSettings" resultMap="NotificationSettingsResultMap">
+        SELECT id, balance_alert_enabled, balance_threshold, alert_interval_minutes, last_alert_at, updated_at
+        FROM notification_settings
+        WHERE id = 1
+    </select>
+
+    <insert id="upsertSettings">
+        INSERT INTO notification_settings (
+            id, balance_alert_enabled, balance_threshold, alert_interval_minutes, last_alert_at, updated_at
+        ) VALUES (
+            1, #{balanceAlertEnabled}, #{balanceThreshold}, #{alertIntervalMinutes}, #{lastAlertAt}, #{updatedAt}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            balance_alert_enabled = EXCLUDED.balance_alert_enabled,
+            balance_threshold = EXCLUDED.balance_threshold,
+            alert_interval_minutes = EXCLUDED.alert_interval_minutes,
+            last_alert_at = EXCLUDED.last_alert_at,
+            updated_at = EXCLUDED.updated_at
+    </insert>
+</mapper>

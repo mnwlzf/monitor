@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.mail.MailRecipientMapper">
+
+    <resultMap id="MailRecipientResultMap" type="com.monitor.platform.mail.MailRecipientEntity">
+        <id column="id" property="id"/>
+        <result column="email" property="email"/>
+        <result column="name" property="name"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <select id="selectAll" resultMap="MailRecipientResultMap">
+        SELECT id, email, name, created_at
+        FROM mail_recipients
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectByEmail" resultMap="MailRecipientResultMap">
+        SELECT id, email, name, created_at
+        FROM mail_recipients
+        WHERE lower(email) = lower(#{email})
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO mail_recipients (email, name, created_at)
+        VALUES (#{email}, #{name}, #{createdAt})
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM mail_recipients WHERE id = #{id}
+    </delete>
+</mapper>
