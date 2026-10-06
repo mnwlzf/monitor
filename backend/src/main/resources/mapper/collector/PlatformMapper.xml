@@ -77,4 +77,11 @@
           AND deleted_at IS NULL
         ORDER BY id
     </select>
+
+    <select id="selectAllPlatforms" resultMap="PlatformResultMap">
+        SELECT <include refid="PlatformColumns"/>
+        FROM platforms
+        WHERE deleted_at IS NULL
+        ORDER BY id
+    </select>
 </mapper>

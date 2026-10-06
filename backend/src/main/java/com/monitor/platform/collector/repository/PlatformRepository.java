@@ -59,6 +59,13 @@ public class PlatformRepository {
     }
 
     /**
+     * 查询所有未删除平台（含已停用），供管理页面展示。
+     */
+    public List<PlatformEntity> findAll() {
+        return platformMapper.selectAllPlatforms();
+    }
+
+    /**
      * 软删除平台，保留历史账号和快照关联。
      */
     public void softDelete(Integer id) {

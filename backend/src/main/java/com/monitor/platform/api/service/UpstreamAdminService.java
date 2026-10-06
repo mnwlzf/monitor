@@ -119,12 +119,12 @@ public class UpstreamAdminService {
     }
 
     /**
-     * 查询所有未删除且启用的平台。
+     * 查询所有未删除平台（含已停用），供管理页面展示与启用/停用切换。
      *
      * @return 平台列表
      */
     public List<PlatformResponse> listPlatforms() {
-        return platformRepository.findEnabled().stream().map(this::toPlatformResponse).toList();
+        return platformRepository.findAll().stream().map(this::toPlatformResponse).toList();
     }
 
     /**
@@ -248,6 +248,9 @@ public class UpstreamAdminService {
         }
         if (request.authType() != null && !request.authType().isBlank()) {
             entity.setAuthType(request.authType());
+        }
+        if (request.status() != null) {
+            entity.setStatus(request.status());
         }
 
         accountRepository.save(entity);

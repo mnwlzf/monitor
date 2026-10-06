@@ -25,6 +25,9 @@ public interface PlatformMapper  {
     /** 软删除平台。 */
     int softDeletePlatform(@Param("id") Integer id, @Param("deletedAt") java.time.OffsetDateTime deletedAt);
 
-    /** 查询所有启用平台。 */
+    /** 查询所有启用平台，供采集调度使用。 */
     List<PlatformEntity> selectEnabledPlatforms();
+
+    /** 查询所有未删除平台（含已停用），供管理页面展示。 */
+    List<PlatformEntity> selectAllPlatforms();
 }

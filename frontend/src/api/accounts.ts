@@ -8,10 +8,11 @@ export interface CreateAccountInput {
 }
 
 export interface UpdateAccountInput {
-  displayName: string
-  loginName: string
-  password: string
+  displayName?: string
+  loginName?: string
+  password?: string
   authType?: string
+  status?: boolean
 }
 
 interface InstanceDto {
@@ -70,16 +71,18 @@ export async function createAccountRecord(platform: Platform, input: CreateAccou
 }
 
 export async function updateAccountRecord(account: Account, input: UpdateAccountInput): Promise<Account> {
+  const body: Record<string, unknown> = {}
+  if (input.displayName !== undefined) body.displayName = input.displayName
+  if (input.loginName !== undefined) body.loginName = input.loginName
+  if (input.password) body.password = input.password
+  if (input.authType) body.authType = input.authType
+  if (input.status !== undefined) body.status = input.status
+
   const updated = await apiRequest<AccountDto>(
     `/api/v1/upstream/instances/${account.platformId}/accounts/${account.id}`,
     {
       method: 'PUT',
-      body: JSON.stringify({
-        displayName: input.displayName,
-        loginName: input.loginName,
-        password: input.password,
-        authType: input.authType || 'PASSWORD',
-      }),
+      body: JSON.stringify(body),
     },
   )
 
@@ -129,22 +132,25 @@ export async function createPlatformRecord(input: CreatePlatformInput): Promise<
 }
 
 export interface UpdatePlatformInput {
-  name: string
-  baseUrl: string
-  type: PlatformType
+  name?: string
+  baseUrl?: string
+  type?: PlatformType
+  status?: boolean
 }
 
 /**
  * 更新平台实例。平台类型/URL 变更后，其下所有账号按新配置采集。
  */
 export async function updatePlatformRecord(platform: Platform, input: UpdatePlatformInput): Promise<Platform> {
+  const body: Record<string, unknown> = {}
+  if (input.name !== undefined) body.name = input.name
+  if (input.baseUrl !== undefined) body.baseUrl = input.baseUrl
+  if (input.type !== undefined) body.platform = input.type
+  if (input.status !== undefined) body.status = input.status
+
   const row = await apiRequest<InstanceDto>(`/api/v1/upstream/instances/${platform.id}`, {
     method: 'PUT',
-    body: JSON.stringify({
-      name: input.name,
-      baseUrl: input.baseUrl,
-      platform: input.type,
-    }),
+    body: JSON.stringify(body),
   })
 
   return {
@@ -203,6 +209,7 @@ function mapAccount(instance: InstanceDto, row: AccountDto, fallbackType: Platfo
     platformType: (row.platformType as PlatformType) || fallbackType,
     displayName: row.displayName || row.loginName || `账号 ${row.id}`,
     loginName: row.loginName || '',
+    status: row.status ?? true,
     balance: Number(row.balance ?? 0),
     frozenBalance: Number(row.frozenBalance ?? 0),
     quota: Number(row.quota ?? 0),

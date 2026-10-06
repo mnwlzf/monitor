@@ -17,6 +17,7 @@ export interface Account {
   platformType: PlatformType
   displayName: string
   loginName: string
+  status: boolean
   balance: number
   frozenBalance: number
   quota: number

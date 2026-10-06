@@ -17,6 +17,8 @@ import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.CollectionRunEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.security.CredentialCipher;
+import com.monitor.platform.common.exception.BusinessException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -30,20 +32,35 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 采集失败上报测试：单个账号失败时，任务应抛出带汇总与根因的错误，供页面展示。
+ * 采集启停与失败上报测试。
+ *
+ * <ul>
+ *   <li>停用的平台/账号不参与采集；</li>
+ *   <li>单个账号失败时，任务抛出带汇总与根因的错误，供页面展示。</li>
+ * </ul>
  */
 class CollectionFailureReportingTest {
 
-    @Test
-    void collectAllAccountsSurfacesPartialFailureWithRootCause() {
-        PlatformRepository platformRepository = mock(PlatformRepository.class);
-        AccountRepository accountRepository = mock(AccountRepository.class);
-        AccountCredentialService credentialService = mock(AccountCredentialService.class);
-        CollectionRunRepository collectionRunRepository = mock(CollectionRunRepository.class);
-        NewApiAdapter newApiAdapter = mock(NewApiAdapter.class);
+    private PlatformRepository platformRepository;
+    private AccountRepository accountRepository;
+    private AccountCredentialService credentialService;
+    private CollectionRunRepository collectionRunRepository;
+    private NewApiAdapter newApiAdapter;
+    private CollectionService service;
+
+    private PlatformEntity platform;
+    private AccountEntity account;
+
+    @BeforeEach
+    void setUp() {
+        platformRepository = mock(PlatformRepository.class);
+        accountRepository = mock(AccountRepository.class);
+        credentialService = mock(AccountCredentialService.class);
+        collectionRunRepository = mock(CollectionRunRepository.class);
+        newApiAdapter = mock(NewApiAdapter.class);
 
         Executor synchronousExecutor = Runnable::run;
-        CollectionService service = new CollectionService(
+        service = new CollectionService(
                 accountRepository,
                 platformRepository,
                 credentialService,
@@ -61,26 +78,33 @@ class CollectionFailureReportingTest {
                 new ObjectMapper(),
                 synchronousExecutor);
 
-        PlatformEntity platform = new PlatformEntity();
+        platform = new PlatformEntity();
         platform.setId(1);
+        platform.setPlatformName("测试平台");
         platform.setPlatformType("newapi");
         platform.setUrl("https://upstream.example.com");
-        when(platformRepository.findEnabled()).thenReturn(List.of(platform));
-        when(platformRepository.findById(1)).thenReturn(Optional.of(platform));
+        platform.setStatus(true);
 
-        AccountEntity account = new AccountEntity();
+        account = new AccountEntity();
         account.setId(7);
         account.setPlatformId(1);
         account.setUsername("tester");
         account.setEmail("tester@example.com");
-        when(accountRepository.findEnabledByPlatformId(1)).thenReturn(List.of(account));
+        account.setStatus(true);
+
+        when(platformRepository.findById(1)).thenReturn(Optional.of(platform));
         when(accountRepository.findById(7)).thenReturn(Optional.of(account));
         when(credentialService.resolvePassword(7)).thenReturn("pw");
 
         CollectionRunEntity run = new CollectionRunEntity();
         run.setId(99L);
-        when(collectionRunRepository.start(eq(7), eq("newapi"), anyString(), anyString())).thenReturn(run);
+        when(collectionRunRepository.start(eq(7), anyString(), anyString(), anyString())).thenReturn(run);
+    }
 
+    @Test
+    void collectAllAccountsSurfacesPartialFailureWithRootCause() {
+        when(platformRepository.findEnabled()).thenReturn(List.of(platform));
+        when(accountRepository.findEnabledByPlatformId(1)).thenReturn(List.of(account));
         when(newApiAdapter.fetchSelf(anyString(), anyString(), anyString()))
                 .thenThrow(new IllegalStateException("上游返回 401 Unauthorized"));
 
@@ -88,5 +112,23 @@ class CollectionFailureReportingTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("失败 1")
                 .hasMessageContaining("上游返回 401 Unauthorized");
+    }
+
+    @Test
+    void collectAccountRejectsDisabledAccount() {
+        account.setStatus(false);
+
+        assertThatThrownBy(() -> service.collectAccount(1, 7, CollectionScope.BALANCE))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("账号已停用");
+    }
+
+    @Test
+    void collectAccountRejectsDisabledPlatform() {
+        platform.setStatus(false);
+
+        assertThatThrownBy(() -> service.collectAccount(1, 7, CollectionScope.BALANCE))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("平台已停用");
     }
 }

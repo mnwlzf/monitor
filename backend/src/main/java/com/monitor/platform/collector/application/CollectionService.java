@@ -14,6 +14,7 @@ import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
+import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.AccountApiKeySnapshotRepository;
@@ -305,6 +306,14 @@ public class CollectionService {
         }
         PlatformEntity platform = platformRepository.findById(account.getPlatformId())
                 .orElseThrow(() -> new IllegalArgumentException("账号未关联平台: " + accountId));
+
+        // 停用的平台或账号不参与采集；定时任务已过滤，这里兜底手动采集
+        if (Boolean.FALSE.equals(platform.getStatus())) {
+            throw BusinessException.of("平台已停用，账号不参与采集: " + platform.getPlatformName());
+        }
+        if (Boolean.FALSE.equals(account.getStatus())) {
+            throw BusinessException.of("账号已停用，不参与采集: " + accountId);
+        }
 
         String platformType = platform.getPlatformType();
         log.info("账号采集开始: accountId={}, platformId={}, platformType={}, scope={}, account={}",

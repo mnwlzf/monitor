@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
  * @param loginName   登录账号
  * @param password    新密码，可为空
  * @param authType    认证类型
+ * @param status      账号是否启用；停用后不参与采集
  */
 public record UpdateAccountRequest(
         @Size(max = 255, message = "显示名称不能超过 255 个字符")
@@ -21,6 +22,8 @@ public record UpdateAccountRequest(
         String password,
 
         @Size(max = 50, message = "认证类型不能超过 50 个字符")
-        String authType
+        String authType,
+
+        Boolean status
 ) {
 }

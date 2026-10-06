@@ -127,12 +127,26 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="410" fixed="right">
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-button v-if="canWrite !== false" size="small" :loading="row.lastCollectStatus === 'RUNNING'" @click="emit('collect', asAccount(row))">采集</el-button>
+            <el-tag size="small" :type="row.status ? 'success' : 'info'" effect="light">{{ row.status ? '启用' : '停用' }}</el-tag>
+            <div v-if="platformDisabled(asAccount(row))" class="admin-table-sub muted">平台已停用</div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="500" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="canWrite !== false" size="small" :loading="row.lastCollectStatus === 'RUNNING'" :disabled="!isCollectable(asAccount(row))" @click="emit('collect', asAccount(row))">采集</el-button>
             <el-button size="small" @click="openKeys(asAccount(row))">密钥{{ keyCount(asAccount(row)) ? `(${keyCount(asAccount(row))})` : '' }}</el-button>
             <el-button v-if="canWrite !== false" size="small" :loading="revealingPasswordId === row.id" @click="revealPassword(asAccount(row))">查看密码</el-button>
             <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="openEdit(asAccount(row))">编辑</el-button>
+            <el-button
+              v-if="canWrite !== false"
+              size="small"
+              :type="row.status ? 'warning' : 'success'"
+              plain
+              @click="toggleStatus(asAccount(row))"
+            >{{ row.status ? '停用' : '启用' }}</el-button>
             <el-popconfirm v-if="canWrite !== false" title="确认删除该账号？" @confirm="remove(asAccount(row))">
               <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
             </el-popconfirm>
@@ -564,6 +578,30 @@ async function remove(account: Account) {
     ElMessage.success('账号已删除')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '账号删除失败')
+  }
+}
+
+/** 账号所属平台是否已停用。 */
+function platformDisabled(account: Account): boolean {
+  const platform = props.platforms.find(item => item.id === account.platformId)
+  return platform ? platform.status === false : false
+}
+
+/** 账号与所属平台都启用时才参与采集。 */
+function isCollectable(account: Account): boolean {
+  return account.status !== false && !platformDisabled(account)
+}
+
+/** 启用/停用账号：停用后该账号不再参与采集。 */
+async function toggleStatus(account: Account) {
+  const next = !account.status
+  try {
+    emit('saved', await updateAccountRecord(account, { status: next }))
+    ElMessage.success(next
+      ? `账号「${account.displayName}」已启用`
+      : `账号「${account.displayName}」已停用，将不再参与采集`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '账号状态更新失败')
   }
 }
 

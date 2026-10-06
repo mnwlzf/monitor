@@ -72,6 +72,13 @@
           <el-button size="small" @click="emit('view-accounts', platform)">查看账号</el-button>
           <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="emit('add-account', platform)">添加账号</el-button>
           <el-button v-if="canWrite !== false" size="small" @click="openEdit(platform)">编辑</el-button>
+          <el-button
+            v-if="canWrite !== false"
+            size="small"
+            :type="platform.status ? 'warning' : 'success'"
+            plain
+            @click="toggleStatus(platform)"
+          >{{ platform.status ? '停用' : '启用' }}</el-button>
           <el-popconfirm
             :title="platform.accountCount ? '该平台下还有 ' + platform.accountCount + ' 个账号，需先删除账号后才能删除平台。' : '确认删除该平台？'"
             :confirm-button-text="platform.accountCount ? '知道了' : '删除'"
@@ -229,6 +236,19 @@ async function submit() {
     ElMessage.error(error instanceof Error ? error.message : '平台保存失败')
   } finally {
     saving.value = false
+  }
+}
+
+/** 启用/停用平台：停用后该平台下所有账号都不再参与采集。 */
+async function toggleStatus(platform: Platform) {
+  const next = !platform.status
+  try {
+    emit('updated', await updatePlatformRecord(platform, { status: next }))
+    ElMessage.success(next
+      ? `平台「${platform.name}」已启用`
+      : `平台「${platform.name}」已停用，其下账号将不再参与采集`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '平台状态更新失败')
   }
 }
 
