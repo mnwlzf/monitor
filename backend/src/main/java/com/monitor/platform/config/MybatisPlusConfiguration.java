@@ -13,7 +13,8 @@ import org.springframework.context.annotation.Configuration;
 @MapperScan({
         "com.monitor.platform.collector.repository",
         "com.monitor.platform.query.repository",
-        "com.monitor.platform.scheduler"
+        "com.monitor.platform.scheduler",
+        "com.monitor.platform.mail"
 })
 public class MybatisPlusConfiguration {
 }

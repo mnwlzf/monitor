@@ -1,0 +1,237 @@
+<template>
+  <section class="admin-page">
+    <div class="admin-page-heading">
+      <div>
+        <p class="admin-eyebrow">SYSTEM SETTINGS</p>
+        <h2>系统设置</h2>
+        <p>配置 SMTP 邮件服务，用于发送验证码与监控通知。</p>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="admin-card" v-loading="loading">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>SMTP 设置</h3>
+            <p>配置用于发送通知邮件的邮件服务</p>
+          </div>
+          <el-button :loading="testing" :disabled="canWrite === false" @click="testConnection">测试连接</el-button>
+        </div>
+      </template>
+
+      <el-form label-position="top">
+        <div class="admin-form-grid">
+          <el-form-item label="SMTP 主机">
+            <el-input v-model="form.host" placeholder="smtp.qq.com" :disabled="canWrite === false" />
+          </el-form-item>
+          <el-form-item label="SMTP 端口">
+            <el-input-number
+              v-model="form.port"
+              :min="1"
+              :max="65535"
+              controls-position="right"
+              style="width: 100%"
+              :disabled="canWrite === false"
+            />
+          </el-form-item>
+          <el-form-item label="SMTP 用户名">
+            <el-input v-model="form.username" placeholder="noreply@example.com" :disabled="canWrite === false" />
+          </el-form-item>
+          <el-form-item label="SMTP 密码">
+            <el-input
+              v-model="form.password"
+              type="password"
+              show-password
+              :placeholder="passwordPlaceholder"
+              :disabled="canWrite === false"
+            />
+            <small class="admin-form-hint">{{ passwordHint }}</small>
+          </el-form-item>
+          <el-form-item label="发件人邮箱">
+            <el-input v-model="form.from" placeholder="noreply@example.com" :disabled="canWrite === false" />
+          </el-form-item>
+          <el-form-item label="发件人名称">
+            <el-input v-model="form.fromName" placeholder="Monitor" :disabled="canWrite === false" />
+          </el-form-item>
+          <div class="admin-form-full settings-toggle-row">
+            <div>
+              <div class="settings-toggle-title">使用 TLS</div>
+              <small class="admin-form-hint">为 SMTP 连接启用隐式 TLS（通常为 465 端口）；关闭后按机会式 STARTTLS（587/25）连接。</small>
+            </div>
+            <el-switch v-model="form.useTls" :disabled="canWrite === false" />
+          </div>
+          <div class="admin-form-full settings-toggle-row">
+            <div>
+              <div class="settings-toggle-title">启用邮件通知</div>
+              <small class="admin-form-hint">关闭后不会发送任何通知邮件，但仍可在本页测试配置。</small>
+            </div>
+            <el-switch v-model="form.enabled" :disabled="canWrite === false" />
+          </div>
+        </div>
+      </el-form>
+
+      <div v-if="canWrite !== false" class="settings-actions">
+        <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
+      </div>
+    </el-card>
+
+    <el-card shadow="never" class="admin-card">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>发送测试邮件</h3>
+            <p>发送测试邮件以验证 SMTP 配置</p>
+          </div>
+        </div>
+      </template>
+
+      <div class="settings-test-email">
+        <el-input
+          v-model="testRecipient"
+          placeholder="test@example.com"
+          :disabled="canWrite === false"
+          @keyup.enter="sendTestEmail"
+        />
+        <el-button type="primary" plain :loading="sending" :disabled="canWrite === false" @click="sendTestEmail">
+          发送测试邮件
+        </el-button>
+      </div>
+      <small class="admin-form-hint">使用上方当前填写的配置（未保存也可）发送一封测试邮件。</small>
+    </el-card>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import {
+  getMailSettings,
+  saveMailSettings,
+  sendTestMail,
+  testMailConnection,
+  type MailSettingsInput,
+} from '../api/settings'
+
+defineProps<{ canWrite?: boolean }>()
+
+const loading = ref(false)
+const saving = ref(false)
+const testing = ref(false)
+const sending = ref(false)
+const testRecipient = ref('')
+const passwordConfigured = ref(false)
+
+const form = reactive<MailSettingsInput>({
+  enabled: false,
+  host: '',
+  port: 587,
+  username: '',
+  password: '',
+  from: '',
+  fromName: 'Monitor',
+  useTls: false,
+})
+
+const passwordPlaceholder = computed(() => (passwordConfigured.value ? '••••••••' : '请输入 SMTP 密码或授权码'))
+const passwordHint = computed(() =>
+  passwordConfigured.value ? '密码已配置，留空以保留当前值。' : '部分邮箱需使用授权码而非登录密码。',
+)
+
+function payload(): MailSettingsInput {
+  return { ...form }
+}
+
+async function load() {
+  loading.value = true
+  try {
+    const settings = await getMailSettings()
+    passwordConfigured.value = settings.passwordConfigured
+    Object.assign(form, {
+      enabled: settings.enabled,
+      host: settings.host ?? '',
+      port: settings.port ?? 587,
+      username: settings.username ?? '',
+      password: '',
+      from: settings.from ?? '',
+      fromName: settings.fromName ?? 'Monitor',
+      useTls: settings.useTls,
+    })
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载 SMTP 设置失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function save() {
+  saving.value = true
+  try {
+    const settings = await saveMailSettings(payload())
+    passwordConfigured.value = settings.passwordConfigured
+    form.password = ''
+    ElMessage.success('SMTP 设置已保存')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function testConnection() {
+  testing.value = true
+  try {
+    await testMailConnection(payload())
+    ElMessage.success('SMTP 连接成功')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : 'SMTP 连接失败')
+  } finally {
+    testing.value = false
+  }
+}
+
+async function sendTestEmail() {
+  if (!testRecipient.value) {
+    ElMessage.warning('请填写收件人邮箱')
+    return
+  }
+  sending.value = true
+  try {
+    await sendTestMail(testRecipient.value, payload())
+    ElMessage.success('测试邮件已发送')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '测试邮件发送失败')
+  } finally {
+    sending.value = false
+  }
+}
+
+onMounted(load)
+</script>
+
+<style scoped>
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.settings-toggle-title {
+  margin-bottom: 4px;
+  color: #303133;
+  font-size: 14px;
+}
+
+.settings-test-email {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+</style>

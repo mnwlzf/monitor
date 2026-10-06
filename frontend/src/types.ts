@@ -159,3 +159,20 @@ export interface CurrentUser {
   roles: UserRole[]
   admin: boolean
 }
+
+/**
+ * 页面可配置的 SMTP 邮件设置。
+ *
+ * 出于安全考虑后端不返回密码明文，仅通过 passwordConfigured 告知是否已配置。
+ */
+export interface MailSettings {
+  enabled: boolean
+  host: string | null
+  port: number
+  username: string | null
+  passwordConfigured: boolean
+  from: string | null
+  fromName: string | null
+  useTls: boolean
+  updatedAt: string | null
+}
