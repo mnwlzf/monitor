@@ -4,14 +4,19 @@ import type { Account, ApiKey, ChangeEvent, Channel, Platform, PlatformType, Usa
 export interface CreateAccountInput {
   displayName: string
   loginName: string
-  password: string
+  password?: string
+  authType?: 'PASSWORD' | 'TOKEN'
+  accessToken?: string
+  refreshToken?: string
 }
 
 export interface UpdateAccountInput {
   displayName?: string
   loginName?: string
   password?: string
-  authType?: string
+  authType?: 'PASSWORD' | 'TOKEN'
+  accessToken?: string
+  refreshToken?: string
   status?: boolean
 }
 
@@ -29,6 +34,7 @@ interface AccountDto {
   displayName?: string
   loginName?: string
   platformType?: string
+  authType?: string
   authStatus?: string
   status?: boolean
   balance?: number | null
@@ -57,7 +63,9 @@ export async function createAccountRecord(platform: Platform, input: CreateAccou
         displayName: input.displayName || input.loginName,
         loginName: input.loginName,
         password: input.password,
-        authType: 'PASSWORD',
+        authType: input.authType || 'PASSWORD',
+        accessToken: input.accessToken,
+        refreshToken: input.refreshToken,
       }),
     },
   )
@@ -76,6 +84,8 @@ export async function updateAccountRecord(account: Account, input: UpdateAccount
   if (input.loginName !== undefined) body.loginName = input.loginName
   if (input.password) body.password = input.password
   if (input.authType) body.authType = input.authType
+  if (input.accessToken) body.accessToken = input.accessToken
+  if (input.refreshToken) body.refreshToken = input.refreshToken
   if (input.status !== undefined) body.status = input.status
 
   const updated = await apiRequest<AccountDto>(
@@ -209,6 +219,7 @@ function mapAccount(instance: InstanceDto, row: AccountDto, fallbackType: Platfo
     platformType: (row.platformType as PlatformType) || fallbackType,
     displayName: row.displayName || row.loginName || `账号 ${row.id}`,
     loginName: row.loginName || '',
+    authType: row.authType === 'TOKEN' ? 'TOKEN' : 'PASSWORD',
     status: row.status ?? true,
     balance: Number(row.balance ?? 0),
     frozenBalance: Number(row.frozenBalance ?? 0),

@@ -5,11 +5,13 @@ import jakarta.validation.constraints.Size;
 /**
  * 更新采集账号请求。密码为空时保留原凭证。
  *
- * @param displayName 展示名称
- * @param loginName   登录账号
- * @param password    新密码，可为空
- * @param authType    认证类型
- * @param status      账号是否启用；停用后不参与采集
+ * @param displayName  展示名称
+ * @param loginName    登录账号
+ * @param password     新密码，可为空表示不修改
+ * @param authType     认证类型：PASSWORD 或 TOKEN
+ * @param accessToken  新的访问令牌，可为空表示不修改
+ * @param refreshToken 新的刷新令牌，可为空表示不修改
+ * @param status       账号是否启用；停用后不参与采集
  */
 public record UpdateAccountRequest(
         @Size(max = 255, message = "显示名称不能超过 255 个字符")
@@ -23,6 +25,12 @@ public record UpdateAccountRequest(
 
         @Size(max = 50, message = "认证类型不能超过 50 个字符")
         String authType,
+
+        @Size(max = 4000, message = "access_token 不能超过 4000 个字符")
+        String accessToken,
+
+        @Size(max = 4000, message = "refresh_token 不能超过 4000 个字符")
+        String refreshToken,
 
         Boolean status
 ) {

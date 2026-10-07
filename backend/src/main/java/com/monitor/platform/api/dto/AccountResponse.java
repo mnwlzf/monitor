@@ -11,6 +11,7 @@ import java.time.OffsetDateTime;
  * @param displayName     前端展示名称
  * @param loginName       登录账号
  * @param platformType    平台类型，newapi 或 sub2api
+ * @param authType        认证类型：PASSWORD 或 TOKEN
  * @param authStatus      凭证认证状态
  * @param status          账号是否启用
  * @param balance         最新余额
@@ -29,6 +30,7 @@ public record AccountResponse(
         String displayName,
         String loginName,
         String platformType,
+        String authType,
         String authStatus,
         Boolean status,
         BigDecimal balance,

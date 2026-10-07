@@ -6,6 +6,8 @@ import com.monitor.platform.adapter.sub2api.model.Sub2ApiKeysUsageResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenRequest;
+import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -28,6 +30,7 @@ import java.util.Map;
 public class Sub2ApiClient {
 
     private static final String LOGIN_PATH = "/api/v1/auth/login";
+    private static final String REFRESH_PATH = "/api/v1/auth/refresh";
     private static final String PROFILE_PATH = "/api/v1/auth/me";
     private static final String KEYS_PATH = "/api/v1/keys";
     private static final String KEYS_USAGE_PATH = "/api/v1/usage/dashboard/api-keys-usage";
@@ -54,6 +57,17 @@ public class Sub2ApiClient {
                 .body(request)
                 .retrieve()
                 .body(Sub2LoginResponse.class);
+    }
+
+    /**
+     * 调用 Sub2API 刷新令牌接口，用 refresh_token 换取新的令牌对。
+     */
+    public Sub2RefreshTokenResponse refreshToken(String baseUrl, String refreshToken) {
+        return restClient.post()
+                .uri(baseUrl + REFRESH_PATH)
+                .body(new Sub2RefreshTokenRequest(refreshToken))
+                .retrieve()
+                .body(Sub2RefreshTokenResponse.class);
     }
 
     /**

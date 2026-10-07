@@ -54,6 +54,9 @@ public class UpstreamAdminService {
 
     private static final Logger log = LoggerFactory.getLogger(UpstreamAdminService.class);
 
+    /** 支持手动 Token 登录的平台类型。 */
+    private static final String SUPPORTED_TOKEN_PLATFORM = "sub2api";
+
     /** New API 平台标识，其「今日消耗」由累计消耗差值推算。 */
     private static final String PLATFORM_NEW_API = "newapi";
 
@@ -200,6 +203,19 @@ public class UpstreamAdminService {
             throw BusinessException.of("该平台下账号已存在: " + request.loginName());
         });
 
+        String authType = normalizeAuthType(request.authType());
+        boolean tokenAuth = AccountCredentialService.TOKEN.equals(authType);
+        if (tokenAuth) {
+            if (isBlank(request.refreshToken()) && isBlank(request.accessToken())) {
+                throw BusinessException.of("使用 Token 登录时，请至少填写 refresh_token 或 access_token");
+            }
+        } else if (isBlank(request.password())) {
+            throw BusinessException.of("密码登录必须填写登录密码");
+        }
+        if (tokenAuth && !SUPPORTED_TOKEN_PLATFORM.equalsIgnoreCase(platform.getPlatformType())) {
+            throw BusinessException.of("手动 Token 登录目前仅支持 Sub2API 平台");
+        }
+
         AccountEntity entity = new AccountEntity();
         entity.setPlatformId(platformId);
         entity.setPlatform(platform.getPlatformType());
@@ -208,13 +224,17 @@ public class UpstreamAdminService {
         entity.setUsername(request.loginName());
         entity.setDisplayName(request.displayName());
         entity.setStatus(true);
-        entity.setAuthType(request.authType() == null ? AccountCredentialService.PASSWORD : request.authType());
+        entity.setAuthType(authType);
         entity.setCredentialStatus("UNKNOWN");
         entity.setConsecutiveFailures(0);
         entity.setSettings("{}");
         accountRepository.save(entity);
 
-        credentialService.savePassword(entity.getId(), request.password());
+        if (tokenAuth) {
+            saveAccountTokens(entity.getId(), request.refreshToken(), request.accessToken());
+        } else {
+            credentialService.savePassword(entity.getId(), request.password());
+        }
 
         log.info("创建采集账号成功: accountId={}, platformId={}, loginName={}, authType={}",
                 entity.getId(), platformId, request.loginName(), entity.getAuthType());
@@ -247,19 +267,39 @@ public class UpstreamAdminService {
             entity.setDisplayName(request.displayName());
         }
         if (request.authType() != null && !request.authType().isBlank()) {
-            entity.setAuthType(request.authType());
+            entity.setAuthType(normalizeAuthType(request.authType()));
         }
         if (request.status() != null) {
             entity.setStatus(request.status());
         }
 
-        accountRepository.save(entity);
-        if (request.password() != null && !request.password().isBlank()) {
+        // 填了 token 就按 Token 登录；填了密码就切回密码登录
+        if (notBlank(request.refreshToken()) || notBlank(request.accessToken())) {
+            saveAccountTokens(accountId, request.refreshToken(), request.accessToken());
+            entity.setAuthType(AccountCredentialService.TOKEN);
+        }
+        if (notBlank(request.password())) {
             credentialService.savePassword(accountId, request.password());
+            entity.setAuthType(AccountCredentialService.PASSWORD);
+        }
+        if (AccountCredentialService.TOKEN.equalsIgnoreCase(entity.getAuthType())) {
+            PlatformEntity accountPlatform = platformRepository.findById(platformId).orElse(null);
+            if (accountPlatform != null
+                    && !SUPPORTED_TOKEN_PLATFORM.equalsIgnoreCase(accountPlatform.getPlatformType())) {
+                throw BusinessException.of("手动 Token 登录目前仅支持 Sub2API 平台");
+            }
+            if (!credentialService.hasCredential(accountId, AccountCredentialService.REFRESH_TOKEN)
+                    && !credentialService.hasCredential(accountId, AccountCredentialService.ACCESS_TOKEN)) {
+                throw BusinessException.of("使用 Token 登录时，请至少填写 refresh_token 或 access_token");
+            }
+        } else if (!credentialService.hasCredential(accountId, AccountCredentialService.PASSWORD)) {
+            throw BusinessException.of("密码登录必须填写登录密码");
         }
 
-        log.info("更新采集账号成功: accountId={}, platformId={}, loginName={}",
-                accountId, platformId, entity.getUsername());
+        accountRepository.save(entity);
+
+        log.info("更新采集账号成功: accountId={}, platformId={}, loginName={}, authType={}",
+                accountId, platformId, entity.getUsername(), entity.getAuthType());
         return toAccountResponse(entity);
     }
 
@@ -287,6 +327,32 @@ public class UpstreamAdminService {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
         return accountRepository.findByPlatformId(platformId).stream().map(this::toAccountResponse).toList();
+    }
+
+    /** 归一化认证类型：只有显式 TOKEN 才按 Token 处理，其余按密码登录。 */
+    private String normalizeAuthType(String authType) {
+        if (authType != null && AccountCredentialService.TOKEN.equalsIgnoreCase(authType.trim())) {
+            return AccountCredentialService.TOKEN;
+        }
+        return AccountCredentialService.PASSWORD;
+    }
+
+    /** 保存页面手动填写的 token；空值表示不修改。 */
+    private void saveAccountTokens(Integer accountId, String refreshToken, String accessToken) {
+        if (notBlank(refreshToken)) {
+            credentialService.saveToken(accountId, AccountCredentialService.REFRESH_TOKEN, refreshToken.trim());
+        }
+        if (notBlank(accessToken)) {
+            credentialService.saveToken(accountId, AccountCredentialService.ACCESS_TOKEN, accessToken.trim());
+        }
+    }
+
+    private boolean notBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     /**
@@ -611,6 +677,7 @@ public class UpstreamAdminService {
                 entity.getDisplayName(),
                 entity.getUsername(),
                 entity.getPlatform(),
+                entity.getAuthType(),
                 entity.getCredentialStatus(),
                 entity.getStatus(),
                 snapshot == null ? null : snapshot.getBalance(),

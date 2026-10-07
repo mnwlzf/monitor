@@ -80,6 +80,7 @@
               <el-tag size="small" :type="row.credentialStatus === 'VALID' ? 'success' : row.credentialStatus === 'INVALID' ? 'danger' : 'info'" effect="light">
                 {{ credentialLabel(row.credentialStatus) }}
               </el-tag>
+              <el-tag v-if="row.authType === 'TOKEN'" size="small" type="warning" effect="plain">Token 登录</el-tag>
             </div>
           </template>
         </el-table-column>
@@ -176,9 +177,33 @@
         <el-form-item label="登录账号" required>
           <el-input v-model="form.loginName" placeholder="邮箱或用户名" />
         </el-form-item>
-        <el-form-item :label="editingAccount ? '登录密码（留空不修改）' : '登录密码'" :required="!editingAccount">
-          <el-input v-model="form.password" type="password" show-password placeholder="登录密码" />
+        <el-form-item label="认证方式" class="admin-form-full">
+          <el-radio-group v-model="form.authType">
+            <el-radio-button value="PASSWORD">账号密码</el-radio-button>
+            <el-radio-button value="TOKEN" :disabled="!tokenLoginSupported">手动 Token</el-radio-button>
+          </el-radio-group>
+          <p class="admin-form-hint">{{ authTypeHint }}</p>
         </el-form-item>
+
+        <template v-if="form.authType === 'PASSWORD'">
+          <el-form-item :label="editingAccount ? '登录密码（留空不修改）' : '登录密码'" :required="!editingAccount" class="admin-form-full">
+            <el-input v-model="form.password" type="password" show-password placeholder="登录密码" />
+          </el-form-item>
+        </template>
+
+        <template v-else>
+          <el-form-item label="Refresh Token（推荐）" class="admin-form-full">
+            <el-input v-model="form.refreshToken" type="password" show-password :placeholder="tokenPlaceholder" />
+            <p class="admin-form-hint">
+              浏览器登录后，从 <code>POST /api/v1/auth/login</code> 的响应里复制 <code>data.refresh_token</code>；
+              会自动续期，约 30 天有效，过期后重新填写即可。
+            </p>
+          </el-form-item>
+          <el-form-item label="Access Token（可选）" class="admin-form-full">
+            <el-input v-model="form.accessToken" type="password" show-password :placeholder="tokenPlaceholder" />
+            <p class="admin-form-hint">只有 access_token 时可用，但约 24 小时即过期；两样都有时优先用 refresh_token。</p>
+          </el-form-item>
+        </template>
         <el-form-item label="显示名称" class="admin-form-full">
           <el-input v-model="form.displayName" placeholder="留空则使用登录账号" />
         </el-form-item>
@@ -296,8 +321,41 @@ const balanceSort = ref<'ascending' | 'descending' | null>(null)
 const showForm = ref(false)
 const saving = ref(false)
 const editingAccount = ref<Account | null>(null)
-const form = reactive<{ platformId: number | null } & CreateAccountInput>({ platformId: null, displayName: '', loginName: '', password: '' })
+const form = reactive<{
+  platformId: number | null
+  authType: 'PASSWORD' | 'TOKEN'
+  displayName: string
+  loginName: string
+  password: string
+  accessToken: string
+  refreshToken: string
+}>({
+  platformId: null,
+  authType: 'PASSWORD',
+  displayName: '',
+  loginName: '',
+  password: '',
+  accessToken: '',
+  refreshToken: '',
+})
 
+const authTypeHint = computed(() => form.authType === 'TOKEN'
+  ? '上游开启了登录验证码（如 Turnstile）导致无法自动登录时，可手动粘贴浏览器登录后拿到的令牌。'
+  : '使用登录账号 + 密码自动登录上游。')
+
+const tokenPlaceholder = computed(() => editingAccount.value ? '留空表示不修改' : '粘贴 token')
+
+/** 手动 Token 仅接入 Sub2API，其它平台只支持账号密码。 */
+const tokenLoginSupported = computed(() => {
+  const platform = props.platforms.find(item => item.id === form.platformId)
+  return platform?.type === 'sub2api'
+})
+
+watch(() => form.platformId, () => {
+  if (!tokenLoginSupported.value && form.authType === 'TOKEN') {
+    form.authType = 'PASSWORD'
+  }
+})
 const showKeys = ref(false)
 const keysAccount = ref<Account | null>(null)
 const revealedKey = ref('')
@@ -511,9 +569,12 @@ function openCreate(platformId?: number) {
   editingAccount.value = null
   Object.assign(form, {
     platformId: platformId ?? selectedPlatformId.value ?? props.platforms[0]?.id ?? null,
+    authType: 'PASSWORD',
     displayName: '',
     loginName: '',
     password: '',
+    accessToken: '',
+    refreshToken: '',
   })
   showForm.value = true
 }
@@ -530,28 +591,46 @@ function openEdit(account: Account) {
   editingAccount.value = account
   Object.assign(form, {
     platformId: account.platformId,
+    authType: account.authType,
     displayName: account.displayName,
     loginName: account.loginName,
     password: '',
+    accessToken: '',
+    refreshToken: '',
   })
   showForm.value = true
 }
 
 async function submit() {
-  if (editingAccount.value) {
-    if (!form.loginName) {
-      ElMessage.warning('请填写登录账号')
+  if (!form.loginName) {
+    ElMessage.warning('请填写登录账号')
+    return
+  }
+  if (!editingAccount.value && !form.platformId) {
+    ElMessage.warning('请选择所属平台')
+    return
+  }
+  if (form.authType === 'PASSWORD') {
+    if (!editingAccount.value && !form.password) {
+      ElMessage.warning('密码登录必须填写登录密码')
       return
     }
-  } else if (!form.platformId || !form.loginName || !form.password) {
-    ElMessage.warning('请选择所属平台并填写登录账号与密码')
+  } else if (!form.accessToken && !form.refreshToken && editingAccount.value?.authType !== 'TOKEN') {
+    ElMessage.warning('Token 登录请至少填写 refresh_token 或 access_token')
     return
   }
 
   saving.value = true
   try {
     if (editingAccount.value) {
-      const input: UpdateAccountInput = { displayName: form.displayName, loginName: form.loginName, password: form.password, authType: 'PASSWORD' }
+      const input: UpdateAccountInput = {
+        displayName: form.displayName,
+        loginName: form.loginName,
+        password: form.authType === 'PASSWORD' ? form.password : '',
+        authType: form.authType,
+        accessToken: form.accessToken,
+        refreshToken: form.refreshToken,
+      }
       emit('saved', await updateAccountRecord(editingAccount.value, input))
       ElMessage.success('账号已更新')
     } else {
@@ -560,7 +639,15 @@ async function submit() {
         ElMessage.error('所选平台不存在，请刷新后重试')
         return
       }
-      emit('saved', await createAccountRecord(platform, form))
+      const input: CreateAccountInput = {
+        displayName: form.displayName,
+        loginName: form.loginName,
+        password: form.authType === 'PASSWORD' ? form.password : undefined,
+        authType: form.authType,
+        accessToken: form.accessToken || undefined,
+        refreshToken: form.refreshToken || undefined,
+      }
+      emit('saved', await createAccountRecord(platform, input))
       ElMessage.success(`账号已添加到「${platform.name}」`)
     }
     showForm.value = false

@@ -7,6 +7,7 @@ import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +38,12 @@ public class Sub2ApiAdapter {
 
     /** 登录令牌在 Redis 中的缓存时长。 */
     private static final Duration TOKEN_TTL = Duration.ofDays(1);
+
+    /** 手动 access_token 的缓存时长：短一些，过期后尽快暴露问题并提示重新填写。 */
+    private static final Duration MANUAL_ACCESS_TOKEN_TTL = Duration.ofMinutes(30);
+
+    /** 上游未返回 expires_in 时的访问令牌有效期兜底（秒）。 */
+    private static final long DEFAULT_TOKEN_TTL_SECONDS = 24 * 60 * 60L;
 
     /** 密钥列表每页条数。 */
     private static final int KEY_PAGE_SIZE = 100;
@@ -75,6 +82,9 @@ public class Sub2ApiAdapter {
      * @param password 登录密码
      */
     public void login(String baseUrl, String email, String password) {
+        if (StrUtil.isBlank(password)) {
+            throw new IllegalStateException("账号未配置密码；若使用手动 Token 登录，请确认 Token 仍有效或重新填写");
+        }
         String cacheKey = tokenKey(baseUrl, email);
 
         // 1. 优先复用缓存令牌，避免频繁登录。
@@ -300,6 +310,45 @@ public class Sub2ApiAdapter {
             log.error("{} {} 登录失败：未返回 access_token", baseUrl, email);
             throw new IllegalStateException("登录失败：未返回 access_token");
         }
+    }
+
+    /**
+     * 使用页面手动填写的 Token 登录：优先用 refresh_token 换新令牌，否则直接使用 access_token。
+     *
+     * <p>结果写入与密码登录相同的缓存，后续采集接口复用。缓存仍有效时直接返回，避免重复刷新
+     * 造成 refresh_token 轮转失效。</p>
+     *
+     * @return 轮转后的 refresh_token（需要调用方回写保存）；未发生刷新时返回 null
+     */
+    public String importManualToken(String baseUrl, String email, String accessToken, String refreshToken) {
+        String cacheKey = tokenKey(baseUrl, email);
+        if (StrUtil.isNotEmpty(stringRedisTemplate.opsForValue().get(cacheKey))) {
+            return null;
+        }
+
+        if (StrUtil.isNotBlank(refreshToken)) {
+            Sub2RefreshTokenResponse response = sub2ApiClient.refreshToken(baseUrl, refreshToken);
+            if (response == null || response.code() != SUCCESS_CODE || response.data() == null
+                    || StrUtil.isBlank(response.data().accessToken())) {
+                String message = response == null ? "响应为空" : response.message();
+                throw new IllegalStateException("手动 refresh_token 刷新失败：" + message);
+            }
+            long expiresIn = response.data().expiresIn() == null || response.data().expiresIn() <= 0
+                    ? DEFAULT_TOKEN_TTL_SECONDS
+                    : response.data().expiresIn();
+            stringRedisTemplate.opsForValue().set(cacheKey, response.data().accessToken(),
+                    Duration.ofSeconds(expiresIn));
+            log.info("{} {} 使用手动 refresh_token 刷新成功", baseUrl, email);
+            return response.data().refreshToken();
+        }
+
+        if (StrUtil.isNotBlank(accessToken)) {
+            stringRedisTemplate.opsForValue().set(cacheKey, accessToken, MANUAL_ACCESS_TOKEN_TTL);
+            log.info("{} {} 使用手动 access_token", baseUrl, email);
+            return null;
+        }
+
+        throw new IllegalStateException("账号未配置可用的 Token（refresh_token 或 access_token）");
     }
 
     /**

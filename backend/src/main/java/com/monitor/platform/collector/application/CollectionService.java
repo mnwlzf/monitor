@@ -444,10 +444,38 @@ public class CollectionService {
     }
 
     /**
+     * 解析 Sub2API 账号的登录凭据。
+     *
+     * <ul>
+     *   <li>密码登录（PASSWORD）：返回解密后的密码；</li>
+     *   <li>手动 Token（TOKEN）：把页面填写的 token 导入适配器缓存后返回 null，
+     *       后续接口直接走 Bearer token；refresh_token 轮转后回写保存。</li>
+     * </ul>
+     */
+    private String resolveSub2Password(AccountEntity account, PlatformEntity platform) {
+        if (AccountCredentialService.TOKEN.equalsIgnoreCase(account.getAuthType())) {
+            String refreshToken = credentialService
+                    .resolveToken(account.getId(), AccountCredentialService.REFRESH_TOKEN)
+                    .orElse(null);
+            String accessToken = credentialService
+                    .resolveToken(account.getId(), AccountCredentialService.ACCESS_TOKEN)
+                    .orElse(null);
+
+            String rotated = sub2ApiAdapter.importManualToken(
+                    platform.getUrl(), account.getEmail(), accessToken, refreshToken);
+            if (StrUtil.isNotBlank(rotated) && !rotated.equals(refreshToken)) {
+                credentialService.saveToken(account.getId(), AccountCredentialService.REFRESH_TOKEN, rotated);
+                log.info("Sub2API refresh_token 已轮转并回写: accountId={}", account.getId());
+            }
+            return null;
+        }
+        return credentialService.resolvePassword(account.getId());
+    }
+    /**
      * Sub2API 余额采集：{@code /api/v1/auth/me} 取余额，{@code /api/v1/usage/dashboard/stats} 取用量看板。
      */
     private void collectSub2ApiBalance(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
-        String password = credentialService.resolvePassword(account.getId());
+        String password = resolveSub2Password(account, platform);
         String email = account.getEmail();
         String baseUrl = platform.getUrl();
         log.info("Sub2API 余额采集开始: accountId={}, baseUrl={}, email={}",
@@ -474,7 +502,7 @@ public class CollectionService {
      * Sub2API 分组/渠道倍率采集：{@code /api/v1/groups/available}。
      */
     private void collectSub2ApiGroups(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
-        String password = credentialService.resolvePassword(account.getId());
+        String password = resolveSub2Password(account, platform);
         String email = account.getEmail();
         String baseUrl = platform.getUrl();
         log.info("Sub2API 分组采集开始: accountId={}, baseUrl={}", account.getId(), baseUrl);
@@ -487,7 +515,7 @@ public class CollectionService {
      * Sub2API API Key 采集：{@code /api/v1/keys} + {@code /api/v1/usage/dashboard/api-keys-usage}。
      */
     private void collectSub2ApiApiKeys(AccountEntity account, PlatformEntity platform, Long collectionRunId) {
-        String password = credentialService.resolvePassword(account.getId());
+        String password = resolveSub2Password(account, platform);
         String email = account.getEmail();
         String baseUrl = platform.getUrl();
         log.info("Sub2API API Key 采集开始: accountId={}, baseUrl={}", account.getId(), baseUrl);

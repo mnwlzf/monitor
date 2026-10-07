@@ -3,6 +3,7 @@ package com.monitor.platform.adapter.sub2api;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,8 +17,13 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -91,5 +97,50 @@ class Sub2ApiAdapterTest {
         assertEquals("test", requestCaptor.getValue().password());
         verify(valueOperations).set(eq(TOKEN_CACHE_KEY), eq("access-token"), eq(Duration.ofDays(1)));
         verify(sub2ApiClient).fetchAvailableGroups(BASE_URL, "access-token");
+    }
+    @Test
+    void shouldRefreshWithManualRefreshTokenAndReturnRotatedToken() {
+        Sub2RefreshTokenResponse refreshResponse = new Sub2RefreshTokenResponse(
+                0,
+                "success",
+                new Sub2RefreshTokenResponse.Data("new-access-token", "new-refresh-token", 86400L, "Bearer"));
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn(null);
+        when(sub2ApiClient.refreshToken(BASE_URL, "old-refresh-token")).thenReturn(refreshResponse);
+
+        String rotated = adapter.importManualToken(BASE_URL, EMAIL, null, "old-refresh-token");
+
+        assertEquals("new-refresh-token", rotated);
+        verify(valueOperations).set(eq(TOKEN_CACHE_KEY), eq("new-access-token"), eq(Duration.ofSeconds(86400)));
+    }
+
+    @Test
+    void shouldUseManualAccessTokenWhenRefreshTokenMissing() {
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn(null);
+
+        String rotated = adapter.importManualToken(BASE_URL, EMAIL, "manual-access-token", null);
+
+        assertNull(rotated);
+        verify(valueOperations).set(eq(TOKEN_CACHE_KEY), eq("manual-access-token"), eq(Duration.ofMinutes(30)));
+        verify(sub2ApiClient, never()).refreshToken(anyString(), anyString());
+    }
+
+    @Test
+    void shouldReuseCachedTokenAndSkipManualImport() {
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn("cached-token");
+
+        String rotated = adapter.importManualToken(BASE_URL, EMAIL, "manual-access-token", "old-refresh-token");
+
+        assertNull(rotated);
+        verify(sub2ApiClient, never()).refreshToken(anyString(), anyString());
+    }
+
+    @Test
+    void shouldFailWhenManualTokenMissing() {
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn(null);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> adapter.importManualToken(BASE_URL, EMAIL, null, null));
+
+        assertTrue(error.getMessage().contains("Token"));
     }
 }
