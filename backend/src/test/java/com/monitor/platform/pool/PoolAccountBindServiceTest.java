@@ -4,7 +4,6 @@ import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
-import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.common.util.Sha256Util;
 import com.monitor.platform.pool.client.Sub2AdminAccountCredential;
 import com.monitor.platform.pool.client.Sub2AdminClient;
@@ -19,7 +18,6 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -96,7 +94,7 @@ class PoolAccountBindServiceTest {
     }
 
     @Test
-    void shouldRejectManualBindWhenKeyBelongsToAnotherPlatform() {
+    void shouldAllowManualBindToKeyFromAnotherPlatform() {
         when(poolAccountRepository.findByPlatformAndExternalId(1, 52064L))
                 .thenReturn(Optional.of(account(52064L, "满血", null)));
 
@@ -110,8 +108,10 @@ class PoolAccountBindServiceTest {
         owner.setPlatformId(2);
         when(accountRepository.findById(100)).thenReturn(Optional.of(owner));
 
-        assertThrows(BusinessException.class, () -> service.bind(1, 52064L, 9L));
-        verify(poolAccountRepository, never()).updateBinding(1, 52064L, 9L);
+        // 号池账号跨平台绑定是常态（自建 sub2api 的号池账号来自其它上游平台）
+        service.bind(1, 52064L, 9L);
+
+        verify(poolAccountRepository).updateBinding(1, 52064L, 9L);
     }
 
     @Test

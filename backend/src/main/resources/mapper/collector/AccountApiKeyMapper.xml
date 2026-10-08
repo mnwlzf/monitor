@@ -122,10 +122,14 @@
         SELECT k.id
         FROM account_api_keys k
                  JOIN accounts a ON a.id = k.account_id
-        WHERE a.platform_id = #{platformId}
-          AND k.key_hash = #{keyHash}
+        WHERE k.key_hash = #{keyHash}
           AND k.is_active = TRUE
-        ORDER BY k.id
+        <if test="preferredPlatformId != null">
+            ORDER BY CASE WHEN a.platform_id = #{preferredPlatformId} THEN 0 ELSE 1 END, k.id
+        </if>
+        <if test="preferredPlatformId == null">
+            ORDER BY k.id
+        </if>
         LIMIT 1
     </select>
 

@@ -32,11 +32,15 @@ public interface AccountApiKeyMapper {
                                                   @Param("activeOnly") boolean activeOnly);
 
     /**
-     * 按平台与密钥 SHA-256 查询有效的本地密钥主键。
+     * 按密钥 SHA-256 查询有效的本地密钥主键。
      *
      * <p>号池账号绑定上游 Key 时使用：只传哈希，绝不传明文。</p>
+     *
+     * <p>这里是<strong>跨平台</strong>查找：用户自建 sub2api 的号池账号，往往是用
+     * 其它上游平台采集到的 Key 建起来的，因此不能只在同一个平台内匹配。
+     * {@code preferredPlatformId} 仅用于「同一个 Key 在多个平台都存在时优先取该平台」。</p>
      */
-    Long selectActiveKeyIdByHash(@Param("platformId") Integer platformId,
+    Long selectActiveKeyIdByHash(@Param("preferredPlatformId") Integer preferredPlatformId,
                                  @Param("keyHash") String keyHash);
 
     /** 将未出现在本轮采集结果中的密钥标记为失效。 */

@@ -24,6 +24,9 @@ import java.util.Optional;
  * <p>绑定关系用于把「号池账号的调用指标」关联回「本项目的上游账号/Key」。
  * 自动绑定通过管理员导出接口拿到明文 Key，在内存中计算 SHA-256 后与本地
  * {@code account_api_keys.key_hash} 比对；明文绝不落库、绝不写日志。</p>
+ *
+ * <p>匹配是<strong>跨平台</strong>的：号池账户里的 Key 来自哪个上游平台，
+ * 就绑定到那个平台的本地密钥；同一个平台内存在时才优先取该平台。</p>
  */
 @Service
 public class PoolAccountBindService {
@@ -94,6 +97,8 @@ public class PoolAccountBindService {
 
     /**
      * 手动绑定号池账号与本地密钥；{@code keyId} 为空表示解除绑定。
+     *
+     * <p>允许绑定任意平台的本地密钥（跨平台是常态），不做同平台限制。</p>
      */
     public void bind(Integer platformId, Long externalAccountId, Long keyId) {
         poolAccountRepository.findByPlatformAndExternalId(platformId, externalAccountId)
@@ -102,11 +107,11 @@ public class PoolAccountBindService {
         if (keyId != null) {
             AccountApiKeyEntity key = apiKeyRepository.findById(keyId)
                     .orElseThrow(() -> BusinessException.of("本地密钥不存在: " + keyId));
-            AccountEntity account = accountRepository.findById(key.getAccountId())
+            // 号池账号与本地上游 Key 是「跨平台」关系：用户自建 sub2api 的号池账号，
+            // 往往是用其它上游平台采集到的 Key 建起来的，因此这里只校验密钥存在，
+            // 不再限制「必须属于当前平台」。
+            accountRepository.findById(key.getAccountId())
                     .orElseThrow(() -> BusinessException.of("密钥所属账号不存在: " + key.getAccountId()));
-            if (!platformId.equals(account.getPlatformId())) {
-                throw BusinessException.of("该密钥不属于当前平台，无法绑定");
-            }
         }
 
         poolAccountRepository.updateBinding(platformId, externalAccountId, keyId);
