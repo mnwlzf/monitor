@@ -104,6 +104,15 @@
           AND external_account_id = #{externalAccountId}
     </update>
 
+    <delete id="deleteByExternalIds">
+        DELETE FROM pool_accounts
+        WHERE platform_id = #{platformId}
+          AND external_account_id IN
+        <foreach collection="externalAccountIds" item="accountId" open="(" separator="," close=")">
+            #{accountId}
+        </foreach>
+    </delete>
+
     <select id="selectDistinctPlatformIds" resultType="int">
         SELECT DISTINCT platform_id
         FROM pool_accounts

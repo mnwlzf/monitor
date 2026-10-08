@@ -4,6 +4,7 @@ import com.monitor.platform.pool.PoolAccountEntity;
 import org.apache.ibatis.annotations.Param;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -35,6 +36,10 @@ public interface PoolAccountMapper {
     int updateSyncError(@Param("platformId") Integer platformId,
                         @Param("externalAccountId") Long externalAccountId,
                         @Param("error") String error);
+
+    /** 按外部账号 ID 批量删除号池账号（用于清理不再监控的类型）。 */
+    int deleteByExternalIds(@Param("platformId") Integer platformId,
+                            @Param("externalAccountIds") Collection<Long> externalAccountIds);
 
     /** 查询存在号池账号的平台 ID，供定时采集遍历。 */
     List<Integer> selectDistinctPlatformIds();

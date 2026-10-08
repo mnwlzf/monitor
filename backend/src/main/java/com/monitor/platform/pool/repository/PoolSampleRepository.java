@@ -8,6 +8,7 @@ import com.monitor.platform.pool.repository.mapper.PoolSampleMapper;
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -28,6 +29,18 @@ public class PoolSampleRepository {
             return 0;
         }
         return poolSampleMapper.insertSamples(samples);
+    }
+
+    /**
+     * 按外部账号 ID 批量删除逐请求明细。
+     *
+     * @return 实际删除行数
+     */
+    public int deleteByExternalIds(Integer platformId, Collection<Long> externalAccountIds) {
+        if (externalAccountIds == null || externalAccountIds.isEmpty()) {
+            return 0;
+        }
+        return poolSampleMapper.deleteByExternalIds(platformId, externalAccountIds);
     }
 
     /** 查询某号已入库明细的最大请求时间。 */

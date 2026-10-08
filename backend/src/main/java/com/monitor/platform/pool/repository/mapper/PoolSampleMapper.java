@@ -7,6 +7,7 @@ import com.monitor.platform.pool.PoolSeriesPoint;
 import org.apache.ibatis.annotations.Param;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -38,6 +39,10 @@ public interface PoolSampleMapper {
                                        @Param("from") OffsetDateTime from,
                                        @Param("to") OffsetDateTime to,
                                        @Param("granularity") String granularity);
+
+    /** 按外部账号 ID 批量删除逐请求明细（清理已不再监控的账号时同步删除）。 */
+    int deleteByExternalIds(@Param("platformId") Integer platformId,
+                            @Param("externalAccountIds") Collection<Long> externalAccountIds);
 
     /** 按模型聚合单个号池账号的指标。 */
     List<PoolModelMetrics> selectByModel(@Param("platformId") Integer platformId,

@@ -5,6 +5,7 @@ import com.monitor.platform.pool.repository.mapper.PoolAccountMapper;
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -49,6 +50,18 @@ public class PoolAccountRepository {
     /** 记录号池账号最近一次采集错误。 */
     public void updateSyncError(Integer platformId, Long externalAccountId, String error) {
         poolAccountMapper.updateSyncError(platformId, externalAccountId, error);
+    }
+
+    /**
+     * 按外部账号 ID 批量删除号池账号。
+     *
+     * @return 实际删除行数
+     */
+    public int deleteByExternalIds(Integer platformId, Collection<Long> externalAccountIds) {
+        if (externalAccountIds == null || externalAccountIds.isEmpty()) {
+            return 0;
+        }
+        return poolAccountMapper.deleteByExternalIds(platformId, externalAccountIds);
     }
 
     /** 查询存在号池账号的平台 ID。 */

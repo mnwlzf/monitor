@@ -78,6 +78,15 @@
         ON CONFLICT (platform_id, request_id) DO NOTHING
     </insert>
 
+    <delete id="deleteByExternalIds">
+        DELETE FROM pool_request_samples
+        WHERE platform_id = #{platformId}
+          AND external_account_id IN
+        <foreach collection="externalAccountIds" item="accountId" open="(" separator="," close=")">
+            #{accountId}
+        </foreach>
+    </delete>
+
     <select id="selectMaxCreatedAt" resultType="java.time.OffsetDateTime">
         SELECT MAX(created_at)
         FROM pool_request_samples

@@ -3,6 +3,7 @@ package com.monitor.platform.pool.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.config.RestClientConfig;
+import com.monitor.platform.pool.PoolAccountTypes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -42,6 +43,8 @@ public class Sub2AdminClient {
     private static final String ADMIN_ACCOUNTS_DATA_PATH = "/api/v1/admin/accounts/data";
     private static final String ADMIN_USAGE_PATH = "/api/v1/admin/usage";
     private static final String API_KEY_HEADER = "x-api-key";
+    /** 只拉取 API Key 类型的号池账号，其他类型（oauth 等）不参与监控。 */
+    private static final String ACCOUNT_TYPE_FILTER = PoolAccountTypes.API_KEY;
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final String[] ARRAY_KEYS = {"items", "list", "records", "rows", "accounts", "results", "data"};
     private static final int MAX_ERROR_LENGTH = 300;
@@ -56,11 +59,15 @@ public class Sub2AdminClient {
     }
 
     /**
-     * 拉取一页号池账号。
+     * 拉取一页 API Key 类型的号池账号。
+     *
+     * <p>上游支持 {@code type=apikey} 过滤，加了之后只需 1 页就能拿全，
+     * 不必再翻完整个号池（含大量无关的 oauth 账号）。</p>
      */
     public Sub2AdminAccountPage fetchAccounts(String baseUrl, String adminKey, int page, int pageSize) {
         JsonNode data = execute(() -> restClient.get()
-                .uri(baseUrl + ADMIN_ACCOUNTS_PATH + "?page={page}&page_size={size}", page, pageSize)
+                .uri(baseUrl + ADMIN_ACCOUNTS_PATH + "?page={page}&page_size={size}&type={type}",
+                        page, pageSize, ACCOUNT_TYPE_FILTER)
                 .header(API_KEY_HEADER, adminKey)
                 .retrieve()
                 .body(JsonNode.class), "获取号池账号列表");
@@ -80,11 +87,13 @@ public class Sub2AdminClient {
     /**
      * 拉取号池账号的明文凭证（管理员导出接口）。
      *
-     * <p>返回值仅在内存中用于与本地密钥哈希比对，调用方不得落库或写日志。</p>
+     * <p>返回值仅在内存中用于与本地密钥哈希比对，调用方不得落库或写日志。
+     * 同样带 {@code type=apikey} 过滤：不加过滤时上游要把全量账号（含 oauth）
+     * 的凭证都解出来，耗时可达数分钟甚至超时。</p>
      */
     public List<Sub2AdminAccountCredential> fetchAccountCredentials(String baseUrl, String adminKey) {
         JsonNode data = execute(() -> restClient.get()
-                .uri(baseUrl + ADMIN_ACCOUNTS_DATA_PATH)
+                .uri(baseUrl + ADMIN_ACCOUNTS_DATA_PATH + "?type={type}", ACCOUNT_TYPE_FILTER)
                 .header(API_KEY_HEADER, adminKey)
                 .retrieve()
                 .body(JsonNode.class), "获取号池账号凭证");

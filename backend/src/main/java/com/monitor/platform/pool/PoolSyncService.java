@@ -42,8 +42,8 @@ public class PoolSyncService {
     private static final int ACCOUNT_MAX_PAGES = 50;
     /** 逐请求明细每页条数。 */
     private static final int SAMPLE_PAGE_SIZE = 1000;
-    /** 逐请求明细最大翻页数。 */
-    private static final int SAMPLE_MAX_PAGES = 50;
+    /** 逐请求明细单个账号单轮最大翻页数（每页 1000 条），避免异常账号拖垮整轮采集。 */
+    private static final int SAMPLE_MAX_PAGES = 10;
     /** 自动绑定凭证导出的最小间隔：导出全量明文凭证很慢，避免每次健康检查都触发。 */
     private static final Duration BIND_MIN_INTERVAL = Duration.ofMinutes(30);
     /** 首次采集时回溯的天数。 */
@@ -109,15 +109,44 @@ public class PoolSyncService {
         OffsetDateTime now = OffsetDateTime.now();
         int synced = 0;
         for (Sub2AdminAccount account : accounts) {
-            if (account.id() == null) {
+            // 只监控 API Key 类型的号池账号，OAuth 等其他类型一律忽略。
+            if (account.id() == null || !PoolAccountTypes.isApiKey(account.accountType())) {
                 continue;
             }
             poolAccountRepository.upsert(toEntity(platform.getId(), account, now));
             synced++;
         }
+        int purged = purgeNonApiKeyAccounts(platform.getId());
         int bound = autoBindIfNeeded(platform, adminKey);
-        log.info("号池健康度同步完成: platformId={}, accountCount={}, boundCount={}",
-                platform.getId(), synced, bound);
+        log.info("号池健康度同步完成: platformId={}, apiKeyAccounts={}, purgedOtherTypes={}, boundCount={}",
+                platform.getId(), synced, purged, bound);
+    }
+
+    /**
+     * 清理历史遗留的非 API Key 号池账号及其明细。
+     *
+     * <p>只删除「类型明确且不是 apikey」的记录；类型为空（上游未返回）时保守保留，
+     * 避免解析异常导致误删。因此这里不依赖本轮拉取结果，天然不受分页中断影响。</p>
+     */
+    private int purgeNonApiKeyAccounts(Integer platformId) {
+        List<Long> stale = new ArrayList<>();
+        for (PoolAccountEntity account : poolAccountRepository.findByPlatform(platformId)) {
+            String normalized = PoolAccountTypes.normalize(account.getAccountType());
+            if (normalized != null && !PoolAccountTypes.API_KEY.equals(normalized)) {
+                stale.add(account.getExternalAccountId());
+                if (log.isDebugEnabled()) {
+                    log.debug("待清理号池账号: externalAccountId={}, accountType={}, name={}",
+                            account.getExternalAccountId(), account.getAccountType(), account.getName());
+                }
+            }
+        }
+        if (stale.isEmpty()) {
+            return 0;
+        }
+        poolSampleRepository.deleteByExternalIds(platformId, stale);
+        int deleted = poolAccountRepository.deleteByExternalIds(platformId, stale);
+        log.info("已清理非 API Key 类型号池账号: platformId={}, count={}", platformId, deleted);
+        return deleted;
     }
 
     /**
@@ -165,27 +194,24 @@ public class PoolSyncService {
         LocalDate today = LocalDate.now(ZONE);
         int totalInserted = 0;
         int collected = 0;
-        int skippedUnbound = 0;
+        int failed = 0;
         for (PoolAccountEntity account : accounts) {
-            // 只采集「已绑定本地密钥」的号池账号：上游号池里可能挂着大量与本项目无关的账号，
-            // 逐个拉取用量接口既慢又没有意义。
-            if (account.getBoundKeyId() == null) {
-                skippedUnbound++;
-                continue;
-            }
+            // pool_accounts 里已经只保留 API Key 类型账号，这里逐个增量拉取用量明细。
+            // 指标采集不依赖「本地密钥绑定」：绑定只用于展示这个号池账号对应本项目的哪个 Key。
             try {
                 totalInserted += syncAccountSamples(platform, adminKey, account, today);
                 poolAccountRepository.updateSyncError(platform.getId(), account.getExternalAccountId(), null);
                 collected++;
             } catch (Exception ex) {
+                failed++;
                 poolAccountRepository.updateSyncError(platform.getId(), account.getExternalAccountId(),
                         truncate(ex.getMessage(), MAX_ERROR_LENGTH));
                 log.warn("号池账号明细采集失败: platformId={}, externalAccountId={}, reason={}",
                         platform.getId(), account.getExternalAccountId(), ex.getMessage());
             }
         }
-        log.info("号池明细采集完成: platformId={}, accountCount={}, collected={}, skippedUnbound={}, insertedSamples={}",
-                platform.getId(), accounts.size(), collected, skippedUnbound, totalInserted);
+        log.info("号池明细采集完成: platformId={}, accountCount={}, collected={}, failed={}, insertedSamples={}",
+                platform.getId(), accounts.size(), collected, failed, totalInserted);
     }
 
     /**

@@ -31,7 +31,7 @@ class Sub2AdminClientTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         Sub2AdminClient client = new Sub2AdminClient(builder.build());
 
-        server.expect(requestTo(BASE_URL + "/api/v1/admin/accounts?page=1&page_size=100"))
+        server.expect(requestTo(BASE_URL + "/api/v1/admin/accounts?page=1&page_size=100&type=apikey"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("x-api-key", ADMIN_KEY))
                 .andRespond(withSuccess("""
@@ -87,7 +87,7 @@ class Sub2AdminClientTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         Sub2AdminClient client = new Sub2AdminClient(builder.build());
 
-        server.expect(requestTo(BASE_URL + "/api/v1/admin/accounts/data"))
+        server.expect(requestTo(BASE_URL + "/api/v1/admin/accounts/data?type=apikey"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("x-api-key", ADMIN_KEY))
                 .andRespond(withSuccess("""
@@ -169,7 +169,7 @@ class Sub2AdminClientTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         Sub2AdminClient client = new Sub2AdminClient(builder.build());
 
-        server.expect(requestTo(BASE_URL + "/api/v1/admin/accounts/data"))
+        server.expect(requestTo(BASE_URL + "/api/v1/admin/accounts/data?type=apikey"))
                 .andRespond(withSuccess("""
                         {"code": 401, "message": "invalid admin key"}
                         """, MediaType.APPLICATION_JSON));
