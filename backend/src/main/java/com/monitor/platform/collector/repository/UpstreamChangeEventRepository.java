@@ -32,6 +32,9 @@ public class UpstreamChangeEventRepository {
         if (entity.getMetadata() == null) {
             entity.setMetadata("{}");
         }
+        if (entity.getInUse() == null) {
+            entity.setInUse(false);
+        }
         eventMapper.insertEvent(entity);
         return entity;
     }
@@ -42,5 +45,16 @@ public class UpstreamChangeEventRepository {
     public List<UpstreamChangeEventEntity> findRecent(Integer accountId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 1000));
         return eventMapper.selectRecentEvents(accountId, safeLimit);
+    }
+
+    /**
+     * 查询指定时间之后、涉及正在使用密钥的变更事件。
+     *
+     * <p>供密钥变更邮件提醒使用：只返回 in_use 标记为真的 API_KEY 事件，
+     * 按发现时间倒序，最多返回 limit 条。</p>
+     */
+    public List<UpstreamChangeEventEntity> findInUseKeyEventsSince(OffsetDateTime since, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return eventMapper.selectInUseKeyEventsSince(since, safeLimit);
     }
 }

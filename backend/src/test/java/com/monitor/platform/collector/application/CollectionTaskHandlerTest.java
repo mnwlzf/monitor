@@ -1,5 +1,6 @@
 package com.monitor.platform.collector.application;
 
+import com.monitor.platform.mail.ApiKeyChangeAlertService;
 import com.monitor.platform.mail.BalanceAlertService;
 import org.junit.jupiter.api.Test;
 
@@ -16,6 +17,7 @@ class CollectionTaskHandlerTest {
 
     private final CollectionService collectionService = mock(CollectionService.class);
     private final BalanceAlertService balanceAlertService = mock(BalanceAlertService.class);
+    private final ApiKeyChangeAlertService apiKeyChangeAlertService = mock(ApiKeyChangeAlertService.class);
 
     @Test
     void handlersRouteToExpectedScope() {
@@ -25,7 +27,7 @@ class CollectionTaskHandlerTest {
         new CollectGroupsTaskHandler(collectionService).execute();
         verify(collectionService).collectAllAccounts(CollectionScope.GROUPS);
 
-        new CollectApiKeysTaskHandler(collectionService).execute();
+        new CollectApiKeysTaskHandler(collectionService, apiKeyChangeAlertService).execute();
         verify(collectionService).collectAllAccounts(CollectionScope.API_KEYS);
 
         new CollectAllAccountsTaskHandler(collectionService).execute();
@@ -37,7 +39,7 @@ class CollectionTaskHandlerTest {
         List<String> codes = List.of(
                 new CollectBalancesTaskHandler(collectionService, balanceAlertService).code(),
                 new CollectGroupsTaskHandler(collectionService).code(),
-                new CollectApiKeysTaskHandler(collectionService).code(),
+                new CollectApiKeysTaskHandler(collectionService, apiKeyChangeAlertService).code(),
                 new CollectAllAccountsTaskHandler(collectionService).code());
 
         assertThat(codes).doesNotHaveDuplicates();

@@ -23,11 +23,19 @@
           <el-option label="警告" value="WARNING" />
           <el-option label="严重" value="CRITICAL" />
         </el-select>
+        <el-checkbox v-model="onlyInUse" label="只看使用中的密钥变更" />
       </div>
     </el-card>
 
     <el-card shadow="never" class="admin-card admin-table-card">
-      <el-table v-if="filteredChanges.length" :data="filteredChanges" row-key="id" stripe class="admin-table">
+      <el-table
+        v-if="filteredChanges.length"
+        :data="filteredChanges"
+        row-key="id"
+        stripe
+        class="admin-table"
+        :row-class-name="changeRowClass"
+      >
         <el-table-column label="时间" width="160" fixed>
           <template #default="{ row }">
             <span class="admin-table-stack">{{ formatDate(row.detectedAt) }}</span>
@@ -40,9 +48,10 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="类型" min-width="140">
+        <el-table-column label="类型" min-width="190">
           <template #default="{ row }">
             <el-tag :type="severityType(row.severity)" effect="light">{{ changeLabel(row.type) }}</el-tag>
+            <el-tag v-if="row.inUse" size="small" type="danger" effect="dark" class="admin-change-inuse-tag">使用中</el-tag>
           </template>
         </el-table-column>
 
@@ -108,6 +117,7 @@ const keyword = ref('')
 const platformFilter = ref<number | null>(null)
 const typeFilter = ref('')
 const severityFilter = ref('')
+const onlyInUse = ref(false)
 const showChangeDetail = ref(false)
 const changeDetail = ref<ChangeEvent | null>(null)
 
@@ -130,8 +140,14 @@ const filteredChanges = computed(() => props.changes.filter(change => {
   const platformMatched = !platformFilter.value || change.platformId === platformFilter.value
   const typeMatched = !typeFilter.value || change.type === typeFilter.value
   const severityMatched = !severityFilter.value || change.severity === severityFilter.value
-  return keywordMatched && platformMatched && typeMatched && severityMatched
+  const inUseMatched = !onlyInUse.value || change.inUse
+  return keywordMatched && platformMatched && typeMatched && severityMatched && inUseMatched
 }))
+
+/** 正在使用密钥的变更整行高亮，便于快速定位。 */
+function changeRowClass({ row }: { row: ChangeEvent }) {
+  return row.inUse ? 'admin-change-in-use-row' : ''
+}
 
 function changeLabel(type: string) {
   return ({
@@ -244,3 +260,18 @@ function formatDate(value: string) {
   return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 </script>
+
+<style scoped>
+.admin-change-inuse-tag {
+  margin-left: 6px;
+}
+
+/* 正在使用密钥的变更整行高亮（覆盖 stripe 交替底色） */
+:deep(.admin-change-in-use-row) > td.el-table__cell {
+  background-color: #fff1f0 !important;
+}
+
+:deep(.admin-change-in-use-row) > td.el-table__cell:first-child {
+  box-shadow: inset 3px 0 0 #f56c6c;
+}
+</style>

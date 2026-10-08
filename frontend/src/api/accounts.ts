@@ -268,6 +268,7 @@ interface ChangeEventDto {
   severity?: string
   message?: string
   detectedAt?: string
+  inUse?: boolean
 }
 
 export async function listGroupRecords(platform: Platform, accountMap: Map<number, Account>): Promise<Channel[]> {
@@ -301,6 +302,7 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
     severity: row.severity === 'WARNING' || row.severity === 'CRITICAL' ? row.severity : 'INFO',
     detectedAt: row.detectedAt || new Date().toISOString(),
     message: row.message || '',
+    inUse: row.inUse === true,
   }))
 }
 interface UsageDashboardDto {

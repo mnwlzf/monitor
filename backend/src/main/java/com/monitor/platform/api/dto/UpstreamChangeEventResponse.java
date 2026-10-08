@@ -17,6 +17,7 @@ import java.time.OffsetDateTime;
  * @param severity     事件级别
  * @param message      可读说明
  * @param detectedAt   发现时间
+ * @param inUse        变更是否涉及正在使用（启用）的密钥
  */
 public record UpstreamChangeEventResponse(
         Long id,
@@ -30,6 +31,7 @@ public record UpstreamChangeEventResponse(
         String newValue,
         String severity,
         String message,
-        OffsetDateTime detectedAt
+        OffsetDateTime detectedAt,
+        boolean inUse
 ) {
 }

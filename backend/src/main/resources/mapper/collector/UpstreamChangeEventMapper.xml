@@ -17,25 +17,26 @@
         <result column="severity" property="severity"/>
         <result column="message" property="message"/>
         <result column="detected_at" property="detectedAt"/>
+        <result column="in_use" property="inUse"/>
         <result column="metadata" property="metadata" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
     </resultMap>
 
     <sql id="UpstreamChangeEventColumns">
         id, account_id, platform_type, collection_run_id, entity_type, entity_id,
         entity_key, change_type, field_name, old_value, new_value, severity,
-        message, detected_at, metadata
+        message, detected_at, in_use, metadata
     </sql>
 
     <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO upstream_change_events (
             account_id, platform_type, collection_run_id, entity_type, entity_id,
             entity_key, change_type, field_name, old_value, new_value, severity,
-            message, detected_at, metadata
+            message, detected_at, in_use, metadata
         ) VALUES (
             #{accountId}, #{platformType}, #{collectionRunId}, #{entityType}, #{entityId},
             #{entityKey}, #{changeType}, #{fieldName},
             #{oldValue,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}, #{newValue,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
-            #{severity}, #{message}, #{detectedAt}, #{metadata,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
+            #{severity}, #{message}, #{detectedAt}, #{inUse}, #{metadata,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
         )
     </insert>
 
@@ -43,6 +44,16 @@
         SELECT <include refid="UpstreamChangeEventColumns"/>
         FROM upstream_change_events
         WHERE account_id = #{accountId}
+        ORDER BY detected_at DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectInUseKeyEventsSince" resultMap="UpstreamChangeEventResultMap">
+        SELECT <include refid="UpstreamChangeEventColumns"/>
+        FROM upstream_change_events
+        WHERE in_use = TRUE
+          AND entity_type = 'API_KEY'
+          AND detected_at &gt;= #{since}
         ORDER BY detected_at DESC
         LIMIT #{limit}
     </select>

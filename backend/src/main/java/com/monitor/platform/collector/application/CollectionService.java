@@ -90,6 +90,8 @@ public class CollectionService {
     private static final String CHANGE_API_KEY_REMOVED = "API_KEY_REMOVED";
     private static final String CHANGE_API_KEY_UPDATED = "API_KEY_UPDATED";
     private static final String CHANGE_API_KEY_ROTATED = "API_KEY_ROTATED";
+    /** 密钥归一化状态：启用（正在使用）。 */
+    private static final String KEY_STATUS_ACTIVE = "ACTIVE";
     /** 额度统一展示单位。 */
     private static final String QUOTA_UNIT_USD = "USD";
     /** New API 密钥列表每页条数。 */
@@ -986,11 +988,13 @@ public class CollectionService {
             if (isNew) {
                 added++;
                 recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_ADDED,
-                        null, null, entity.getRawData(), "密钥新增: " + displayKeyName(entity));
+                        null, null, entity.getRawData(), "密钥新增: " + displayKeyName(entity),
+                        isKeyInUse(entity.getStatus()));
             } else if (rotated) {
                 updated++;
                 recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_ROTATED,
-                        "key", null, null, "密钥已轮换: " + displayKeyName(entity));
+                        "key", null, null, "密钥已轮换: " + displayKeyName(entity),
+                        isKeyInUse(entity.getStatus()));
             } else if (changed) {
                 updated++;
             }
@@ -1067,11 +1071,13 @@ public class CollectionService {
             if (isNew) {
                 added++;
                 recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_ADDED,
-                        null, null, entity.getRawData(), "密钥新增: " + displayKeyName(entity));
+                        null, null, entity.getRawData(), "密钥新增: " + displayKeyName(entity),
+                        isKeyInUse(entity.getStatus()));
             } else if (rotated) {
                 updated++;
                 recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_ROTATED,
-                        "key", null, null, "密钥已轮换: " + displayKeyName(entity));
+                        "key", null, null, "密钥已轮换: " + displayKeyName(entity),
+                        isKeyInUse(entity.getStatus()));
             } else if (changed) {
                 updated++;
             }
@@ -1154,24 +1160,32 @@ public class CollectionService {
     private boolean recordApiKeyChanges(AccountEntity account, String platformType, Long collectionRunId,
                                         AccountApiKeyEntity entity, String keyName, String status,
                                         String groupName) {
+        // 变更前后任一时刻处于启用状态，都视为「正在使用的密钥」发生的变更。
+        boolean inUse = isKeyInUse(entity.getStatus()) || isKeyInUse(status);
         boolean changed = false;
         if (!Objects.equals(entity.getKeyName(), keyName)) {
             // 名称本身就是变化项，用明确标注的上游 ID 定位密钥，避免旧名被误读成新名。
             recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
-                    "name", entity.getKeyName(), keyName, "密钥名称变化（密钥 ID " + entity.getExternalKeyId() + "）");
+                    "name", entity.getKeyName(), keyName,
+                    "密钥名称变化（密钥 ID " + entity.getExternalKeyId() + "）", inUse);
             changed = true;
         }
         if (!Objects.equals(entity.getStatus(), status)) {
             recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
-                    "status", entity.getStatus(), status, "密钥状态变化: " + displayKeyName(entity));
+                    "status", entity.getStatus(), status, "密钥状态变化: " + displayKeyName(entity), inUse);
             changed = true;
         }
         if (!Objects.equals(entity.getGroupName(), groupName)) {
             recordApiKeyChange(account, platformType, collectionRunId, entity, CHANGE_API_KEY_UPDATED,
-                    "group", entity.getGroupName(), groupName, "密钥所属分组变化: " + displayKeyName(entity));
+                    "group", entity.getGroupName(), groupName, "密钥所属分组变化: " + displayKeyName(entity), inUse);
             changed = true;
         }
         return changed;
+    }
+
+    /** 密钥归一化状态是否为启用（正在使用）。 */
+    private boolean isKeyInUse(String status) {
+        return KEY_STATUS_ACTIVE.equalsIgnoreCase(status);
     }
 
     /**
@@ -1191,7 +1205,7 @@ public class CollectionService {
             key.setLastChangedAt(now);
             apiKeyRepository.save(key);
             recordApiKeyChange(account, platformType, collectionRunId, key, CHANGE_API_KEY_REMOVED,
-                    "is_active", true, false, "密钥已失效: " + displayKeyName(key));
+                    "is_active", true, false, "密钥已失效: " + displayKeyName(key), isKeyInUse(key.getStatus()));
             saveApiKeySnapshot(key, collectionRunId, now);
             removed++;
         }
@@ -1227,7 +1241,7 @@ public class CollectionService {
     private void recordApiKeyChange(AccountEntity account, String platformType, Long collectionRunId,
                                     AccountApiKeyEntity entity, String changeType,
                                     String fieldName, Object oldValue, Object newValue,
-                                    String message) {
+                                    String message, boolean inUse) {
         UpstreamChangeEventEntity event = new UpstreamChangeEventEntity();
         event.setAccountId(account.getId());
         event.setPlatformType(platformType);
@@ -1241,6 +1255,7 @@ public class CollectionService {
         event.setNewValue(toJson(newValue));
         event.setSeverity("INFO");
         event.setMessage(message);
+        event.setInUse(inUse);
         event.setDetectedAt(OffsetDateTime.now());
         event.setMetadata("{}");
         log.info("记录密钥变更事件: accountId={}, runId={}, platformType={}, changeType={}, field={}, keyId={}",

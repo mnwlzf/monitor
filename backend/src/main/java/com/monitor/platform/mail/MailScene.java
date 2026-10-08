@@ -11,5 +11,8 @@ public enum MailScene {
     BALANCE_ALERT,
 
     /** 每日余额消耗报表。 */
-    DAILY_REPORT
+    DAILY_REPORT,
+
+    /** 正在使用的密钥发生变更提醒。 */
+    API_KEY_CHANGE
 }

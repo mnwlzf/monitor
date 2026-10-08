@@ -45,6 +45,8 @@ public class UpstreamChangeEventEntity {
     private String message;
     /** 发现时间。 */
     private OffsetDateTime detectedAt;
+    /** 变更是否涉及正在使用（启用）的密钥，仅 API_KEY 事件有意义。 */
+    private Boolean inUse;
     /** 扩展元数据，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String metadata;
@@ -77,6 +79,8 @@ public class UpstreamChangeEventEntity {
     public void setMessage(String message) { this.message = message; }
     public OffsetDateTime getDetectedAt() { return detectedAt; }
     public void setDetectedAt(OffsetDateTime detectedAt) { this.detectedAt = detectedAt; }
+    public Boolean getInUse() { return inUse; }
+    public void setInUse(Boolean inUse) { this.inUse = inUse; }
     public String getMetadata() { return metadata; }
     public void setMetadata(String metadata) { this.metadata = metadata; }
 }

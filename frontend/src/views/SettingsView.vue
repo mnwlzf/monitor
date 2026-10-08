@@ -161,6 +161,22 @@
       <el-divider content-position="left">该事件的收件人</el-divider>
       <RecipientEditor scene="DAILY_REPORT" :can-write="canWrite" />
     </el-card>
+
+    <el-card shadow="never" class="admin-card">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>密钥变更提醒</h3>
+            <p>正在使用（启用）的密钥发生变更时发送邮件提醒</p>
+          </div>
+        </div>
+      </template>
+
+      <small class="admin-form-hint">由「API Key 采集」任务在采集完成后触发，只提醒本轮新产生的变更。</small>
+
+      <el-divider content-position="left">该事件的收件人</el-divider>
+      <RecipientEditor scene="API_KEY_CHANGE" :can-write="canWrite" />
+    </el-card>
   </section>
 </template>
 

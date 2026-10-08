@@ -63,6 +63,8 @@ export interface ChangeEvent {
   severity: 'INFO' | 'WARNING' | 'CRITICAL'
   detectedAt: string
   message: string
+  /** 是否为「正在使用（启用）」密钥发生的变更，仅 API_KEY 事件有意义。 */
+  inUse: boolean
 }
 
 /**
@@ -182,7 +184,7 @@ export interface MailSettings {
 /**
  * 邮件事件场景：不同事件使用各自的收件人。
  */
-export type MailScene = 'BALANCE_ALERT' | 'DAILY_REPORT'
+export type MailScene = 'BALANCE_ALERT' | 'DAILY_REPORT' | 'API_KEY_CHANGE'
 
 /**
  * 邮件收件人（按事件场景区分）。
