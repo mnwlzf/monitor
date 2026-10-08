@@ -20,7 +20,7 @@
 
       <div class="admin-sidebar-status">
         <div class="admin-status-line"><i></i><span>采集服务运行中</span></div>
-        <small>最近刷新 {{ lastUpdated }}</small>
+        <small>{{ loading ? '正在加载数据…' : `最近刷新 ${lastUpdated}` }}</small>
       </div>
     </el-aside>
 
@@ -36,7 +36,7 @@
         </div>
         <div class="admin-header-actions">
           <el-tag type="success" effect="dark" round>自动采集已开启</el-tag>
-          <el-button :icon="Refresh" @click="refresh">刷新数据</el-button>
+          <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新数据</el-button>
           <el-tag v-if="currentUser" :type="isAdmin ? 'warning' : 'info'" effect="plain" round>
             {{ currentUser.username }} · {{ isAdmin ? '管理员' : '只读' }}
           </el-tag>
@@ -44,7 +44,14 @@
         </div>
       </el-header>
 
-      <el-main class="admin-main">
+      <el-main
+        v-loading="loading && hasLoadedOnce"
+        element-loading-text="正在加载监控数据…"
+        class="admin-main"
+      >
+        <!-- 首次加载展示骨架屏，避免白屏；后续刷新用遮罩 -->
+        <el-skeleton v-if="loading && !hasLoadedOnce" class="admin-main-skeleton" :rows="10" animated />
+        <template v-else>
         <OverviewView
           v-if="currentPage === 'overview'"
           :accounts="accountList"
@@ -86,6 +93,7 @@
         <ScheduledTasksView v-else-if="currentPage === 'schedules'" :can-write="isAdmin" />
         <SettingsView v-else-if="currentPage === 'settings'" :can-write="isAdmin" />
         <ChangesView v-else :changes="changes" :platforms="platformList" />
+        </template>
       </el-main>
     </el-container>
   </el-container>
@@ -133,6 +141,8 @@ const metricSeries = ref<Record<number, MetricPoint[]>>({})
 const usageDashboards = ref<UsageDashboard[]>([])
 const apiKeys = ref<ApiKey[]>([])
 const lastUpdated = ref(formatTime(new Date()))
+const loading = ref(false)
+const hasLoadedOnce = ref(false)
 
 const isAdmin = computed(() => currentUser.value?.admin === true)
 const visibleNavItems = computed(() => navItems.filter(item => !item.adminOnly || isAdmin.value))
@@ -184,6 +194,7 @@ async function refresh() {
 }
 
 async function loadRemoteData() {
+  loading.value = true
   try {
     platformList.value = await listPlatformRecords()
     const accountGroups = await Promise.all(platformList.value.map(platform => listAccountRecords(platform)))
@@ -222,6 +233,9 @@ async function loadRemoteData() {
     usageDashboards.value = []
     selectedAccountId.value = 0
     ElMessage.error(error instanceof Error ? error.message : '后端数据加载失败')
+  } finally {
+    loading.value = false
+    hasLoadedOnce.value = true
   }
 }
 

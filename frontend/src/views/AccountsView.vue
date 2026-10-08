@@ -28,6 +28,20 @@
           <el-option label="采集中" value="RUNNING" />
           <el-option label="未知状态" value="UNKNOWN" />
         </el-select>
+        <el-dropdown trigger="click" :hide-on-click="false">
+          <el-button :icon="Setting">列设置</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="col in columnOptions" :key="col.key">
+                <el-checkbox
+                  :model-value="visibleColumns.includes(col.key)"
+                  @change="toggleColumn(col.key)"
+                >{{ col.label }}</el-checkbox>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button v-if="hasActiveFilter" link type="primary" :icon="RefreshLeft" @click="resetFilters">重置筛选</el-button>
         <el-button :icon="Refresh" @click="emit('refresh')">刷新</el-button>
       </div>
       <div class="admin-summary-line">
@@ -41,7 +55,7 @@
     <el-card shadow="never" class="admin-card admin-table-card">
       <el-table
         v-if="filteredAccounts.length"
-        :data="sortedAccounts"
+        :data="pagedAccounts"
         row-key="id"
         stripe
         class="admin-table"
@@ -60,7 +74,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="平台" min-width="200">
+        <el-table-column v-if="visibleColumns.includes('platform')" label="平台" min-width="200">
           <template #default="{ row }">
             <div class="admin-platform-cell-head">
               <el-tag size="small" :type="row.platformType === 'newapi' ? 'primary' : 'success'" effect="plain">{{ row.platformName }}</el-tag>
@@ -85,7 +99,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="balance" label="余额" min-width="130" sortable="custom" align="right">
+        <el-table-column v-if="visibleColumns.includes('balance')" prop="balance" label="余额" min-width="130" sortable="custom" align="right">
           <template #default="{ row }">
             <el-tooltip content="点击查看余额趋势" placement="top" :show-after="200">
               <el-button link class="admin-balance-link" @click="openBalance(asAccount(row))">
@@ -95,7 +109,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="额度消耗" min-width="160">
+        <el-table-column v-if="visibleColumns.includes('usage')" label="额度消耗" min-width="160">
           <template #default="{ row }">
             <template v-if="row.platformType === 'newapi' && (row.quota || row.usedQuota)">
               <el-progress :percentage="usagePercent(asAccount(row))" :stroke-width="6" :show-text="false" />
@@ -105,25 +119,25 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="今日消耗" min-width="110" align="right">
+        <el-table-column v-if="visibleColumns.includes('todayCost')" label="今日消耗" min-width="110" align="right">
           <template #default="{ row }">
             <strong class="admin-num cost">{{ formatMoney(metricNumber(usageOf(asAccount(row)), 'today_actual_cost')) }}</strong>
           </template>
         </el-table-column>
 
-        <el-table-column prop="requestCount" label="请求数" min-width="110" sortable align="right">
+        <el-table-column v-if="visibleColumns.includes('requests')" prop="requestCount" label="请求数" min-width="110" sortable align="right">
           <template #default="{ row }">
             <span class="admin-num">{{ formatNumberOrDash(row.requestCount) }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="采集状态" min-width="120">
+        <el-table-column v-if="visibleColumns.includes('collectStatus')" label="采集状态" min-width="120">
           <template #default="{ row }">
             <el-tag :type="statusType(row.lastCollectStatus)" effect="light" round>{{ statusLabel(row.lastCollectStatus) }}</el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column label="采集时间" min-width="170">
+        <el-table-column v-if="visibleColumns.includes('collectTime')" label="采集时间" min-width="170">
           <template #default="{ row }">
             <div class="admin-table-stack">
               <span>最近 {{ row.lastCollectedAt ? formatDate(row.lastCollectedAt) : '暂无' }}</span>
@@ -132,7 +146,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" width="100">
+        <el-table-column v-if="visibleColumns.includes('status')" label="状态" width="100">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status ? 'success' : 'info'" effect="light">{{ row.status ? '启用' : '停用' }}</el-tag>
             <div v-if="platformDisabled(asAccount(row))" class="admin-table-sub muted">平台已停用</div>
@@ -145,13 +159,21 @@
             <el-button size="small" @click="openKeys(asAccount(row))">密钥{{ keyCount(asAccount(row)) ? `(${keyCount(asAccount(row))})` : '' }}</el-button>
             <el-button v-if="canWrite !== false" size="small" :loading="revealingPasswordId === row.id" @click="revealPassword(asAccount(row))">查看密码</el-button>
             <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="openEdit(asAccount(row))">编辑</el-button>
+            <el-popconfirm
+              v-if="canWrite !== false && row.status"
+              title="停用后该账号将不再参与采集，确认停用？"
+              width="240"
+              @confirm="toggleStatus(asAccount(row))"
+            >
+              <template #reference><el-button size="small" type="warning" plain>停用</el-button></template>
+            </el-popconfirm>
             <el-button
-              v-if="canWrite !== false"
+              v-else-if="canWrite !== false"
               size="small"
-              :type="row.status ? 'warning' : 'success'"
+              type="success"
               plain
               @click="toggleStatus(asAccount(row))"
-            >{{ row.status ? '停用' : '启用' }}</el-button>
+            >启用</el-button>
             <el-popconfirm v-if="canWrite !== false" title="确认删除该账号？" @confirm="remove(asAccount(row))">
               <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
             </el-popconfirm>
@@ -163,11 +185,22 @@
         <el-button v-if="!platforms.length" type="primary" @click="emit('manage-platforms')">去添加平台</el-button>
         <el-button v-else-if="canWrite !== false" type="primary" @click="openCreate()">添加账号</el-button>
       </el-empty>
+
+      <div v-if="filteredAccounts.length > pageSize" class="admin-pagination">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100]"
+          :total="filteredAccounts.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="showForm" :title="editingAccount ? '编辑采集账号' : '新增采集账号'" width="640px" destroy-on-close>
-      <el-form label-position="top" class="admin-form-grid">
-        <el-form-item label="所属平台" required class="admin-form-full">
+      <el-form ref="accountFormRef" :model="form" :rules="formRules" label-position="top" class="admin-form-grid">
+        <el-form-item label="所属平台" prop="platformId" required class="admin-form-full">
           <el-select
             v-model="form.platformId"
             :disabled="Boolean(editingAccount)"
@@ -178,10 +211,10 @@
           </el-select>
           <p class="admin-form-hint">{{ platformHint }}</p>
         </el-form-item>
-        <el-form-item label="登录账号" required>
+        <el-form-item label="登录账号" prop="loginName" required>
           <el-input v-model="form.loginName" placeholder="邮箱或用户名" />
         </el-form-item>
-        <el-form-item label="认证方式" class="admin-form-full">
+        <el-form-item label="认证方式" prop="authType" class="admin-form-full">
           <el-radio-group v-model="form.authType">
             <el-radio-button value="PASSWORD">账号密码</el-radio-button>
             <el-radio-button value="TOKEN" :disabled="!tokenLoginSupported">手动 Token</el-radio-button>
@@ -190,20 +223,20 @@
         </el-form-item>
 
         <template v-if="form.authType === 'PASSWORD'">
-          <el-form-item :label="editingAccount ? '登录密码（留空不修改）' : '登录密码'" :required="!editingAccount" class="admin-form-full">
+          <el-form-item :label="editingAccount ? '登录密码（留空不修改）' : '登录密码'" prop="password" :required="!editingAccount" class="admin-form-full">
             <el-input v-model="form.password" type="password" show-password placeholder="登录密码" />
           </el-form-item>
         </template>
 
         <template v-else>
-          <el-form-item label="Refresh Token（推荐）" class="admin-form-full">
+          <el-form-item label="Refresh Token（推荐）" prop="refreshToken" class="admin-form-full">
             <el-input v-model="form.refreshToken" type="password" show-password :placeholder="tokenPlaceholder" />
             <p class="admin-form-hint">
               浏览器登录后，从 <code>POST /api/v1/auth/login</code> 的响应里复制 <code>data.refresh_token</code>；
               会自动续期，约 30 天有效，过期后重新填写即可。
             </p>
           </el-form-item>
-          <el-form-item label="Access Token（可选）" class="admin-form-full">
+          <el-form-item label="Access Token（可选）" prop="accessToken" class="admin-form-full">
             <el-input v-model="form.accessToken" type="password" show-password :placeholder="tokenPlaceholder" />
             <p class="admin-form-hint">只有 access_token 时可用，但约 24 小时即过期；两样都有时优先用 refresh_token。</p>
           </el-form-item>
@@ -314,8 +347,8 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Monitor, Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Monitor, Plus, Refresh, RefreshLeft, Search, Setting } from '@element-plus/icons-vue'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import BalanceTrendPanel from '../components/BalanceTrendPanel.vue'
 import { createAccountRecord, deleteAccountRecord, revealAccountPasswordRecord, revealApiKeyRecord, updateAccountRecord, type CreateAccountInput, type UpdateAccountInput } from '../api/accounts'
 import type { Account, ApiKey, Platform, UsageDashboard } from '../types'
@@ -327,9 +360,71 @@ const keyword = ref('')
 const selectedPlatformId = ref<number | null>(null)
 const statusFilter = ref('')
 const balanceSort = ref<'ascending' | 'descending' | null>(null)
+
+/** 账号表可自定义显示的列（偏好存本地）。 */
+type AccountColumnKey = 'platform' | 'balance' | 'usage' | 'todayCost' | 'requests' | 'collectStatus' | 'collectTime' | 'status'
+
+const columnOptions: Array<{ key: AccountColumnKey; label: string }> = [
+  { key: 'platform', label: '平台' },
+  { key: 'balance', label: '余额' },
+  { key: 'usage', label: '额度消耗' },
+  { key: 'todayCost', label: '今日消耗' },
+  { key: 'requests', label: '请求数' },
+  { key: 'collectStatus', label: '采集状态' },
+  { key: 'collectTime', label: '采集时间' },
+  { key: 'status', label: '状态' },
+]
+
+const COLUMN_STORAGE_KEY = 'monitor.account.columns'
+const allColumnKeys = columnOptions.map(item => item.key)
+
+function loadVisibleColumns(): AccountColumnKey[] {
+  try {
+    const raw = localStorage.getItem(COLUMN_STORAGE_KEY)
+    if (!raw) return [...allColumnKeys]
+    const saved = (JSON.parse(raw) as string[]).filter(key => allColumnKeys.includes(key as AccountColumnKey))
+    return saved.length ? (saved as AccountColumnKey[]) : [...allColumnKeys]
+  } catch {
+    return [...allColumnKeys]
+  }
+}
+
+const visibleColumns = ref<AccountColumnKey[]>(loadVisibleColumns())
+
+watch(visibleColumns, value => {
+  try {
+    localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify(value))
+  } catch {
+    // 隐私模式等写入失败时忽略，不影响使用
+  }
+}, { deep: true })
+
+/** 切换列显示；至少保留一列，避免表格只剩操作列。 */
+function toggleColumn(key: AccountColumnKey) {
+  const next = visibleColumns.value.includes(key)
+    ? visibleColumns.value.filter(item => item !== key)
+    : [...visibleColumns.value, key]
+  if (!next.length) return
+  visibleColumns.value = columnOptions.filter(item => next.includes(item.key)).map(item => item.key)
+}
+
+const page = ref(1)
+const pageSize = ref(20)
+
+/** 是否处于筛选中（用于显示「重置筛选」）。 */
+const hasActiveFilter = computed(() =>
+  Boolean(keyword.value || statusFilter.value || selectedPlatformId.value))
+
+function resetFilters() {
+  keyword.value = ''
+  statusFilter.value = ''
+  selectedPlatformId.value = null
+}
 const showForm = ref(false)
 const saving = ref(false)
 const editingAccount = ref<Account | null>(null)
+const accountFormRef = ref<FormInstance | null>(null)
+
 const form = reactive<{
   platformId: number | null
   authType: 'PASSWORD' | 'TOKEN'
@@ -346,6 +441,30 @@ const form = reactive<{
   password: '',
   accessToken: '',
   refreshToken: '',
+})
+
+const formRules = computed<FormRules>(() => {
+  const creating = !editingAccount.value
+  return {
+    platformId: creating ? [{ required: true, message: '请选择所属平台', trigger: 'change' }] : [],
+    loginName: [{ required: true, message: '请填写登录账号', trigger: 'blur' }],
+    password: creating && form.authType === 'PASSWORD'
+      ? [{ required: true, message: '请填写登录密码', trigger: 'blur' }]
+      : [],
+    // 新建、或从密码登录切到 Token 登录时，必须提供 Token；已是 Token 登录时留空表示不修改
+    refreshToken: form.authType === 'TOKEN' && (creating || editingAccount.value?.authType !== 'TOKEN')
+      ? [{
+          validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+            if (!value && !form.accessToken) {
+              callback(new Error('请至少填写 Refresh Token 或 Access Token'))
+              return
+            }
+            callback()
+          },
+          trigger: 'blur',
+        }]
+      : [],
+  }
 })
 
 const authTypeHint = computed(() => form.authType === 'TOKEN'
@@ -514,6 +633,23 @@ const sortedAccounts = computed(() => [...filteredAccounts.value].sort((a, b) =>
   return accountSortKey(a).localeCompare(accountSortKey(b), 'zh-Hans-CN')
 }))
 
+/** 当前页展示的账号（在分组排序之后分页，保证分组不被拆散时顺序稳定）。 */
+const pagedAccounts = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return sortedAccounts.value.slice(start, start + pageSize.value)
+})
+
+/** 筛选条件变化时回到第一页。 */
+watch([keyword, statusFilter, selectedPlatformId, pageSize], () => {
+  page.value = 1
+})
+
+/** 数据减少（刷新/筛选）后把页码收回，避免停留在空页。 */
+watch(() => filteredAccounts.value.length, () => {
+  const maxPage = Math.max(1, Math.ceil(filteredAccounts.value.length / pageSize.value))
+  if (page.value > maxPage) page.value = maxPage
+})
+
 /** 余额列启用 custom 排序，交由 computed 在平台组内排序。 */
 function onSortChange({ prop, order }: { prop: string | null; order: 'ascending' | 'descending' | null }) {
   balanceSort.value = prop === 'balance' && order ? order : null
@@ -623,23 +759,11 @@ function openEdit(account: Account) {
 }
 
 async function submit() {
-  if (!form.loginName) {
-    ElMessage.warning('请填写登录账号')
-    return
-  }
-  if (!editingAccount.value && !form.platformId) {
-    ElMessage.warning('请选择所属平台')
-    return
-  }
-  if (form.authType === 'PASSWORD') {
-    if (!editingAccount.value && !form.password) {
-      ElMessage.warning('密码登录必须填写登录密码')
-      return
-    }
-  } else if (!form.accessToken && !form.refreshToken && editingAccount.value?.authType !== 'TOKEN') {
-    ElMessage.warning('Token 登录请至少填写 refresh_token 或 access_token')
-    return
-  }
+  const formEl = accountFormRef.value
+  if (!formEl) return
+  // 表单校验失败时字段下方会出现红字提示，这里不再弹 toast
+  const valid = await formEl.validate().catch(() => false)
+  if (!valid) return
 
   saving.value = true
   try {

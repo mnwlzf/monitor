@@ -15,7 +15,10 @@
             <h3>SMTP 设置</h3>
             <p>配置用于发送通知邮件的邮件服务</p>
           </div>
-          <el-button :loading="testing" :disabled="canWrite === false" @click="testConnection">测试连接</el-button>
+          <div class="settings-header-actions">
+            <el-button :loading="testing" :disabled="canWrite === false" @click="testConnection">测试连接</el-button>
+            <el-button v-if="canWrite !== false" type="primary" :loading="saving" @click="save">保存设置</el-button>
+          </div>
         </div>
       </template>
 
@@ -69,10 +72,6 @@
           </div>
         </div>
       </el-form>
-
-      <div v-if="canWrite !== false" class="settings-actions">
-        <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
-      </div>
     </el-card>
 
     <el-card shadow="never" class="admin-card">
@@ -332,10 +331,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.settings-actions {
+.settings-header-actions {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 4px;
+  align-items: center;
+  gap: 10px;
 }
 
 .settings-toggle-row {

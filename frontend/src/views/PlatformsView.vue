@@ -72,13 +72,21 @@
           <el-button size="small" @click="emit('view-accounts', platform)">查看账号</el-button>
           <el-button v-if="canWrite !== false" size="small" type="primary" plain @click="emit('add-account', platform)">添加账号</el-button>
           <el-button v-if="canWrite !== false" size="small" @click="openEdit(platform)">编辑</el-button>
+          <el-popconfirm
+            v-if="canWrite !== false && platform.status"
+            title="停用后该平台下所有账号都不再参与采集，确认停用？"
+            width="260"
+            @confirm="toggleStatus(platform)"
+          >
+            <template #reference><el-button size="small" type="warning" plain>停用</el-button></template>
+          </el-popconfirm>
           <el-button
-            v-if="canWrite !== false"
+            v-else-if="canWrite !== false"
             size="small"
-            :type="platform.status ? 'warning' : 'success'"
+            type="success"
             plain
             @click="toggleStatus(platform)"
-          >{{ platform.status ? '停用' : '启用' }}</el-button>
+          >启用</el-button>
           <el-popconfirm
             :title="platform.accountCount ? '该平台下还有 ' + platform.accountCount + ' 个账号，需先删除账号后才能删除平台。' : '确认删除该平台？'"
             :confirm-button-text="platform.accountCount ? '知道了' : '删除'"
@@ -96,17 +104,17 @@
     </el-card>
 
     <el-dialog v-model="showForm" :title="editingPlatform ? '编辑平台实例' : '新增平台实例'" width="560px" destroy-on-close>
-      <el-form label-position="top">
+      <el-form ref="platformFormRef" :model="form" :rules="formRules" label-position="top">
         <el-form-item label="平台类型" required>
           <el-radio-group v-model="form.type">
             <el-radio-button value="sub2api">Sub2API</el-radio-button>
             <el-radio-button value="newapi">New API</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="平台名称" required>
+        <el-form-item label="平台名称" prop="name" required>
           <el-input v-model="form.name" placeholder="例如：云眠 New API" />
         </el-form-item>
-        <el-form-item label="Base URL" required>
+        <el-form-item label="Base URL" prop="baseUrl" required>
           <el-input v-model="form.baseUrl" placeholder="https://example.com" />
         </el-form-item>
         <p class="admin-form-hint">
@@ -125,7 +133,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { Plus, Search } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import MetricCard from '../components/MetricCard.vue'
 import { createPlatformRecord, deletePlatformRecord, updatePlatformRecord, type CreatePlatformInput } from '../api/accounts'
 import type { Account, Platform, PlatformType, UsageDashboard } from '../types'
@@ -145,7 +153,17 @@ const onlyAbnormal = ref(false)
 const showForm = ref(false)
 const saving = ref(false)
 const editingPlatform = ref<Platform | null>(null)
+const platformFormRef = ref<FormInstance | null>(null)
+
 const form = reactive<CreatePlatformInput>({ name: '', baseUrl: '', type: 'sub2api' })
+
+const formRules: FormRules = {
+  name: [{ required: true, message: '请填写平台名称', trigger: 'blur' }],
+  baseUrl: [
+    { required: true, message: '请填写 Base URL', trigger: 'blur' },
+    { pattern: /^https?:\/\/.+/i, message: 'Base URL 必须以 http:// 或 https:// 开头', trigger: 'blur' },
+  ],
+}
 
 const enabledCount = computed(() => props.platforms.filter(platform => platform.status).length)
 const newApiCount = computed(() => props.platforms.filter(platform => platform.type === 'newapi').length)
@@ -214,14 +232,12 @@ function openEdit(platform: Platform) {
 }
 
 async function submit() {
-  if (!form.name || !form.baseUrl) {
-    ElMessage.warning('请填写平台名称与 Base URL')
-    return
-  }
-  if (!/^https?:\/\/.+/i.test(form.baseUrl)) {
-    ElMessage.warning('Base URL 必须以 http:// 或 https:// 开头')
-    return
-  }
+  const formEl = platformFormRef.value
+  if (!formEl) return
+  // 表单校验失败时字段下方会出现红字提示，这里不再弹 toast
+  const valid = await formEl.validate().catch(() => false)
+  if (!valid) return
+
   saving.value = true
   try {
     if (editingPlatform.value) {

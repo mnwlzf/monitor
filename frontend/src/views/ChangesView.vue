@@ -24,13 +24,14 @@
           <el-option label="严重" value="CRITICAL" />
         </el-select>
         <el-checkbox v-model="onlyInUse" label="只看使用中的密钥变更" />
+        <el-button v-if="hasActiveFilter" link type="primary" :icon="RefreshLeft" @click="resetFilters">重置筛选</el-button>
       </div>
     </el-card>
 
     <el-card shadow="never" class="admin-card admin-table-card">
       <el-table
         v-if="filteredChanges.length"
-        :data="filteredChanges"
+        :data="pagedChanges"
         row-key="id"
         stripe
         class="admin-table"
@@ -80,6 +81,17 @@
       </el-table>
 
       <el-empty v-else description="暂无变更记录" />
+
+      <div v-if="filteredChanges.length > pageSize" class="admin-pagination">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100]"
+          :total="filteredChanges.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="showChangeDetail" title="变更详情" width="720px" destroy-on-close append-to-body>
@@ -107,8 +119,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Search } from '@element-plus/icons-vue'
+import { computed, ref, watch } from 'vue'
+import { RefreshLeft, Search } from '@element-plus/icons-vue'
 import type { ChangeEvent, Platform } from '../types'
 
 const props = defineProps<{ changes: ChangeEvent[]; platforms: Platform[] }>()
@@ -118,6 +130,21 @@ const platformFilter = ref<number | null>(null)
 const typeFilter = ref('')
 const severityFilter = ref('')
 const onlyInUse = ref(false)
+
+const page = ref(1)
+const pageSize = ref(20)
+
+/** 是否处于筛选中（用于显示「重置筛选」）。 */
+const hasActiveFilter = computed(() =>
+  Boolean(keyword.value || platformFilter.value || typeFilter.value || severityFilter.value || onlyInUse.value))
+
+function resetFilters() {
+  keyword.value = ''
+  platformFilter.value = null
+  typeFilter.value = ''
+  severityFilter.value = ''
+  onlyInUse.value = false
+}
 const showChangeDetail = ref(false)
 const changeDetail = ref<ChangeEvent | null>(null)
 
@@ -148,6 +175,23 @@ const filteredChanges = computed(() => props.changes.filter(change => {
 function changeRowClass({ row }: { row: ChangeEvent }) {
   return row.inUse ? 'admin-change-in-use-row' : ''
 }
+
+/** 当前页展示的变更记录。 */
+const pagedChanges = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredChanges.value.slice(start, start + pageSize.value)
+})
+
+/** 筛选条件变化时回到第一页。 */
+watch([keyword, platformFilter, typeFilter, severityFilter, onlyInUse, pageSize], () => {
+  page.value = 1
+})
+
+/** 数据减少（刷新/筛选）后把页码收回，避免停留在空页。 */
+watch(() => filteredChanges.value.length, () => {
+  const maxPage = Math.max(1, Math.ceil(filteredChanges.value.length / pageSize.value))
+  if (page.value > maxPage) page.value = maxPage
+})
 
 function changeLabel(type: string) {
   return ({
