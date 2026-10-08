@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Size;
  * @param name     平台名称
  * @param baseUrl  平台基础地址
  * @param platform 平台类型，newapi 或 sub2api
+ * @param adminKey Sub2API 管理员密钥（可选，仅 sub2api 平台使用）
  */
 public record CreatePlatformRequest(
         @NotBlank(message = "平台名称不能为空")
@@ -23,6 +24,9 @@ public record CreatePlatformRequest(
 
         @NotBlank(message = "平台类型不能为空")
         @Pattern(regexp = "newapi|sub2api", message = "平台类型仅支持 newapi 或 sub2api")
-        String platform
+        String platform,
+
+        @Size(max = 500, message = "管理员密钥不能超过 500 个字符")
+        String adminKey
 ) {
 }

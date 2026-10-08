@@ -31,6 +31,14 @@ public interface AccountApiKeyMapper {
     List<AccountApiKeyEntity> selectKeysByAccount(@Param("accountId") Integer accountId,
                                                   @Param("activeOnly") boolean activeOnly);
 
+    /**
+     * 按平台与密钥 SHA-256 查询有效的本地密钥主键。
+     *
+     * <p>号池账号绑定上游 Key 时使用：只传哈希，绝不传明文。</p>
+     */
+    Long selectActiveKeyIdByHash(@Param("platformId") Integer platformId,
+                                 @Param("keyHash") String keyHash);
+
     /** 将未出现在本轮采集结果中的密钥标记为失效。 */
     int deactivateMissingKeys(@Param("accountId") Integer accountId,
                               @Param("platformType") String platformType,

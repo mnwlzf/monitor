@@ -14,21 +14,31 @@
         <result column="deleted_at" property="deletedAt"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
+        <result column="admin_key_encryption_algorithm" property="adminKeyEncryptionAlgorithm"/>
+        <result column="admin_key_encrypted_payload" property="adminKeyEncryptedPayload"/>
+        <result column="admin_key_initialization_vector" property="adminKeyInitializationVector"/>
+        <result column="admin_key_key_version" property="adminKeyKeyVersion"/>
     </resultMap>
 
     <sql id="PlatformColumns">
         id, platform_name, url, platform_type, status, description, settings,
-        last_collected_at, deleted_at, created_at, updated_at
+        last_collected_at, deleted_at, created_at, updated_at,
+        admin_key_encryption_algorithm, admin_key_encrypted_payload,
+        admin_key_initialization_vector, admin_key_key_version
     </sql>
 
     <insert id="insertPlatform" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO platforms (
             platform_name, url, platform_type, status, description, settings,
-            last_collected_at, deleted_at, created_at, updated_at
+            last_collected_at, deleted_at, created_at, updated_at,
+            admin_key_encryption_algorithm, admin_key_encrypted_payload,
+            admin_key_initialization_vector, admin_key_key_version
         ) VALUES (
             #{platformName}, #{url}, #{platformType}, #{status}, #{description},
             #{settings,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}, #{lastCollectedAt}, #{deletedAt},
-            #{createdAt}, #{updatedAt}
+            #{createdAt}, #{updatedAt},
+            #{adminKeyEncryptionAlgorithm}, #{adminKeyEncryptedPayload},
+            #{adminKeyInitializationVector}, #{adminKeyKeyVersion}
         )
     </insert>
 
@@ -42,6 +52,10 @@
             settings = #{settings,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
             last_collected_at = #{lastCollectedAt},
             deleted_at = #{deletedAt},
+            admin_key_encryption_algorithm = #{adminKeyEncryptionAlgorithm},
+            admin_key_encrypted_payload = #{adminKeyEncryptedPayload},
+            admin_key_initialization_vector = #{adminKeyInitializationVector},
+            admin_key_key_version = #{adminKeyKeyVersion},
             updated_at = #{updatedAt}
         WHERE id = #{id}
     </update>

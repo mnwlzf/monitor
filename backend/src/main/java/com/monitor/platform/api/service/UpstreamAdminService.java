@@ -122,6 +122,7 @@ public class UpstreamAdminService {
         entity.setPlatformType(request.platform());
         entity.setStatus(true);
         entity.setSettings("{}");
+        applyAdminKey(entity, request.adminKey(), false);
         platformRepository.save(entity);
 
         log.info("创建上游平台成功: platformId={}, name={}, type={}, baseUrl={}",
@@ -163,6 +164,7 @@ public class UpstreamAdminService {
         if (request.status() != null) {
             entity.setStatus(request.status());
         }
+        applyAdminKey(entity, request.adminKey(), Boolean.TRUE.equals(request.clearAdminKey()));
 
         platformRepository.save(entity);
 
@@ -408,8 +410,33 @@ public class UpstreamAdminService {
                 entity.getPlatformName(),
                 entity.getUrl(),
                 entity.getPlatformType(),
-                entity.getStatus()
+                entity.getStatus(),
+                entity.hasAdminKey()
         );
+    }
+
+    /**
+     * 写入或清除平台的管理员密钥密文。
+     *
+     * <p>{@code clear} 为真时清空全部密钥字段；否则仅在 {@code adminKey} 非空时加密覆盖，
+     * 传入空值表示保留原密钥（编辑平台时不回显明文，避免误清空）。</p>
+     */
+    private void applyAdminKey(PlatformEntity entity, String adminKey, boolean clear) {
+        if (clear) {
+            entity.setAdminKeyEncryptionAlgorithm(null);
+            entity.setAdminKeyEncryptedPayload(null);
+            entity.setAdminKeyInitializationVector(null);
+            entity.setAdminKeyKeyVersion(null);
+            return;
+        }
+        if (adminKey == null || adminKey.isBlank()) {
+            return;
+        }
+        CredentialCipher.EncryptedCredential encrypted = credentialCipher.encrypt(adminKey.trim());
+        entity.setAdminKeyEncryptionAlgorithm(encrypted.algorithm());
+        entity.setAdminKeyEncryptedPayload(encrypted.encryptedPayload());
+        entity.setAdminKeyInitializationVector(encrypted.initializationVector());
+        entity.setAdminKeyKeyVersion(encrypted.keyVersion());
     }
 
     /**

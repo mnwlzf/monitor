@@ -1,0 +1,145 @@
+package com.monitor.platform.pool;
+
+import com.monitor.platform.api.dto.PoolAccountResponse;
+import com.monitor.platform.api.dto.PoolSeriesPointResponse;
+import com.monitor.platform.collector.repository.AccountApiKeyRepository;
+import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
+import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.pool.repository.PoolAccountRepository;
+import com.monitor.platform.pool.repository.PoolSampleRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.when;
+
+/**
+ * 号池查询服务的聚合映射与缓存命中率计算测试。
+ */
+@ExtendWith(MockitoExtension.class)
+class PoolQueryServiceTest {
+
+    @Mock private PoolAccountRepository poolAccountRepository;
+    @Mock private PoolSampleRepository poolSampleRepository;
+    @Mock private AccountApiKeyRepository apiKeyRepository;
+
+    private PoolQueryService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new PoolQueryService(poolAccountRepository, poolSampleRepository, apiKeyRepository);
+    }
+
+    private PoolAccountEntity account(long externalId, String name, Long boundKeyId) {
+        PoolAccountEntity entity = new PoolAccountEntity();
+        entity.setPlatformId(1);
+        entity.setExternalAccountId(externalId);
+        entity.setName(name);
+        entity.setStatus("active");
+        entity.setSchedulable(true);
+        entity.setBoundKeyId(boundKeyId);
+        return entity;
+    }
+
+    private PoolAccountMetrics metrics(long externalId, long input, long read, long creation) {
+        PoolAccountMetrics m = new PoolAccountMetrics();
+        m.setExternalAccountId(externalId);
+        m.setRequests(160L);
+        m.setInputTokens(input);
+        m.setOutputTokens(154483L);
+        m.setCacheReadTokens(read);
+        m.setCacheCreationTokens(creation);
+        m.setFirstTokenSamples(158L);
+        m.setAvgFirstTokenMs(820.0);
+        m.setP95FirstTokenMs(2100.0);
+        m.setAvgDurationMs(46950.5);
+        m.setTotalCost(new BigDecimal("24.28697552"));
+        m.setTotalActualCost(new BigDecimal("3.8859160832"));
+        return m;
+    }
+
+    @Test
+    void shouldComputeCacheHitRateAndAttachBoundKey() {
+        PoolAccountEntity entity = account(52064L, "满血", 9L);
+        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(entity));
+        when(poolSampleRepository.aggregateByPlatform(ArgumentMatchers.eq(1),
+                ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(List.of(metrics(52064L, 4081379L, 12672804L, 0L)));
+
+        AccountApiKeyEntity key = new AccountApiKeyEntity();
+        key.setKeyName("上游满血");
+        key.setKeyMasked("sk-abc****1234");
+        when(apiKeyRepository.findById(9L)).thenReturn(Optional.of(key));
+
+        List<PoolAccountResponse> result = service.listAccounts(1, "7d");
+
+        assertEquals(1, result.size());
+        PoolAccountResponse response = result.get(0);
+        assertEquals("满血", response.name());
+        assertEquals(160L, response.requests());
+        assertEquals("上游满血", response.boundKeyName());
+        assertEquals("sk-abc****1234", response.boundKeyMasked());
+        // 缓存命中率 = 12672804 / (4081379 + 12672804 + 0) ≈ 0.7563
+        assertEquals(0.7563, response.cacheHitRate(), 0.0001);
+    }
+
+    @Test
+    void shouldReturnNullCacheHitRateWhenDenominatorIsZero() {
+        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(account(1L, "空", null)));
+        when(poolSampleRepository.aggregateByPlatform(ArgumentMatchers.eq(1),
+                ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(List.of());
+
+        List<PoolAccountResponse> result = service.listAccounts(1, "7d");
+
+        assertEquals(1, result.size());
+        assertEquals(0L, result.get(0).requests());
+        assertNull(result.get(0).cacheHitRate());
+    }
+
+    @Test
+    void shouldMapSeriesWithCacheHitRate() {
+        when(poolAccountRepository.findByPlatformAndExternalId(1, 52064L))
+                .thenReturn(Optional.of(account(52064L, "满血", null)));
+
+        PoolSeriesPoint point = new PoolSeriesPoint();
+        point.setBucket(OffsetDateTime.parse("2026-10-08T10:00:00+08:00"));
+        point.setRequests(12L);
+        point.setInputTokens(100L);
+        point.setCacheReadTokens(300L);
+        point.setCacheCreationTokens(100L);
+        point.setFirstTokenSamples(12L);
+        point.setAvgFirstTokenMs(900.0);
+        point.setP95FirstTokenMs(2000.0);
+        point.setAvgDurationMs(30000.0);
+        point.setTotalActualCost(new BigDecimal("0.5"));
+        when(poolSampleRepository.series(ArgumentMatchers.eq(1), ArgumentMatchers.eq(52064L),
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq("hour")))
+                .thenReturn(List.of(point));
+
+        List<PoolSeriesPointResponse> result = service.series(1, 52064L, "1d", null);
+
+        assertEquals(1, result.size());
+        assertEquals(12L, result.get(0).requests());
+        // 300 / (100 + 300 + 100) = 0.6
+        assertEquals(0.6, result.get(0).cacheHitRate(), 0.0001);
+    }
+
+    @Test
+    void shouldRejectUnknownPoolAccount() {
+        when(poolAccountRepository.findByPlatformAndExternalId(1, 999L)).thenReturn(Optional.empty());
+
+        assertThrows(BusinessException.class, () -> service.series(1, 999L, "7d", null));
+    }
+}

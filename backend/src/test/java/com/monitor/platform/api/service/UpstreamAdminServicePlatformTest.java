@@ -92,7 +92,7 @@ class UpstreamAdminServicePlatformTest {
         when(platformRepository.findByName("云眠")).thenReturn(Optional.empty());
 
         PlatformResponse response = service.createPlatform(
-                new CreatePlatformRequest("云眠", "https://a.example.com", "sub2api"));
+                new CreatePlatformRequest("云眠", "https://a.example.com", "sub2api", null));
 
         assertEquals("云眠", response.name());
         assertEquals("https://a.example.com", response.baseUrl());
@@ -106,7 +106,7 @@ class UpstreamAdminServicePlatformTest {
         when(platformRepository.findByName("云眠")).thenReturn(Optional.of(platform(1, "云眠", "https://a", "sub2api")));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.createPlatform(
-                new CreatePlatformRequest("云眠", "https://b.example.com", "newapi")));
+                new CreatePlatformRequest("云眠", "https://b.example.com", "newapi", null)));
 
         assertEquals("平台名称已存在: 云眠", ex.getMessage());
         verify(platformRepository, never()).save(ArgumentMatchers.any(PlatformEntity.class));
@@ -126,7 +126,7 @@ class UpstreamAdminServicePlatformTest {
         when(accountRepository.findByPlatformId(1)).thenReturn(List.of(account));
 
         PlatformResponse response = service.updatePlatform(1,
-                new UpdatePlatformRequest("新名", "https://new.example.com", "newapi", null));
+                new UpdatePlatformRequest("新名", "https://new.example.com", "newapi", null, null, null));
 
         assertEquals("新名", response.name());
         assertEquals("https://new.example.com", response.baseUrl());
@@ -144,7 +144,7 @@ class UpstreamAdminServicePlatformTest {
         when(accountRepository.findByPlatformId(1)).thenReturn(List.of());
 
         PlatformResponse response = service.updatePlatform(1,
-                new UpdatePlatformRequest(null, null, null, false));
+                new UpdatePlatformRequest(null, null, null, false, null, null));
 
         assertEquals("原名", response.name());
         assertEquals("https://old.example.com", response.baseUrl());
@@ -159,7 +159,7 @@ class UpstreamAdminServicePlatformTest {
         when(platformRepository.findByName("乙")).thenReturn(Optional.of(platform(2, "乙", "https://b", "newapi")));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.updatePlatform(1,
-                new UpdatePlatformRequest("乙", null, null, null)));
+                new UpdatePlatformRequest("乙", null, null, null, null, null)));
 
         assertEquals("平台名称已存在: 乙", ex.getMessage());
     }
@@ -169,7 +169,7 @@ class UpstreamAdminServicePlatformTest {
         when(platformRepository.findById(99)).thenReturn(Optional.empty());
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.updatePlatform(99,
-                new UpdatePlatformRequest("任意", null, null, null)));
+                new UpdatePlatformRequest("任意", null, null, null, null, null)));
 
         assertEquals("平台不存在: 99", ex.getMessage());
     }

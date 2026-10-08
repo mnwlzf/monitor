@@ -117,6 +117,22 @@
         <el-form-item label="Base URL" prop="baseUrl" required>
           <el-input v-model="form.baseUrl" placeholder="https://example.com" />
         </el-form-item>
+        <el-form-item v-if="form.type === 'sub2api'" label="Sub2API 管理员密钥">
+          <el-input
+            v-model="form.adminKey"
+            type="password"
+            show-password
+            clearable
+            :placeholder="editingPlatform?.adminKeyConfigured ? '已配置，留空表示不修改' : '用于号池监控的只读管理员密钥（x-api-key）'"
+          />
+          <p class="admin-form-hint">
+            仅用于只读调用号池账号与用量接口，密钥会加密保存且不会回显；
+            号池监控的缓存命中率、首 Token 耗时等指标都依赖它。
+          </p>
+          <el-checkbox v-if="editingPlatform?.adminKeyConfigured" v-model="form.clearAdminKey">
+            清除已保存的管理员密钥
+          </el-checkbox>
+        </el-form-item>
         <p class="admin-form-hint">
           <template v-if="editingPlatform">保存后该平台下 {{ editingPlatform.accountCount }} 个账号将按新的类型与 Base URL 采集。</template>
           <template v-else>平台创建完成后，可在「账号管理」或此处的「添加账号」为该平台挂载一个或多个采集账号。</template>
@@ -155,7 +171,13 @@ const saving = ref(false)
 const editingPlatform = ref<Platform | null>(null)
 const platformFormRef = ref<FormInstance | null>(null)
 
-const form = reactive<CreatePlatformInput>({ name: '', baseUrl: '', type: 'sub2api' })
+const form = reactive<CreatePlatformInput & { clearAdminKey: boolean }>({
+  name: '',
+  baseUrl: '',
+  type: 'sub2api',
+  adminKey: '',
+  clearAdminKey: false,
+})
 
 const formRules: FormRules = {
   name: [{ required: true, message: '请填写平台名称', trigger: 'blur' }],
@@ -221,13 +243,13 @@ function formatMoney(value: number | null | undefined) {
 
 function openCreate() {
   editingPlatform.value = null
-  Object.assign(form, { name: '', baseUrl: '', type: 'sub2api' })
+  Object.assign(form, { name: '', baseUrl: '', type: 'sub2api', adminKey: '', clearAdminKey: false })
   showForm.value = true
 }
 
 function openEdit(platform: Platform) {
   editingPlatform.value = platform
-  Object.assign(form, { name: platform.name, baseUrl: platform.url, type: platform.type })
+  Object.assign(form, { name: platform.name, baseUrl: platform.url, type: platform.type, adminKey: '', clearAdminKey: false })
   showForm.value = true
 }
 

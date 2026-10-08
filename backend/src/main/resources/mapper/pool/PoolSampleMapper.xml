@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.pool.repository.mapper.PoolSampleMapper">
+
+    <resultMap id="PoolAccountMetricsResultMap" type="com.monitor.platform.pool.PoolAccountMetrics">
+        <result column="external_account_id" property="externalAccountId"/>
+        <result column="requests" property="requests"/>
+        <result column="input_tokens" property="inputTokens"/>
+        <result column="output_tokens" property="outputTokens"/>
+        <result column="cache_read_tokens" property="cacheReadTokens"/>
+        <result column="cache_creation_tokens" property="cacheCreationTokens"/>
+        <result column="first_token_samples" property="firstTokenSamples"/>
+        <result column="avg_first_token_ms" property="avgFirstTokenMs"/>
+        <result column="p95_first_token_ms" property="p95FirstTokenMs"/>
+        <result column="avg_duration_ms" property="avgDurationMs"/>
+        <result column="total_cost" property="totalCost"/>
+        <result column="total_actual_cost" property="totalActualCost"/>
+    </resultMap>
+
+    <resultMap id="PoolSeriesPointResultMap" type="com.monitor.platform.pool.PoolSeriesPoint">
+        <result column="bucket" property="bucket"/>
+        <result column="requests" property="requests"/>
+        <result column="input_tokens" property="inputTokens"/>
+        <result column="output_tokens" property="outputTokens"/>
+        <result column="cache_read_tokens" property="cacheReadTokens"/>
+        <result column="cache_creation_tokens" property="cacheCreationTokens"/>
+        <result column="first_token_samples" property="firstTokenSamples"/>
+        <result column="avg_first_token_ms" property="avgFirstTokenMs"/>
+        <result column="p95_first_token_ms" property="p95FirstTokenMs"/>
+        <result column="avg_duration_ms" property="avgDurationMs"/>
+        <result column="total_actual_cost" property="totalActualCost"/>
+    </resultMap>
+
+    <resultMap id="PoolModelMetricsResultMap" type="com.monitor.platform.pool.PoolModelMetrics">
+        <result column="model" property="model"/>
+        <result column="requests" property="requests"/>
+        <result column="input_tokens" property="inputTokens"/>
+        <result column="output_tokens" property="outputTokens"/>
+        <result column="cache_read_tokens" property="cacheReadTokens"/>
+        <result column="cache_creation_tokens" property="cacheCreationTokens"/>
+        <result column="first_token_samples" property="firstTokenSamples"/>
+        <result column="avg_first_token_ms" property="avgFirstTokenMs"/>
+        <result column="p95_first_token_ms" property="p95FirstTokenMs"/>
+        <result column="avg_duration_ms" property="avgDurationMs"/>
+        <result column="total_actual_cost" property="totalActualCost"/>
+    </resultMap>
+
+    <sql id="MetricAggregates">
+        COUNT(*)                                                  AS requests,
+        COALESCE(SUM(input_tokens), 0)::bigint                     AS input_tokens,
+        COALESCE(SUM(output_tokens), 0)::bigint                     AS output_tokens,
+        COALESCE(SUM(cache_read_tokens), 0)::bigint                 AS cache_read_tokens,
+        COALESCE(SUM(cache_creation_tokens), 0)::bigint             AS cache_creation_tokens,
+        COUNT(first_token_ms)                                       AS first_token_samples,
+        AVG(first_token_ms)                                         AS avg_first_token_ms,
+        percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) AS p95_first_token_ms,
+        AVG(duration_ms)                                            AS avg_duration_ms,
+        COALESCE(SUM(total_cost), 0)                                AS total_cost,
+        COALESCE(SUM(actual_cost), 0)                               AS total_actual_cost
+    </sql>
+
+    <sql id="BucketExpression">
+        date_trunc(#{granularity}, created_at AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
+    </sql>
+
+    <insert id="insertSamples">
+        INSERT INTO pool_request_samples (
+            platform_id, external_account_id, request_id, api_key_id, model, channel_id, endpoint, stream,
+            created_at, first_token_ms, duration_ms, input_tokens, output_tokens,
+            cache_read_tokens, cache_creation_tokens, total_cost, actual_cost, ingested_at
+        ) VALUES
+        <foreach collection="samples" item="s" separator=",">
+            (#{s.platformId}, #{s.externalAccountId}, #{s.requestId}, #{s.apiKeyId}, #{s.model}, #{s.channelId},
+             #{s.endpoint}, #{s.stream}, #{s.createdAt}, #{s.firstTokenMs}, #{s.durationMs},
+             #{s.inputTokens}, #{s.outputTokens}, #{s.cacheReadTokens}, #{s.cacheCreationTokens},
+             #{s.totalCost}, #{s.actualCost}, COALESCE(#{s.ingestedAt}, now()))
+        </foreach>
+        ON CONFLICT (platform_id, request_id) DO NOTHING
+    </insert>
+
+    <select id="selectMaxCreatedAt" resultType="java.time.OffsetDateTime">
+        SELECT MAX(created_at)
+        FROM pool_request_samples
+        WHERE platform_id = #{platformId}
+          AND external_account_id = #{externalAccountId}
+    </select>
+
+    <select id="selectAggregate" resultMap="PoolAccountMetricsResultMap">
+        SELECT
+            #{externalAccountId} AS external_account_id,
+            <include refid="MetricAggregates"/>
+        FROM pool_request_samples
+        WHERE platform_id = #{platformId}
+          AND external_account_id = #{externalAccountId}
+          AND created_at &gt;= #{from}
+          AND created_at &lt; #{to}
+    </select>
+
+    <select id="selectAggregatesByPlatform" resultMap="PoolAccountMetricsResultMap">
+        SELECT
+            external_account_id,
+            <include refid="MetricAggregates"/>
+        FROM pool_request_samples
+        WHERE platform_id = #{platformId}
+          AND created_at &gt;= #{from}
+          AND created_at &lt; #{to}
+        GROUP BY external_account_id
+        ORDER BY external_account_id
+    </select>
+
+    <select id="selectSeries" resultMap="PoolSeriesPointResultMap">
+        SELECT
+            <include refid="BucketExpression"/> AS bucket,
+            <include refid="MetricAggregates"/>
+        FROM pool_request_samples
+        WHERE platform_id = #{platformId}
+          AND external_account_id = #{externalAccountId}
+          AND created_at &gt;= #{from}
+          AND created_at &lt; #{to}
+        GROUP BY bucket
+        ORDER BY bucket
+    </select>
+
+    <select id="selectByModel" resultMap="PoolModelMetricsResultMap">
+        SELECT
+            COALESCE(model, 'unknown') AS model,
+            <include refid="MetricAggregates"/>
+        FROM pool_request_samples
+        WHERE platform_id = #{platformId}
+          AND external_account_id = #{externalAccountId}
+          AND created_at &gt;= #{from}
+          AND created_at &lt; #{to}
+        GROUP BY COALESCE(model, 'unknown')
+        ORDER BY requests DESC
+    </select>
+</mapper>

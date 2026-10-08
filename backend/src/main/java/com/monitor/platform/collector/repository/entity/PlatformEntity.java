@@ -39,6 +39,16 @@ public class PlatformEntity {
     /** 更新时间。 */
     private OffsetDateTime updatedAt;
 
+    // ----- Sub2API 管理员密钥（AES-GCM 加密，仅用于只读调用管理员接口） -----
+    /** 管理员密钥加密算法。 */
+    private String adminKeyEncryptionAlgorithm;
+    /** 管理员密钥密文。 */
+    private String adminKeyEncryptedPayload;
+    /** 管理员密钥加密初始化向量。 */
+    private String adminKeyInitializationVector;
+    /** 管理员密钥加密密钥版本。 */
+    private Integer adminKeyKeyVersion;
+
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
     public String getPlatformName() { return platformName; }
@@ -61,4 +71,17 @@ public class PlatformEntity {
     public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public String getAdminKeyEncryptionAlgorithm() { return adminKeyEncryptionAlgorithm; }
+    public void setAdminKeyEncryptionAlgorithm(String adminKeyEncryptionAlgorithm) { this.adminKeyEncryptionAlgorithm = adminKeyEncryptionAlgorithm; }
+    public String getAdminKeyEncryptedPayload() { return adminKeyEncryptedPayload; }
+    public void setAdminKeyEncryptedPayload(String adminKeyEncryptedPayload) { this.adminKeyEncryptedPayload = adminKeyEncryptedPayload; }
+    public String getAdminKeyInitializationVector() { return adminKeyInitializationVector; }
+    public void setAdminKeyInitializationVector(String adminKeyInitializationVector) { this.adminKeyInitializationVector = adminKeyInitializationVector; }
+    public Integer getAdminKeyKeyVersion() { return adminKeyKeyVersion; }
+    public void setAdminKeyKeyVersion(Integer adminKeyKeyVersion) { this.adminKeyKeyVersion = adminKeyKeyVersion; }
+
+    /** 是否已配置 Sub2API 管理员密钥。 */
+    public boolean hasAdminKey() {
+        return adminKeyEncryptedPayload != null && !adminKeyEncryptedPayload.isBlank();
+    }
 }

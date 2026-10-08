@@ -14,7 +14,8 @@ import org.springframework.context.annotation.Configuration;
         "com.monitor.platform.collector.repository",
         "com.monitor.platform.query.repository",
         "com.monitor.platform.scheduler",
-        "com.monitor.platform.mail"
+        "com.monitor.platform.mail",
+        "com.monitor.platform.pool"
 })
 public class MybatisPlusConfiguration {
 }

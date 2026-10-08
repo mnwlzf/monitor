@@ -26,6 +26,7 @@ interface InstanceDto {
   baseUrl: string
   platform: string
   status?: boolean
+  adminKeyConfigured?: boolean
 }
 
 interface AccountDto {
@@ -115,6 +116,8 @@ export interface CreatePlatformInput {
   name: string
   baseUrl: string
   type: PlatformType
+  /** Sub2API 管理员密钥，仅 sub2api 平台使用；留空表示不配置。 */
+  adminKey?: string
 }
 
 /**
@@ -127,6 +130,7 @@ export async function createPlatformRecord(input: CreatePlatformInput): Promise<
       name: input.name || `${input.type} - ${input.baseUrl}`,
       baseUrl: input.baseUrl,
       platform: input.type,
+      adminKey: input.adminKey || undefined,
     }),
   })
 
@@ -138,6 +142,7 @@ export async function createPlatformRecord(input: CreatePlatformInput): Promise<
     status: row.status ?? true,
     accountCount: 0,
     lastCollectedAt: null,
+    adminKeyConfigured: row.adminKeyConfigured ?? false,
   }
 }
 
@@ -146,6 +151,10 @@ export interface UpdatePlatformInput {
   baseUrl?: string
   type?: PlatformType
   status?: boolean
+  /** 管理员密钥；留空表示保留原密钥。 */
+  adminKey?: string
+  /** 是否清除已保存的管理员密钥。 */
+  clearAdminKey?: boolean
 }
 
 /**
@@ -157,6 +166,8 @@ export async function updatePlatformRecord(platform: Platform, input: UpdatePlat
   if (input.baseUrl !== undefined) body.baseUrl = input.baseUrl
   if (input.type !== undefined) body.platform = input.type
   if (input.status !== undefined) body.status = input.status
+  if (input.adminKey) body.adminKey = input.adminKey
+  if (input.clearAdminKey !== undefined) body.clearAdminKey = input.clearAdminKey
 
   const row = await apiRequest<InstanceDto>(`/api/v1/upstream/instances/${platform.id}`, {
     method: 'PUT',
@@ -171,6 +182,7 @@ export async function updatePlatformRecord(platform: Platform, input: UpdatePlat
     status: row.status ?? true,
     accountCount: platform.accountCount,
     lastCollectedAt: platform.lastCollectedAt,
+    adminKeyConfigured: row.adminKeyConfigured ?? platform.adminKeyConfigured ?? false,
   }
 }
 
@@ -191,6 +203,7 @@ export async function listPlatformRecords(): Promise<Platform[]> {
     status: row.status ?? true,
     accountCount: 0,
     lastCollectedAt: null,
+    adminKeyConfigured: row.adminKeyConfigured ?? false,
   }))
 }
 

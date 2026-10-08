@@ -118,6 +118,17 @@
         WHERE id = #{id}
     </select>
 
+    <select id="selectActiveKeyIdByHash" resultType="java.lang.Long">
+        SELECT k.id
+        FROM account_api_keys k
+                 JOIN accounts a ON a.id = k.account_id
+        WHERE a.platform_id = #{platformId}
+          AND k.key_hash = #{keyHash}
+          AND k.is_active = TRUE
+        ORDER BY k.id
+        LIMIT 1
+    </select>
+
     <update id="deactivateMissingKeys">
         UPDATE account_api_keys
         SET is_active = FALSE,

@@ -61,6 +61,16 @@ public class AccountApiKeyRepository {
         return apiKeyMapper.selectKeysByAccount(accountId, activeOnly);
     }
 
+    /**
+     * 按平台与密钥 SHA-256 查询有效的本地密钥主键，供号池账号自动绑定使用。
+     */
+    public Optional<Long> findActiveKeyIdByHash(Integer platformId, String keyHash) {
+        if (keyHash == null || keyHash.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(apiKeyMapper.selectActiveKeyIdByHash(platformId, keyHash));
+    }
+
     /** 将本轮未出现在上游的密钥批量标记为失效。 */
     public int deactivateMissing(Integer accountId, String platformType,
                                  Collection<String> activeExternalKeyIds) {

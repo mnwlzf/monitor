@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.pool.repository.mapper.PoolAccountMapper">
+
+    <resultMap id="PoolAccountResultMap" type="com.monitor.platform.pool.PoolAccountEntity">
+        <id column="id" property="id"/>
+        <result column="platform_id" property="platformId"/>
+        <result column="external_account_id" property="externalAccountId"/>
+        <result column="name" property="name"/>
+        <result column="platform" property="platform"/>
+        <result column="account_type" property="accountType"/>
+        <result column="status" property="status"/>
+        <result column="schedulable" property="schedulable"/>
+        <result column="error_message" property="errorMessage"/>
+        <result column="rate_limited_at" property="rateLimitedAt"/>
+        <result column="rate_limit_reset_at" property="rateLimitResetAt"/>
+        <result column="overload_until" property="overloadUntil"/>
+        <result column="temp_unschedulable_until" property="tempUnschedulableUntil"/>
+        <result column="temp_unschedulable_reason" property="tempUnschedulableReason"/>
+        <result column="concurrency" property="concurrency"/>
+        <result column="priority" property="priority"/>
+        <result column="rate_multiplier" property="rateMultiplier"/>
+        <result column="last_used_at" property="lastUsedAt"/>
+        <result column="bound_key_id" property="boundKeyId"/>
+        <result column="last_sample_at" property="lastSampleAt"/>
+        <result column="last_sync_error" property="lastSyncError"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="PoolAccountColumns">
+        id, platform_id, external_account_id, name, platform, account_type, status, schedulable,
+        error_message, rate_limited_at, rate_limit_reset_at, overload_until,
+        temp_unschedulable_until, temp_unschedulable_reason, concurrency, priority, rate_multiplier,
+        last_used_at, bound_key_id, last_sample_at, last_sync_error, created_at, updated_at
+    </sql>
+
+    <insert id="upsertAccount">
+        INSERT INTO pool_accounts (
+            platform_id, external_account_id, name, platform, account_type, status, schedulable,
+            error_message, rate_limited_at, rate_limit_reset_at, overload_until,
+            temp_unschedulable_until, temp_unschedulable_reason, concurrency, priority, rate_multiplier,
+            last_used_at, bound_key_id, created_at, updated_at
+        ) VALUES (
+            #{platformId}, #{externalAccountId}, #{name}, #{platform}, #{accountType}, #{status}, #{schedulable},
+            #{errorMessage}, #{rateLimitedAt}, #{rateLimitResetAt}, #{overloadUntil},
+            #{tempUnschedulableUntil}, #{tempUnschedulableReason}, #{concurrency}, #{priority}, #{rateMultiplier},
+            #{lastUsedAt}, #{boundKeyId}, COALESCE(#{createdAt}, now()), COALESCE(#{updatedAt}, now())
+        )
+        ON CONFLICT (platform_id, external_account_id) DO UPDATE
+        SET name = EXCLUDED.name,
+            platform = EXCLUDED.platform,
+            account_type = EXCLUDED.account_type,
+            status = EXCLUDED.status,
+            schedulable = EXCLUDED.schedulable,
+            error_message = EXCLUDED.error_message,
+            rate_limited_at = EXCLUDED.rate_limited_at,
+            rate_limit_reset_at = EXCLUDED.rate_limit_reset_at,
+            overload_until = EXCLUDED.overload_until,
+            temp_unschedulable_until = EXCLUDED.temp_unschedulable_until,
+            temp_unschedulable_reason = EXCLUDED.temp_unschedulable_reason,
+            concurrency = EXCLUDED.concurrency,
+            priority = EXCLUDED.priority,
+            rate_multiplier = EXCLUDED.rate_multiplier,
+            last_used_at = EXCLUDED.last_used_at,
+            updated_at = now()
+    </insert>
+
+    <select id="selectByPlatform" resultMap="PoolAccountResultMap">
+        SELECT <include refid="PoolAccountColumns"/>
+        FROM pool_accounts
+        WHERE platform_id = #{platformId}
+        ORDER BY external_account_id
+    </select>
+
+    <select id="selectByPlatformAndExternalId" resultMap="PoolAccountResultMap">
+        SELECT <include refid="PoolAccountColumns"/>
+        FROM pool_accounts
+        WHERE platform_id = #{platformId}
+          AND external_account_id = #{externalAccountId}
+    </select>
+
+    <update id="updateBinding">
+        UPDATE pool_accounts
+        SET bound_key_id = #{boundKeyId},
+            updated_at = now()
+        WHERE platform_id = #{platformId}
+          AND external_account_id = #{externalAccountId}
+    </update>
+
+    <update id="updateSampleWatermark">
+        UPDATE pool_accounts
+        SET last_sample_at = #{lastSampleAt},
+            updated_at = now()
+        WHERE platform_id = #{platformId}
+          AND external_account_id = #{externalAccountId}
+    </update>
+
+    <update id="updateSyncError">
+        UPDATE pool_accounts
+        SET last_sync_error = #{error},
+            updated_at = now()
+        WHERE platform_id = #{platformId}
+          AND external_account_id = #{externalAccountId}
+    </update>
+
+    <select id="selectDistinctPlatformIds" resultType="int">
+        SELECT DISTINCT platform_id
+        FROM pool_accounts
+        ORDER BY platform_id
+    </select>
+</mapper>

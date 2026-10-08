@@ -1,0 +1,304 @@
+package com.monitor.platform.pool;
+
+import com.monitor.platform.collector.repository.PlatformRepository;
+import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.pool.client.Sub2AdminAccount;
+import com.monitor.platform.pool.client.Sub2AdminClient;
+import com.monitor.platform.pool.client.Sub2UsageLog;
+import com.monitor.platform.pool.repository.PoolAccountRepository;
+import com.monitor.platform.pool.repository.PoolSampleRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 号池数据同步服务。
+ *
+ * <p>只调用 Sub2API 管理员只读接口：健康度任务同步号池账号列表与状态，
+ * 明细任务增量拉取逐请求数据并落地到本地，供任意时间粒度聚合。</p>
+ */
+@Service
+public class PoolSyncService {
+
+    private static final Logger log = LoggerFactory.getLogger(PoolSyncService.class);
+
+    private static final String PLATFORM_SUB2_API = "sub2api";
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    /** 号池账号列表每页条数。 */
+    private static final int ACCOUNT_PAGE_SIZE = 100;
+    /** 号池账号列表最大翻页数，避免上游分页异常导致死循环。 */
+    private static final int ACCOUNT_MAX_PAGES = 50;
+    /** 逐请求明细每页条数。 */
+    private static final int SAMPLE_PAGE_SIZE = 1000;
+    /** 逐请求明细最大翻页数。 */
+    private static final int SAMPLE_MAX_PAGES = 50;
+    /** 首次采集时回溯的天数。 */
+    private static final int LOOKBACK_DAYS = 7;
+    private static final int MAX_ERROR_LENGTH = 500;
+
+    private final PlatformRepository platformRepository;
+    private final PoolAccountRepository poolAccountRepository;
+    private final PoolSampleRepository poolSampleRepository;
+    private final Sub2AdminClient adminClient;
+    private final PoolAdminKeyResolver adminKeyResolver;
+    private final PoolAccountBindService bindService;
+
+    public PoolSyncService(PlatformRepository platformRepository,
+                           PoolAccountRepository poolAccountRepository,
+                           PoolSampleRepository poolSampleRepository,
+                           Sub2AdminClient adminClient,
+                           PoolAdminKeyResolver adminKeyResolver,
+                           PoolAccountBindService bindService) {
+        this.platformRepository = platformRepository;
+        this.poolAccountRepository = poolAccountRepository;
+        this.poolSampleRepository = poolSampleRepository;
+        this.adminClient = adminClient;
+        this.adminKeyResolver = adminKeyResolver;
+        this.bindService = bindService;
+    }
+
+    /**
+     * 同步所有启用 Sub2API 平台的号池账号健康状态。
+     */
+    public void syncAllHealth() {
+        int success = 0;
+        int skipped = 0;
+        int failed = 0;
+        for (PlatformEntity platform : platformRepository.findEnabled()) {
+            if (!PLATFORM_SUB2_API.equals(platform.getPlatformType())) {
+                continue;
+            }
+            if (!platform.hasAdminKey()) {
+                skipped++;
+                continue;
+            }
+            try {
+                syncHealth(platform);
+                success++;
+            } catch (Exception ex) {
+                failed++;
+                log.error("号池健康度同步失败: platformId={}, name={}",
+                        platform.getId(), platform.getPlatformName(), ex);
+            }
+        }
+        log.info("号池健康度同步完成: success={}, skipped={}, failed={}", success, skipped, failed);
+    }
+
+    /**
+     * 同步单个平台的号池账号健康状态，并尝试自动绑定本地密钥。
+     */
+    public void syncHealth(PlatformEntity platform) {
+        String adminKey = requireAdminKey(platform);
+        List<Sub2AdminAccount> accounts = fetchAllAccounts(platform.getUrl(), adminKey);
+        OffsetDateTime now = OffsetDateTime.now();
+        int synced = 0;
+        for (Sub2AdminAccount account : accounts) {
+            if (account.id() == null) {
+                continue;
+            }
+            poolAccountRepository.upsert(toEntity(platform.getId(), account, now));
+            synced++;
+        }
+        int bound = bindService.autoBind(platform.getId(), platform.getUrl(), adminKey);
+        log.info("号池健康度同步完成: platformId={}, accountCount={}, boundCount={}",
+                platform.getId(), synced, bound);
+    }
+
+    /**
+     * 按平台 ID 同步号池健康状态。
+     */
+    public void syncHealth(Integer platformId) {
+        PlatformEntity platform = platformRepository.findById(platformId)
+                .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
+        syncHealth(platform);
+    }
+
+    /**
+     * 增量采集所有启用 Sub2API 平台的号池逐请求明细。
+     */
+    public void syncAllSamples() {
+        int success = 0;
+        int skipped = 0;
+        int failed = 0;
+        for (PlatformEntity platform : platformRepository.findEnabled()) {
+            if (!PLATFORM_SUB2_API.equals(platform.getPlatformType())) {
+                continue;
+            }
+            if (!platform.hasAdminKey()) {
+                skipped++;
+                continue;
+            }
+            try {
+                syncSamples(platform);
+                success++;
+            } catch (Exception ex) {
+                failed++;
+                log.error("号池明细采集失败: platformId={}, name={}",
+                        platform.getId(), platform.getPlatformName(), ex);
+            }
+        }
+        log.info("号池明细采集完成: success={}, skipped={}, failed={}", success, skipped, failed);
+    }
+
+    /**
+     * 增量采集单个平台的号池逐请求明细。
+     */
+    public void syncSamples(PlatformEntity platform) {
+        String adminKey = requireAdminKey(platform);
+        List<PoolAccountEntity> accounts = poolAccountRepository.findByPlatform(platform.getId());
+        LocalDate today = LocalDate.now(ZONE);
+        int totalInserted = 0;
+        for (PoolAccountEntity account : accounts) {
+            try {
+                totalInserted += syncAccountSamples(platform, adminKey, account, today);
+                poolAccountRepository.updateSyncError(platform.getId(), account.getExternalAccountId(), null);
+            } catch (Exception ex) {
+                poolAccountRepository.updateSyncError(platform.getId(), account.getExternalAccountId(),
+                        truncate(ex.getMessage(), MAX_ERROR_LENGTH));
+                log.warn("号池账号明细采集失败: platformId={}, externalAccountId={}, reason={}",
+                        platform.getId(), account.getExternalAccountId(), ex.getMessage());
+            }
+        }
+        log.info("号池明细采集完成: platformId={}, accountCount={}, insertedSamples={}",
+                platform.getId(), accounts.size(), totalInserted);
+    }
+
+    /**
+     * 按平台 ID 增量采集号池明细。
+     */
+    public void syncSamples(Integer platformId) {
+        PlatformEntity platform = platformRepository.findById(platformId)
+                .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
+        syncSamples(platform);
+    }
+
+    private int syncAccountSamples(PlatformEntity platform, String adminKey,
+                                   PoolAccountEntity account, LocalDate today) {
+        OffsetDateTime watermark = account.getLastSampleAt();
+        LocalDate start = watermark == null
+                ? today.minusDays(LOOKBACK_DAYS)
+                : watermark.atZoneSameInstant(ZONE).toLocalDate().minusDays(1);
+        if (start.isAfter(today)) {
+            start = today;
+        }
+
+        List<Sub2UsageLog> logs = fetchAllUsage(platform.getUrl(), adminKey,
+                account.getExternalAccountId(), start, today);
+        List<PoolSampleEntity> entities = new ArrayList<>(logs.size());
+        OffsetDateTime maxCreatedAt = watermark;
+        for (Sub2UsageLog entry : logs) {
+            if (entry.requestId() == null || entry.createdAt() == null) {
+                continue;
+            }
+            entities.add(toEntity(platform.getId(), account.getExternalAccountId(), entry));
+            if (maxCreatedAt == null || entry.createdAt().isAfter(maxCreatedAt)) {
+                maxCreatedAt = entry.createdAt();
+            }
+        }
+
+        int inserted = poolSampleRepository.insertBatch(entities);
+        if (maxCreatedAt != null && !maxCreatedAt.equals(watermark)) {
+            poolAccountRepository.updateSampleWatermark(platform.getId(), account.getExternalAccountId(), maxCreatedAt);
+        }
+        return inserted;
+    }
+
+    private List<Sub2AdminAccount> fetchAllAccounts(String baseUrl, String adminKey) {
+        List<Sub2AdminAccount> all = new ArrayList<>();
+        for (int page = 1; page <= ACCOUNT_MAX_PAGES; page++) {
+            List<Sub2AdminAccount> batch = adminClient.fetchAccounts(baseUrl, adminKey, page, ACCOUNT_PAGE_SIZE);
+            if (batch.isEmpty()) {
+                break;
+            }
+            all.addAll(batch);
+            if (batch.size() < ACCOUNT_PAGE_SIZE) {
+                break;
+            }
+        }
+        return all;
+    }
+
+    private List<Sub2UsageLog> fetchAllUsage(String baseUrl, String adminKey, Long accountId,
+                                             LocalDate start, LocalDate end) {
+        List<Sub2UsageLog> all = new ArrayList<>();
+        for (int page = 1; page <= SAMPLE_MAX_PAGES; page++) {
+            List<Sub2UsageLog> batch = adminClient.fetchUsage(baseUrl, adminKey, accountId,
+                    start, end, page, SAMPLE_PAGE_SIZE);
+            if (batch.isEmpty()) {
+                break;
+            }
+            all.addAll(batch);
+            if (batch.size() < SAMPLE_PAGE_SIZE) {
+                break;
+            }
+        }
+        return all;
+    }
+
+    private PoolAccountEntity toEntity(Integer platformId, Sub2AdminAccount account, OffsetDateTime now) {
+        PoolAccountEntity entity = new PoolAccountEntity();
+        entity.setPlatformId(platformId);
+        entity.setExternalAccountId(account.id());
+        entity.setName(account.name());
+        entity.setPlatform(account.platform());
+        entity.setAccountType(account.accountType());
+        entity.setStatus(account.status());
+        entity.setSchedulable(account.schedulable() == null ? Boolean.TRUE : account.schedulable());
+        entity.setErrorMessage(truncate(account.errorMessage(), MAX_ERROR_LENGTH));
+        entity.setRateLimitedAt(account.rateLimitedAt());
+        entity.setRateLimitResetAt(account.rateLimitResetAt());
+        entity.setOverloadUntil(account.overloadUntil());
+        entity.setTempUnschedulableUntil(account.tempUnschedulableUntil());
+        entity.setTempUnschedulableReason(account.tempUnschedulableReason());
+        entity.setConcurrency(account.concurrency());
+        entity.setPriority(account.priority());
+        entity.setRateMultiplier(account.rateMultiplier());
+        entity.setLastUsedAt(account.lastUsedAt());
+        entity.setCreatedAt(now);
+        entity.setUpdatedAt(now);
+        return entity;
+    }
+
+    private PoolSampleEntity toEntity(Integer platformId, Long externalAccountId, Sub2UsageLog logEntry) {
+        PoolSampleEntity entity = new PoolSampleEntity();
+        entity.setPlatformId(platformId);
+        entity.setExternalAccountId(externalAccountId);
+        entity.setRequestId(logEntry.requestId());
+        entity.setApiKeyId(logEntry.apiKeyId());
+        entity.setModel(logEntry.model());
+        entity.setChannelId(logEntry.channelId());
+        entity.setEndpoint(logEntry.endpoint());
+        entity.setStream(logEntry.stream());
+        entity.setCreatedAt(logEntry.createdAt());
+        entity.setFirstTokenMs(logEntry.firstTokenMs());
+        entity.setDurationMs(logEntry.durationMs());
+        entity.setInputTokens(logEntry.inputTokens());
+        entity.setOutputTokens(logEntry.outputTokens());
+        entity.setCacheReadTokens(logEntry.cacheReadTokens());
+        entity.setCacheCreationTokens(logEntry.cacheCreationTokens());
+        entity.setTotalCost(logEntry.totalCost());
+        entity.setActualCost(logEntry.actualCost());
+        entity.setIngestedAt(OffsetDateTime.now());
+        return entity;
+    }
+
+    private String requireAdminKey(PlatformEntity platform) {
+        return adminKeyResolver.resolve(platform)
+                .orElseThrow(() -> BusinessException.of(
+                        "平台未配置可用的 Sub2API 管理员密钥: " + platform.getPlatformName()));
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
+    }
+}

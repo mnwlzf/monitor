@@ -8,6 +8,8 @@ export interface Platform {
   status: boolean
   accountCount: number
   lastCollectedAt: string | null
+  /** 是否已配置 Sub2API 管理员密钥（用于号池监控）。 */
+  adminKeyConfigured?: boolean
 }
 
 export interface Account {
@@ -213,6 +215,85 @@ export interface MailRecipient {
   email: string
   name: string | null
   createdAt: string | null
+}
+
+/**
+ * 号池监控：账号健康状态与时间窗聚合指标。
+ *
+ * 号池指的是用户自建 Sub2API 平台上的账号，每个账号对应一个上游 Key。
+ * requests / tokens / cost 等为空时表示该时间窗内没有明细样本。
+ */
+export interface PoolAccount {
+  externalAccountId: number
+  name: string | null
+  platform: string | null
+  accountType: string | null
+  status: string | null
+  schedulable: boolean | null
+  errorMessage: string | null
+  rateLimitedAt: string | null
+  rateLimitResetAt: string | null
+  tempUnschedulableUntil: string | null
+  tempUnschedulableReason: string | null
+  concurrency: number | null
+  priority: number | null
+  rateMultiplier: number | null
+  lastUsedAt: string | null
+  boundKeyId: number | null
+  boundKeyName: string | null
+  boundKeyMasked: string | null
+  lastSampleAt: string | null
+  lastSyncError: string | null
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  firstTokenSamples: number
+  avgFirstTokenMs: number | null
+  p95FirstTokenMs: number | null
+  avgDurationMs: number | null
+  totalCost: number
+  totalActualCost: number
+  cacheHitRate: number | null
+}
+
+/** 号池监控可选时间维度。 */
+export type PoolRange = '1d' | '7d' | '30d' | '90d'
+
+/** 号池时序聚合粒度。 */
+export type PoolGranularity = 'hour' | 'day'
+
+/** 号池指标时序点。 */
+export interface PoolSeriesPoint {
+  bucket: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  firstTokenSamples: number
+  avgFirstTokenMs: number | null
+  p95FirstTokenMs: number | null
+  avgDurationMs: number | null
+  totalActualCost: number
+  cacheHitRate: number | null
+}
+
+/** 号池按模型聚合指标。 */
+export interface PoolModelMetrics {
+  model: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  firstTokenSamples: number
+  avgFirstTokenMs: number | null
+  p95FirstTokenMs: number | null
+  avgDurationMs: number | null
+  totalActualCost: number
+  cacheHitRate: number | null
 }
 
 /**

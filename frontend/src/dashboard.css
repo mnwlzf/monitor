@@ -993,3 +993,77 @@ body {
     display: none;
   }
 }
+
+/* ===== 号池监控页面 ===== */
+.pool-view { display: flex; flex-direction: column; gap: 16px; }
+
+.pool-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  margin-bottom: 0;
+}
+
+.pool-toolbar-filters,
+.pool-toolbar-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pool-toolbar-label { color: #6b7b77; font-size: 12px; }
+
+.pool-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.pool-table-card { margin-bottom: 0; }
+.pool-table .el-table__row { cursor: pointer; }
+
+.pool-account-cell { display: flex; flex-direction: column; gap: 2px; }
+.pool-account-cell strong { font-size: 13px; color: #22322e; }
+.pool-account-cell small { color: #8b9a96; font-size: 10px; }
+
+.pool-key-bound { display: block; color: #2b6f5f; font-size: 12px; }
+.pool-key-masked { display: block; color: #9aa8a4; font-size: 10px; }
+
+.pool-rate-cell { display: flex; flex-direction: column; gap: 2px; }
+.pool-rate-cell small { color: #9aa8a4; font-size: 10px; }
+.pool-good { color: #2f9e6e; }
+.pool-warn { color: #d99a2b; }
+.pool-bad { color: #d9534f; }
+
+.pool-sample-cell { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.pool-token-cell { display: flex; flex-direction: column; gap: 4px; }
+.pool-token-cell > span { font-size: 11px; color: #5a6b67; }
+.pool-token-bar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #eef2f0;
+}
+.pool-token-bar-seg { height: 100%; }
+
+.pool-error-text {
+  display: block;
+  color: #d9534f;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pool-muted { color: #a7b3af; }
+
+.pool-detail { display: flex; flex-direction: column; gap: 16px; }
+.pool-detail-alert { margin: 0; }
+.pool-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+}
+.pool-chart-card { margin-bottom: 0; }
+.pool-chart-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
