@@ -5,6 +5,7 @@ import com.monitor.platform.common.interceptor.RetryInterceptor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
@@ -20,6 +21,9 @@ import java.util.Map;
  * <p>所有上游适配器共用同一个 {@link RestClient}，统一连接超时、读取超时和网络重试策略，
  * 避免各适配器自行创建客户端导致配置漂移。</p>
  *
+ * <p>Sub2API 管理员接口的响应体远大于普通采集接口（全量号池账号 + 凭证），
+ * 单独提供一个 {@code sub2AdminRestClient} 使用更长的读取超时，避免读取响应体阶段被截断。</p>
+ *
  * <p>同时统一加上浏览器风格的请求头：上游 New API / Sub2API 都是面向浏览器的站点，
  * 默认的 {@code Java-http-client/21} 标识过于显眼，容易被网关或风控拦截。</p>
  */
@@ -27,8 +31,10 @@ import java.util.Map;
 @EnableConfigurationProperties(UpstreamHttpProperties.class)
 public class RestClientConfig {
 
+    /** 提供 Sub2API 管理员接口专用 RestClient 的 Bean 名称。 */
+    public static final String SUB2_ADMIN_REST_CLIENT = "sub2AdminRestClient";
+
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
     private static final int RETRY_MAX_ATTEMPTS = 3;
     private static final long RETRY_BACKOFF_MILLIS = 500L;
 
@@ -53,10 +59,28 @@ public class RestClientConfig {
     }
 
     /**
-     * 创建上游采集共用的 RestClient。
+     * 创建上游采集共用的 RestClient（普通采集接口使用）。
      */
     @Bean
+    @Primary
     public RestClient restClient(UpstreamHttpProperties upstreamHttpProperties) {
+        return buildRestClient(upstreamHttpProperties.getReadTimeout(), upstreamHttpProperties);
+    }
+
+    /**
+     * 创建 Sub2API 管理员接口专用的 RestClient。
+     *
+     * <p>管理员接口单次响应体大、耗时长，使用独立的读取超时。</p>
+     */
+    @Bean(SUB2_ADMIN_REST_CLIENT)
+    public RestClient sub2AdminRestClient(UpstreamHttpProperties upstreamHttpProperties) {
+        return buildRestClient(upstreamHttpProperties.getAdminReadTimeout(), upstreamHttpProperties);
+    }
+
+    /**
+     * 按给定读取超时构建 RestClient，其余策略（连接超时、重试、浏览器请求头）完全一致。
+     */
+    private RestClient buildRestClient(Duration readTimeout, UpstreamHttpProperties properties) {
         // JDK HttpClient 负责建立连接并设置连接超时。
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT)
@@ -64,13 +88,13 @@ public class RestClientConfig {
 
         // 请求工厂负责单次请求的读取超时。
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
-        factory.setReadTimeout(READ_TIMEOUT);
+        factory.setReadTimeout(readTimeout);
 
         // 网络层重试只处理连接类异常，HTTP 业务错误仍由各适配器处理。
         RestClient.Builder builder = RestClient.builder()
                 .requestFactory(factory)
                 .requestInterceptor(new RetryInterceptor(RETRY_MAX_ATTEMPTS, RETRY_BACKOFF_MILLIS));
-        return applyBrowserHeaders(builder, upstreamHttpProperties).build();
+        return applyBrowserHeaders(builder, properties).build();
     }
 
     /**

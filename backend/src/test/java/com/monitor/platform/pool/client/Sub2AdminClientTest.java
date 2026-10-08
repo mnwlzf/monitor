@@ -44,7 +44,7 @@ class Sub2AdminClientTest {
                                 "id": 52064,
                                 "name": "满血",
                                 "platform": "openai",
-                                "account_type": "api_key",
+                                "type": "apikey",
                                 "status": "active",
                                 "schedulable": true,
                                 "concurrency": 5,
@@ -53,21 +53,28 @@ class Sub2AdminClientTest {
                                 "last_used_at": "2026-10-08T10:25:44.565599+08:00"
                               }
                             ],
-                            "total": 1,
+                            "total": 708,
                             "page": 1,
-                            "page_size": 100
+                            "page_size": 100,
+                            "pages": 8
                           }
                         }
                         """, MediaType.APPLICATION_JSON));
 
-        List<Sub2AdminAccount> accounts = client.fetchAccounts(BASE_URL, ADMIN_KEY, 1, 100);
+        Sub2AdminAccountPage result = client.fetchAccounts(BASE_URL, ADMIN_KEY, 1, 100);
 
-        assertEquals(1, accounts.size());
-        Sub2AdminAccount account = accounts.get(0);
+        assertEquals(1, result.items().size());
+        assertEquals(1, result.page());
+        assertEquals(100, result.pageSize());
+        assertEquals(708, result.total());
+        assertEquals(8, result.pages());
+        Sub2AdminAccount account = result.items().get(0);
         assertEquals(52064L, account.id());
         assertEquals("满血", account.name());
         assertEquals("openai", account.platform());
         assertEquals("active", account.status());
+        // 上游账号类型字段名为 type，需要映射到 accountType
+        assertEquals("apikey", account.accountType());
         assertEquals(Boolean.TRUE, account.schedulable());
         assertEquals(5, account.concurrency());
         assertEquals(0.18, account.rateMultiplier().doubleValue(), 0.0001);

@@ -1,10 +1,16 @@
 package com.monitor.platform.pool.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.config.RestClientConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -23,6 +29,9 @@ import java.util.List;
  * <p>认证方式为请求头 {@code x-api-key: <管理员密钥>}，与普通用户登录令牌不同，
  * 不需要经过登录接口或 Turnstile 校验。该客户端<strong>只调用只读接口</strong>，
  * 绝不触发任何写操作（如清除错误、修改可调度状态）。</p>
+ *
+ * <p>管理员接口响应体大、耗时长（全量号池账号一次可达数百 KB、数十秒），
+ * 因此使用专用的 {@code sub2AdminRestClient}（更长的读取超时）。</p>
  */
 @Component
 public class Sub2AdminClient {
@@ -35,27 +44,37 @@ public class Sub2AdminClient {
     private static final String API_KEY_HEADER = "x-api-key";
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final String[] ARRAY_KEYS = {"items", "list", "records", "rows", "accounts", "results", "data"};
+    private static final int MAX_ERROR_LENGTH = 300;
 
     private final RestClient restClient;
 
-    public Sub2AdminClient(RestClient restClient) {
+    /**
+     * @param restClient Sub2API 管理员接口专用客户端（读取超时更长）
+     */
+    public Sub2AdminClient(@Qualifier(RestClientConfig.SUB2_ADMIN_REST_CLIENT) RestClient restClient) {
         this.restClient = restClient;
     }
 
     /**
-     * 拉取号池账号列表。
+     * 拉取一页号池账号。
      */
-    public List<Sub2AdminAccount> fetchAccounts(String baseUrl, String adminKey, int page, int pageSize) {
-        JsonNode root = restClient.get()
+    public Sub2AdminAccountPage fetchAccounts(String baseUrl, String adminKey, int page, int pageSize) {
+        JsonNode data = execute(() -> restClient.get()
                 .uri(baseUrl + ADMIN_ACCOUNTS_PATH + "?page={page}&page_size={size}", page, pageSize)
                 .header(API_KEY_HEADER, adminKey)
                 .retrieve()
-                .body(JsonNode.class);
-        List<Sub2AdminAccount> result = new ArrayList<>();
-        for (JsonNode node : extractArray(unwrapData(root))) {
-            result.add(toAccount(node));
+                .body(JsonNode.class), "获取号池账号列表");
+
+        List<Sub2AdminAccount> items = new ArrayList<>();
+        for (JsonNode node : extractArray(data)) {
+            items.add(toAccount(node));
         }
-        return result;
+
+        int currentPage = intOr(data, "page", page);
+        int size = intOr(data, "page_size", pageSize);
+        int total = intOr(data, "total", items.size());
+        int pages = intOr(data, "pages", items.isEmpty() ? 0 : 1);
+        return new Sub2AdminAccountPage(items, currentPage, size, total, pages);
     }
 
     /**
@@ -64,13 +83,14 @@ public class Sub2AdminClient {
      * <p>返回值仅在内存中用于与本地密钥哈希比对，调用方不得落库或写日志。</p>
      */
     public List<Sub2AdminAccountCredential> fetchAccountCredentials(String baseUrl, String adminKey) {
-        JsonNode root = restClient.get()
+        JsonNode data = execute(() -> restClient.get()
                 .uri(baseUrl + ADMIN_ACCOUNTS_DATA_PATH)
                 .header(API_KEY_HEADER, adminKey)
                 .retrieve()
-                .body(JsonNode.class);
+                .body(JsonNode.class), "获取号池账号凭证");
+
         List<Sub2AdminAccountCredential> result = new ArrayList<>();
-        for (JsonNode node : extractArray(unwrapData(root))) {
+        for (JsonNode node : extractArray(data)) {
             String name = text(node, "name");
             String apiKey = extractApiKey(node);
             if (name != null && apiKey != null && !apiKey.isBlank()) {
@@ -88,22 +108,44 @@ public class Sub2AdminClient {
      */
     public List<Sub2UsageLog> fetchUsage(String baseUrl, String adminKey, long accountId,
                                          LocalDate start, LocalDate end, int page, int pageSize) {
-        JsonNode root = restClient.get()
+        JsonNode data = execute(() -> restClient.get()
                 .uri(baseUrl + ADMIN_USAGE_PATH
                                 + "?account_id={accountId}&start_date={start}&end_date={end}"
                                 + "&sort_by=created_at&sort_order=desc&page={page}&page_size={size}",
                         accountId, start.toString(), end.toString(), page, pageSize)
                 .header(API_KEY_HEADER, adminKey)
                 .retrieve()
-                .body(JsonNode.class);
+                .body(JsonNode.class), "获取号池用量明细");
+
         List<Sub2UsageLog> result = new ArrayList<>();
-        for (JsonNode node : extractArray(unwrapData(root))) {
+        for (JsonNode node : extractArray(data)) {
             Sub2UsageLog entry = toUsageLog(node);
             if (entry.requestId() != null) {
                 result.add(entry);
             }
         }
         return result;
+    }
+
+    /**
+     * 统一执行一次管理员请求：把网络/解析异常转换成可读的业务异常。
+     *
+     * <p>管理员接口响应体较大，读取阶段超时会被底层抛出 {@code IOException: closed}，
+     * 这里转成明确提示，避免页面只看到「服务器内部错误」。</p>
+     */
+    private JsonNode execute(AdminCall call, String action) {
+        try {
+            return unwrapData(call.invoke());
+        } catch (RestClientResponseException ex) {
+            HttpStatusCode status = ex.getStatusCode();
+            String message = action + "失败：上游返回 " + status.value() + "，请检查管理员密钥是否有效";
+            log.warn("Sub2API 管理员接口调用失败: action={}, status={}", action, status.value());
+            throw BusinessException.of(message);
+        } catch (RestClientException ex) {
+            String reason = rootMessage(ex);
+            log.warn("Sub2API 管理员接口调用失败: action={}, reason={}", action, reason);
+            throw BusinessException.of(action + "失败：" + reason);
+        }
     }
 
     /**
@@ -150,7 +192,8 @@ public class Sub2AdminClient {
                 longValue(node, "id"),
                 text(node, "name"),
                 text(node, "platform"),
-                text(node, "account_type"),
+                // 上游账号类型字段名是 type（如 apikey / oauth），兼容 account_type
+                firstNonBlank(text(node, "type"), text(node, "account_type")),
                 text(node, "status"),
                 bool(node, "schedulable"),
                 text(node, "error_message"),
@@ -203,6 +246,10 @@ public class Sub2AdminClient {
         return null;
     }
 
+    private String firstNonBlank(String first, String second) {
+        return first != null && !first.isBlank() ? first : second;
+    }
+
     private String text(JsonNode node, String field) {
         JsonNode value = node.path(field);
         if (value.isMissingNode() || value.isNull()) {
@@ -230,6 +277,11 @@ public class Sub2AdminClient {
     private Integer intValue(JsonNode node, String field) {
         Long value = longValue(node, field);
         return value == null ? null : value.intValue();
+    }
+
+    private int intOr(JsonNode node, String field, int fallback) {
+        Integer value = intValue(node, field);
+        return value == null ? fallback : value;
     }
 
     private Boolean bool(JsonNode node, String field) {
@@ -291,5 +343,31 @@ public class Sub2AdminClient {
             log.debug("无法解析 Sub2API 时间字段 {}={}", field, text);
             return null;
         }
+    }
+
+    /**
+     * 提取最内层异常信息，去掉过长的堆栈描述，便于在页面展示。
+     */
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        String message = null;
+        while (current != null) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                message = current.getMessage();
+            }
+            current = current.getCause();
+        }
+        if (message == null) {
+            message = throwable.getClass().getSimpleName();
+        }
+        return message.length() > MAX_ERROR_LENGTH ? message.substring(0, MAX_ERROR_LENGTH) : message;
+    }
+
+    /**
+     * 一次管理员接口调用。
+     */
+    @FunctionalInterface
+    private interface AdminCall {
+        JsonNode invoke();
     }
 }

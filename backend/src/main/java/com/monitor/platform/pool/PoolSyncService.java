@@ -4,6 +4,7 @@ import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.pool.client.Sub2AdminAccount;
+import com.monitor.platform.pool.client.Sub2AdminAccountPage;
 import com.monitor.platform.pool.client.Sub2AdminClient;
 import com.monitor.platform.pool.client.Sub2UsageLog;
 import com.monitor.platform.pool.repository.PoolAccountRepository;
@@ -12,11 +13,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 号池数据同步服务。
@@ -39,6 +44,8 @@ public class PoolSyncService {
     private static final int SAMPLE_PAGE_SIZE = 1000;
     /** 逐请求明细最大翻页数。 */
     private static final int SAMPLE_MAX_PAGES = 50;
+    /** 自动绑定凭证导出的最小间隔：导出全量明文凭证很慢，避免每次健康检查都触发。 */
+    private static final Duration BIND_MIN_INTERVAL = Duration.ofMinutes(30);
     /** 首次采集时回溯的天数。 */
     private static final int LOOKBACK_DAYS = 7;
     private static final int MAX_ERROR_LENGTH = 500;
@@ -49,6 +56,8 @@ public class PoolSyncService {
     private final Sub2AdminClient adminClient;
     private final PoolAdminKeyResolver adminKeyResolver;
     private final PoolAccountBindService bindService;
+    /** 各平台最近一次自动绑定时间，内存态节流，重启后重置。 */
+    private final Map<Integer, Instant> lastBindAttemptAt = new ConcurrentHashMap<>();
 
     public PoolSyncService(PlatformRepository platformRepository,
                            PoolAccountRepository poolAccountRepository,
@@ -106,7 +115,7 @@ public class PoolSyncService {
             poolAccountRepository.upsert(toEntity(platform.getId(), account, now));
             synced++;
         }
-        int bound = bindService.autoBind(platform.getId(), platform.getUrl(), adminKey);
+        int bound = autoBindIfNeeded(platform, adminKey);
         log.info("号池健康度同步完成: platformId={}, accountCount={}, boundCount={}",
                 platform.getId(), synced, bound);
     }
@@ -155,10 +164,19 @@ public class PoolSyncService {
         List<PoolAccountEntity> accounts = poolAccountRepository.findByPlatform(platform.getId());
         LocalDate today = LocalDate.now(ZONE);
         int totalInserted = 0;
+        int collected = 0;
+        int skippedUnbound = 0;
         for (PoolAccountEntity account : accounts) {
+            // 只采集「已绑定本地密钥」的号池账号：上游号池里可能挂着大量与本项目无关的账号，
+            // 逐个拉取用量接口既慢又没有意义。
+            if (account.getBoundKeyId() == null) {
+                skippedUnbound++;
+                continue;
+            }
             try {
                 totalInserted += syncAccountSamples(platform, adminKey, account, today);
                 poolAccountRepository.updateSyncError(platform.getId(), account.getExternalAccountId(), null);
+                collected++;
             } catch (Exception ex) {
                 poolAccountRepository.updateSyncError(platform.getId(), account.getExternalAccountId(),
                         truncate(ex.getMessage(), MAX_ERROR_LENGTH));
@@ -166,8 +184,8 @@ public class PoolSyncService {
                         platform.getId(), account.getExternalAccountId(), ex.getMessage());
             }
         }
-        log.info("号池明细采集完成: platformId={}, accountCount={}, insertedSamples={}",
-                platform.getId(), accounts.size(), totalInserted);
+        log.info("号池明细采集完成: platformId={}, accountCount={}, collected={}, skippedUnbound={}, insertedSamples={}",
+                platform.getId(), accounts.size(), collected, skippedUnbound, totalInserted);
     }
 
     /**
@@ -210,19 +228,60 @@ public class PoolSyncService {
         return inserted;
     }
 
+    /**
+     * 翻完上游号池账号的全部页。
+     *
+     * <p>上游响应带 {@code total}/{@code pages}，直接按 {@code pages} 结束，
+     * 比「本页条数小于页大小」更可靠（避免上游忽略分页参数时无限翻页）。</p>
+     */
     private List<Sub2AdminAccount> fetchAllAccounts(String baseUrl, String adminKey) {
         List<Sub2AdminAccount> all = new ArrayList<>();
-        for (int page = 1; page <= ACCOUNT_MAX_PAGES; page++) {
-            List<Sub2AdminAccount> batch = adminClient.fetchAccounts(baseUrl, adminKey, page, ACCOUNT_PAGE_SIZE);
-            if (batch.isEmpty()) {
+        int page = 1;
+        while (page <= ACCOUNT_MAX_PAGES) {
+            Sub2AdminAccountPage result = adminClient.fetchAccounts(baseUrl, adminKey, page, ACCOUNT_PAGE_SIZE);
+            log.info("号池账号列表已拉取: page={}/{}, total={}, size={}",
+                    result.page(), result.pages(), result.total(), result.items().size());
+            if (result.items().isEmpty()) {
                 break;
             }
-            all.addAll(batch);
-            if (batch.size() < ACCOUNT_PAGE_SIZE) {
+            all.addAll(result.items());
+            if (result.pages() <= 0 || page >= result.pages()) {
                 break;
             }
+            page++;
         }
         return all;
+    }
+
+    /**
+     * 存在未绑定号池账号时尝试自动绑定，并按平台做时间节流。
+     *
+     * <p>自动绑定依赖 {@code /admin/accounts/data} 导出全量明文凭证，响应体很大。
+     * 若某账号本来就匹配不到本地密钥，放任每次健康检查都导出会白白拖慢任务，
+     * 因此这里限制同一平台最多每 {@link #BIND_MIN_INTERVAL} 尝试一次。</p>
+     */
+    private int autoBindIfNeeded(PlatformEntity platform, String adminKey) {
+        if (!hasUnboundAccount(platform.getId())) {
+            return 0;
+        }
+        Instant now = Instant.now();
+        Instant last = lastBindAttemptAt.get(platform.getId());
+        if (last != null && now.isBefore(last.plus(BIND_MIN_INTERVAL))) {
+            log.debug("距上次自动绑定不足 {}，跳过: platformId={}", BIND_MIN_INTERVAL, platform.getId());
+            return 0;
+        }
+        lastBindAttemptAt.put(platform.getId(), now);
+        return bindService.autoBind(platform.getId(), platform.getUrl(), adminKey);
+    }
+
+    /** 平台下是否存在尚未绑定本地密钥的号池账号。 */
+    private boolean hasUnboundAccount(Integer platformId) {
+        for (PoolAccountEntity account : poolAccountRepository.findByPlatform(platformId)) {
+            if (account.getBoundKeyId() == null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<Sub2UsageLog> fetchAllUsage(String baseUrl, String adminKey, Long accountId,
