@@ -37,6 +37,24 @@ export interface MetricPoint {
   usedQuota: number
 }
 
+/** 余额详情页可选时间维度。 */
+export type MetricRange = '1d' | '7d' | '30d' | '90d'
+
+/**
+ * 账号指标时序点（余额详情折线图）。
+ *
+ * balance 统一为 USD；quota / usedQuota 为上游原始额度单位，部分平台为 null。
+ */
+export interface AccountMetricPoint {
+  collectedAt: string
+  balance: number | null
+  frozenBalance: number | null
+  quota: number | null
+  usedQuota: number | null
+  requestCount: number | null
+  quotaUnit: string | null
+}
+
 export interface Channel {
   id: string
   name: string

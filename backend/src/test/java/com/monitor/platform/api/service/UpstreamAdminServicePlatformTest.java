@@ -1,6 +1,7 @@
 package com.monitor.platform.api.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.monitor.platform.api.dto.AccountMetricPointResponse;
 import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
 import com.monitor.platform.api.dto.PlatformResponse;
@@ -14,6 +15,7 @@ import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
 import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
+import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.security.CredentialCipher;
@@ -21,11 +23,13 @@ import com.monitor.platform.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +37,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -298,5 +303,59 @@ class UpstreamAdminServicePlatformTest {
 
         assertThrows(BusinessException.class, () -> service.revealAccountPassword(1, 10, "admin"));
         verify(credentialService, never()).resolvePassword(ArgumentMatchers.anyInt());
+    }
+    @Test
+    void shouldReturnAccountMetricSeriesWithinRequestedRange() {
+        AccountEntity account = new AccountEntity();
+        account.setId(7);
+        account.setPlatformId(1);
+        when(accountRepository.findById(7)).thenReturn(Optional.of(account));
+
+        AccountMetricSnapshotEntity point = new AccountMetricSnapshotEntity();
+        point.setAccountId(7);
+        point.setBalance(new BigDecimal("12.34"));
+        point.setUsedQuota(new BigDecimal("100"));
+        point.setCollectedAt(OffsetDateTime.now());
+        when(metricSnapshotRepository.findByAccount(
+                ArgumentMatchers.eq(7), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq(10000)))
+                .thenReturn(List.of(point));
+
+        List<AccountMetricPointResponse> result = service.listAccountMetrics(1, 7, "30d");
+
+        assertEquals(1, result.size());
+        assertEquals(new BigDecimal("12.34"), result.get(0).balance());
+
+        ArgumentCaptor<OffsetDateTime> fromCaptor = ArgumentCaptor.forClass(OffsetDateTime.class);
+        verify(metricSnapshotRepository).findByAccount(
+                ArgumentMatchers.eq(7), fromCaptor.capture(), ArgumentMatchers.any(), ArgumentMatchers.eq(10000));
+        assertTrue(fromCaptor.getValue().isBefore(OffsetDateTime.now().minusDays(29)),
+                "30d 维度应查询最近 30 天的数据");
+    }
+
+    @Test
+    void shouldDownsampleLargeAccountMetricSeries() {
+        AccountEntity account = new AccountEntity();
+        account.setId(7);
+        account.setPlatformId(1);
+        when(accountRepository.findById(7)).thenReturn(Optional.of(account));
+
+        List<AccountMetricSnapshotEntity> points = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            AccountMetricSnapshotEntity point = new AccountMetricSnapshotEntity();
+            point.setAccountId(7);
+            point.setBalance(BigDecimal.valueOf(i));
+            point.setCollectedAt(OffsetDateTime.now().minusMinutes(1000 - i));
+            points.add(point);
+        }
+        when(metricSnapshotRepository.findByAccount(
+                ArgumentMatchers.eq(7), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq(10000)))
+                .thenReturn(points);
+
+        List<AccountMetricPointResponse> result = service.listAccountMetrics(1, 7, "90d");
+
+        assertTrue(result.size() <= 401, "抽稀后点数应不超过上限");
+        assertTrue(result.size() < points.size(), "大数据量应被抽稀");
+        assertEquals(points.get(0).getCollectedAt(), result.get(0).collectedAt());
+        assertEquals(points.get(999).getCollectedAt(), result.get(result.size() - 1).collectedAt());
     }
 }

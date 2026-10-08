@@ -1,5 +1,6 @@
 package com.monitor.platform.api.controller;
 
+import com.monitor.platform.api.dto.AccountMetricPointResponse;
 import com.monitor.platform.api.dto.AccountResponse;
 import com.monitor.platform.api.dto.AccountApiKeyResponse;
 import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
@@ -212,6 +213,21 @@ public class UpstreamAdminController {
      * @param instanceId 平台 ID
      * @return 账号列表
      */
+    /**
+     * 查询账号余额/额度指标时序，供余额详情页折线图使用。
+     *
+     * @param instanceId 平台 ID
+     * @param accountId  账号 ID
+     * @param range      时间维度：1d、7d、30d、90d
+     */
+    @GetMapping("/instances/{instanceId}/accounts/{accountId}/metrics")
+    public ApiResponse<List<AccountMetricPointResponse>> listAccountMetrics(
+            @PathVariable Integer instanceId,
+            @PathVariable Integer accountId,
+            @RequestParam(defaultValue = "7d") String range) {
+        return ApiResponse.of(upstreamAdminService.listAccountMetrics(instanceId, accountId, range), null);
+    }
+
     @GetMapping("/instances/{instanceId}/accounts")
     public ApiResponse<List<AccountResponse>> listAccounts(@PathVariable Integer instanceId) {
         return ApiResponse.of(upstreamAdminService.listAccounts(instanceId), null);

@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { Account, ApiKey, ChangeEvent, Channel, Platform, PlatformType, UsageDashboard } from '../types'
+import type { Account, AccountMetricPoint, ApiKey, ChangeEvent, Channel, MetricRange, Platform, PlatformType, UsageDashboard } from '../types'
 
 export interface CreateAccountInput {
   displayName: string
@@ -440,4 +440,35 @@ export async function revealAccountPasswordRecord(account: Account): Promise<str
     `/api/v1/upstream/instances/${account.platformId}/accounts/${account.id}/credential/reveal`,
     { method: 'POST' },
   )
+}
+
+interface AccountMetricDto {
+  collectedAt?: string
+  balance?: number | null
+  frozenBalance?: number | null
+  quota?: number | null
+  usedQuota?: number | null
+  requestCount?: number | null
+  quotaUnit?: string | null
+}
+
+/**
+ * 查询账号余额/额度指标时序，供余额详情页折线图使用。
+ *
+ * @param account 目标账号
+ * @param range   时间维度：1d / 7d / 30d / 90d
+ */
+export async function listAccountMetricRecords(account: Account, range: MetricRange): Promise<AccountMetricPoint[]> {
+  const rows = await apiRequest<AccountMetricDto[]>(
+    `/api/v1/upstream/instances/${account.platformId}/accounts/${account.id}/metrics?range=${range}`,
+  )
+  return rows.map(row => ({
+    collectedAt: row.collectedAt || new Date().toISOString(),
+    balance: toNullableNumber(row.balance),
+    frozenBalance: toNullableNumber(row.frozenBalance),
+    quota: toNullableNumber(row.quota),
+    usedQuota: toNullableNumber(row.usedQuota),
+    requestCount: toNullableNumber(row.requestCount),
+    quotaUnit: row.quotaUnit ?? null,
+  }))
 }

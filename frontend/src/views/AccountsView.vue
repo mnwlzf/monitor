@@ -85,9 +85,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="balance" label="余额" min-width="110" sortable="custom" align="right">
+        <el-table-column prop="balance" label="余额" min-width="130" sortable="custom" align="right">
           <template #default="{ row }">
-            <strong class="admin-num positive">{{ formatMoney(row.balance) }}</strong>
+            <el-tooltip content="点击查看余额趋势" placement="top" :show-after="200">
+              <el-button link class="admin-balance-link" @click="openBalance(asAccount(row))">
+                {{ formatMoney(row.balance) }}
+              </el-button>
+            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -288,6 +292,10 @@
       </template>
     </el-dialog>
 
+    <el-drawer v-model="showBalance" :title="balanceTitle" size="900px" destroy-on-close>
+      <BalanceTrendPanel v-if="balanceAccount" :account="balanceAccount" />
+    </el-drawer>
+
     <el-dialog v-model="showPassword" title="账号登录密码" width="560px" destroy-on-close append-to-body>
       <p class="admin-key-secret-tip">明文密码（仅管理员可见），查看操作会记录审计日志。</p>
       <div class="admin-key-secret">
@@ -308,6 +316,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { Monitor, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import BalanceTrendPanel from '../components/BalanceTrendPanel.vue'
 import { createAccountRecord, deleteAccountRecord, revealAccountPasswordRecord, revealApiKeyRecord, updateAccountRecord, type CreateAccountInput, type UpdateAccountInput } from '../api/accounts'
 import type { Account, ApiKey, Platform, UsageDashboard } from '../types'
 
@@ -362,6 +371,18 @@ const revealedKey = ref('')
 const revealedKeyLabel = ref('')
 const showSecret = ref(false)
 const revealingId = ref<number | null>(null)
+
+const showBalance = ref(false)
+const balanceAccount = ref<Account | null>(null)
+const balanceTitle = computed(() => balanceAccount.value
+  ? `${balanceAccount.value.displayName} · 余额趋势`
+  : '余额趋势')
+
+/** 点击余额列：下钻查看该账号的余额趋势。 */
+function openBalance(account: Account) {
+  balanceAccount.value = account
+  showBalance.value = true
+}
 
 const showPassword = ref(false)
 const revealedPassword = ref('')
@@ -754,3 +775,17 @@ function formatDate(value: string) {
   return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 </script>
+
+<style scoped>
+.admin-balance-link {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f7a69;
+}
+
+.admin-balance-link:hover {
+  color: #2ba189;
+  text-decoration: underline;
+}
+</style>

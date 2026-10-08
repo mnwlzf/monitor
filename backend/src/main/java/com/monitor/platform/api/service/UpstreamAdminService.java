@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.monitor.platform.api.dto.AccountMetricPointResponse;
 import com.monitor.platform.api.dto.AccountResponse;
 import com.monitor.platform.api.dto.AccountApiKeyResponse;
 import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
@@ -38,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -56,6 +58,12 @@ public class UpstreamAdminService {
 
     /** 支持手动 Token 登录的平台类型。 */
     private static final String SUPPORTED_TOKEN_PLATFORM = "sub2api";
+
+    /** 指标时序单次最多查询的原始点数。 */
+    private static final int METRIC_MAX_QUERY_POINTS = 10000;
+
+    /** 折线图最多返回的点数，超出时按步长抽稀，避免前端渲染过慢。 */
+    private static final int METRIC_MAX_CHART_POINTS = 400;
 
     /** New API 平台标识，其「今日消耗」由累计消耗差值推算。 */
     private static final String PLATFORM_NEW_API = "newapi";
@@ -670,6 +678,72 @@ public class UpstreamAdminService {
     /**
      * 将账号实体与其最新指标快照组合为接口响应。
      */
+    /**
+     * 查询账号余额/额度指标时序，供余额详情页折线图使用。
+     *
+     * <p>时间维度支持 {@code 1d}、{@code 7d}、{@code 30d}、{@code 90d}，默认 {@code 7d}。
+     * 点数过多时按步长抽稀到 {@value #METRIC_MAX_CHART_POINTS} 以内，保留首尾点。</p>
+     *
+     * @param platformId 平台 ID
+     * @param accountId  账号 ID
+     * @param range      时间维度
+     * @return 指标时序点（按时间升序）
+     */
+    public List<AccountMetricPointResponse> listAccountMetrics(Integer platformId, Integer accountId, String range) {
+        findAccount(platformId, accountId);
+
+        OffsetDateTime to = OffsetDateTime.now();
+        OffsetDateTime from = to.minus(resolveMetricRange(range));
+        List<AccountMetricSnapshotEntity> snapshots = metricSnapshotRepository
+                .findByAccount(accountId, from, to, METRIC_MAX_QUERY_POINTS);
+
+        return downsampleMetrics(snapshots, METRIC_MAX_CHART_POINTS).stream()
+                .map(this::toMetricPointResponse)
+                .toList();
+    }
+
+    /** 解析时间维度参数。 */
+    private Duration resolveMetricRange(String range) {
+        if (range == null) {
+            return Duration.ofDays(7);
+        }
+        return switch (range.trim().toLowerCase()) {
+            case "1d", "24h" -> Duration.ofDays(1);
+            case "30d" -> Duration.ofDays(30);
+            case "90d" -> Duration.ofDays(90);
+            default -> Duration.ofDays(7);
+        };
+    }
+
+    /**
+     * 等步长抽稀指标点：超过上限时按比例采样，并始终保留最后一个点。
+     */
+    private List<AccountMetricSnapshotEntity> downsampleMetrics(List<AccountMetricSnapshotEntity> points, int maxPoints) {
+        if (points.size() <= maxPoints || maxPoints <= 1) {
+            return points;
+        }
+        List<AccountMetricSnapshotEntity> result = new ArrayList<>(maxPoints + 1);
+        int step = (int) Math.ceil((double) points.size() / maxPoints);
+        for (int i = 0; i < points.size(); i += step) {
+            result.add(points.get(i));
+        }
+        AccountMetricSnapshotEntity last = points.get(points.size() - 1);
+        if (!result.get(result.size() - 1).equals(last)) {
+            result.add(last);
+        }
+        return result;
+    }
+
+    private AccountMetricPointResponse toMetricPointResponse(AccountMetricSnapshotEntity snapshot) {
+        return new AccountMetricPointResponse(
+                snapshot.getCollectedAt(),
+                snapshot.getBalance(),
+                snapshot.getFrozenBalance(),
+                snapshot.getQuota(),
+                snapshot.getUsedQuota(),
+                snapshot.getRequestCount(),
+                snapshot.getQuotaUnit());
+    }
     private AccountResponse toAccountResponse(AccountEntity entity) {
         AccountMetricSnapshotEntity snapshot = metricSnapshotRepository.findLatest(entity.getId()).orElse(null);
         return new AccountResponse(
