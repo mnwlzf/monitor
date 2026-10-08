@@ -43,10 +43,22 @@ public class PoolSyncService {
     /** 逐请求明细每页条数。 */
     private static final int SAMPLE_PAGE_SIZE = 1000;
     /** 逐请求明细单个账号单轮最大翻页数（每页 1000 条），避免异常账号拖垮整轮采集。 */
-    private static final int SAMPLE_MAX_PAGES = 10;
+    private static final int SAMPLE_MAX_PAGES = 5;
+    /**
+     * 单轮明细采集的总时长预算。
+     *
+     * <p>号池账号较多时，一轮可能跑很久，导致任务长时间占用上游接口并「卡顿」。
+     * 超过预算就提前结束本轮，剩余账号留到下一轮继续（水位已推进，下一轮只取增量）。</p>
+     */
+    private static final Duration SAMPLE_BUDGET = Duration.ofMinutes(8);
     /** 自动绑定凭证导出的最小间隔：导出全量明文凭证很慢，避免每次健康检查都触发。 */
     private static final Duration BIND_MIN_INTERVAL = Duration.ofMinutes(30);
-    /** 首次采集时回溯的天数。 */
+    /**
+     * 首次采集时最多回溯的天数。
+     *
+     * <p>上游 /admin/usage 只支持按天过滤，且一次采集可能返回上千条明细。
+     * 这里明确「最多往前 7 天」，不做全量回溯，避免首次采集长时间卡住。</p>
+     */
     private static final int LOOKBACK_DAYS = 7;
     private static final int MAX_ERROR_LENGTH = 500;
 
@@ -192,10 +204,16 @@ public class PoolSyncService {
         String adminKey = requireAdminKey(platform);
         List<PoolAccountEntity> accounts = poolAccountRepository.findByPlatform(platform.getId());
         LocalDate today = LocalDate.now(ZONE);
+        Instant deadline = Instant.now().plus(SAMPLE_BUDGET);
         int totalInserted = 0;
         int collected = 0;
         int failed = 0;
         for (PoolAccountEntity account : accounts) {
+            if (Instant.now().isAfter(deadline)) {
+                log.info("号池明细采集达到单轮时长预算 {}，本轮提前结束，剩余 {} 个账号留到下一轮",
+                        SAMPLE_BUDGET, accounts.size() - collected - failed);
+                break;
+            }
             // pool_accounts 里已经只保留 API Key 类型账号，这里逐个增量拉取用量明细。
             // 指标采集不依赖「本地密钥绑定」：绑定只用于展示这个号池账号对应本项目的哪个 Key。
             try {

@@ -17,18 +17,36 @@ import java.util.List;
 @Repository
 public class PoolSampleRepository {
 
+    /**
+     * 单条 INSERT 语句最多写入的行数。
+     *
+     * <p>一条明细有 18 个绑定参数，PostgreSQL 的 JDBC 驱动硬上限是 65535 个参数，
+     * 超过会直接抛 {@code PreparedStatement can have at most 65,535 parameters}。
+     * 500 行约 9000 个参数，留足余量；单次采集可能产生上万条明细，必须分片写入。</p>
+     */
+    static final int MAX_BATCH_ROWS = 500;
+
     private final PoolSampleMapper poolSampleMapper;
 
     public PoolSampleRepository(PoolSampleMapper poolSampleMapper) {
         this.poolSampleMapper = poolSampleMapper;
     }
 
-    /** 批量写入请求明细，返回实际新增条数。 */
+    /**
+     * 分批写入请求明细，返回实际新增条数。
+     *
+     * <p>按 {@link #MAX_BATCH_ROWS} 切片，避免单条语句参数个数超过数据库上限。</p>
+     */
     public int insertBatch(List<PoolSampleEntity> samples) {
         if (samples == null || samples.isEmpty()) {
             return 0;
         }
-        return poolSampleMapper.insertSamples(samples);
+        int inserted = 0;
+        for (int start = 0; start < samples.size(); start += MAX_BATCH_ROWS) {
+            int end = Math.min(start + MAX_BATCH_ROWS, samples.size());
+            inserted += poolSampleMapper.insertSamples(samples.subList(start, end));
+        }
+        return inserted;
     }
 
     /**
