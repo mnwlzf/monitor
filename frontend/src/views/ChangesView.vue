@@ -234,15 +234,41 @@ function displayChangeValue(value: string | null | undefined) {
   return !text || text === 'null' ? '—' : text
 }
 
-/** 详情弹窗里的值：能解析为 JSON 的做格式化，否则原样展示。 */
+/** 详情弹窗里的值：能解析为 JSON 的做格式化，否则原样展示；密钥字段一律脱敏。 */
 function prettyValue(value: string | null | undefined) {
   const text = (value ?? '').trim()
   if (!text || text === 'null') return '—'
   try {
-    return JSON.stringify(JSON.parse(text), null, 2)
+    return JSON.stringify(maskSecrets(JSON.parse(text)), null, 2)
   } catch {
-    return text
+    return maskSecretsInText(text)
   }
+}
+
+/** 递归脱敏 JSON 里的密钥字段，避免详情弹窗展示明文 key。 */
+function maskSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(maskSecrets)
+  }
+  if (value && typeof value === 'object') {
+    const result: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      result[key] = key === 'key' ? maskKeyValue(item) : maskSecrets(item)
+    }
+    return result
+  }
+  return value
+}
+
+function maskKeyValue(value: unknown) {
+  if (typeof value !== 'string' || !value) return value
+  if (value.includes('*') || value.length <= 12) return value
+  return `${value.slice(0, 6)}****${value.slice(-4)}`
+}
+
+/** 非 JSON 文本里的 sk-xxx 也做兜底脱敏。 */
+function maskSecretsInText(text: string) {
+  return text.replace(/sk-[A-Za-z0-9_-]{16,}/g, match => `${match.slice(0, 6)}****${match.slice(-4)}`)
 }
 
 function openChangeDetail(change: ChangeEvent) {

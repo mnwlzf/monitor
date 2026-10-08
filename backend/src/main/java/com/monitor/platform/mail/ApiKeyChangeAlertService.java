@@ -135,14 +135,62 @@ public class ApiKeyChangeAlertService {
         return html.toString();
     }
 
-    /** 展示字段变化：标签 + 旧值 → 新值；无标量对比时展示破折号。 */
+    /**
+     * 变更列的展示文案。
+     *
+     * <p>新增/轮换类事件的前后值往往是整块上游响应（很长，且包含密钥明文），这里只给结论，
+     * 既不把邮件刷屏、也不把密钥写进邮件；只有标量字段才展示「旧值 → 新值」。</p>
+     */
     private String changeDescription(UpstreamChangeEventEntity event) {
+        if (isRawPayload(event.getOldValue()) || isRawPayload(event.getNewValue())) {
+            return escape(summaryLabel(event));
+        }
         String oldValue = scalar(event.getOldValue());
         String newValue = scalar(event.getNewValue());
         if (oldValue == null && newValue == null) {
+            return escape(summaryLabel(event));
+        }
+        return escape(fieldLabel(event.getFieldName())) + "：" + escape(readable(oldValue))
+                + " → " + escape(readable(newValue));
+    }
+
+    /** 整块 JSON / 超长文本视为原始响应，不直接展示。 */
+    private boolean isRawPayload(String value) {
+        if (value == null) {
+            return false;
+        }
+        String text = value.trim();
+        if (text.isEmpty() || "null".equals(text)) {
+            return false;
+        }
+        if (text.length() > 120) {
+            return true;
+        }
+        return (text.startsWith("{") && text.endsWith("}"))
+                || (text.startsWith("[") && text.endsWith("]"));
+    }
+
+    /** 无标量可对比时给出的结论文案。 */
+    private String summaryLabel(UpstreamChangeEventEntity event) {
+        String changeType = event.getChangeType();
+        if (changeType == null) {
+            return "内容已更新（明细见变更记录页）";
+        }
+        return switch (changeType) {
+            case "API_KEY_ADDED" -> "新增密钥（明细见变更记录页）";
+            case "API_KEY_REMOVED" -> "密钥已失效";
+            case "API_KEY_ROTATED" -> "密钥已轮换";
+            case "API_KEY_UPDATED" -> "密钥信息已更新（明细见变更记录页）";
+            default -> "内容已更新（明细见变更记录页）";
+        };
+    }
+
+    /** 标量值的可读展示：空值用破折号，超长截断。 */
+    private String readable(String value) {
+        if (value == null) {
             return "—";
         }
-        return escape(fieldLabel(event.getFieldName())) + "：" + escape(oldValue) + " → " + escape(newValue);
+        return value.length() <= 80 ? value : value.substring(0, 80) + "…";
     }
 
     private String platformName(Integer accountId, Map<Integer, String> platformNames) {

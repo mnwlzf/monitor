@@ -5,11 +5,13 @@ import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import org.junit.jupiter.api.BeforeEach;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -103,5 +105,47 @@ class ApiKeyChangeAlertServiceTest {
     private SmtpConfig smtpConfig() {
         return new SmtpConfig(true, "smtp.example.com", 587, "user", "pw",
                 "monitor@example.com", "Monitor", false);
+    }
+    @Test
+    void shouldSummarizeRawPayloadWithoutLeakingKey() {
+        UpstreamChangeEventEntity event = inUseKeyEvent();
+        event.setChangeType("API_KEY_ADDED");
+        event.setFieldName(null);
+        event.setOldValue(null);
+        event.setNewValue("{\"id\":52064,\"key\":\"sk-698199a2cb9089b1795491c358f0997bfa517d8be63fcbbbaf6455f782f3fa4b\","
+                + "\"name\":\"满血\",\"status\":\"active\"}");
+        when(changeEventRepository.findInUseKeyEventsSince(any(), anyInt())).thenReturn(List.of(event));
+        when(mailRecipientRepository.findByScene(MailScene.API_KEY_CHANGE)).thenReturn(List.of(recipient()));
+        when(smtpConfigProvider.load()).thenReturn(smtpConfig());
+
+        service.notifyInUseKeyChanges(OffsetDateTime.now().minusMinutes(1));
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(mailService).send(any(SmtpConfig.class), anyList(), anyString(), body.capture());
+        assertThat(body.getValue())
+                .contains("新增密钥")
+                .doesNotContain("sk-698199a2")
+                .doesNotContain("\"id\":52064");
+    }
+
+    @Test
+    void shouldRenderScalarFieldChanges() {
+        UpstreamChangeEventEntity event = inUseKeyEvent();
+        event.setChangeType("API_KEY_UPDATED");
+        event.setFieldName("status");
+        event.setOldValue("\"active\"");
+        event.setNewValue("\"disabled\"");
+        when(changeEventRepository.findInUseKeyEventsSince(any(), anyInt())).thenReturn(List.of(event));
+        when(mailRecipientRepository.findByScene(MailScene.API_KEY_CHANGE)).thenReturn(List.of(recipient()));
+        when(smtpConfigProvider.load()).thenReturn(smtpConfig());
+
+        service.notifyInUseKeyChanges(OffsetDateTime.now().minusMinutes(1));
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(mailService).send(any(SmtpConfig.class), anyList(), anyString(), body.capture());
+        assertThat(body.getValue())
+                .contains("密钥状态")
+                .contains("active")
+                .contains("disabled");
     }
 }

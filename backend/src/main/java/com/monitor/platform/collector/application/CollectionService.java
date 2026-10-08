@@ -15,6 +15,7 @@ import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.common.util.SecretMasker;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.AccountApiKeySnapshotRepository;
@@ -979,7 +980,7 @@ public class CollectionService {
             entity.setIsActive(true);
             entity.setLastSeenAt(now);
             entity.setMetrics(toJson(newApiKeyMetrics(item)));
-            entity.setRawData(toJson(item));
+            entity.setRawData(toRedactedJson(item));
             if (changed) {
                 entity.setLastChangedAt(now);
             }
@@ -1062,7 +1063,7 @@ public class CollectionService {
             entity.setIsActive(true);
             entity.setLastSeenAt(now);
             entity.setMetrics(toJson(sub2KeyMetrics(item, usage)));
-            entity.setRawData(toJson(item));
+            entity.setRawData(toRedactedJson(item));
             if (changed) {
                 entity.setLastChangedAt(now);
             }
@@ -1251,8 +1252,9 @@ public class CollectionService {
         event.setEntityKey(entity.getExternalKeyId());
         event.setChangeType(changeType);
         event.setFieldName(fieldName);
-        event.setOldValue(toJson(oldValue));
-        event.setNewValue(toJson(newValue));
+        // 新增/轮换密钥的前后值可能是整块上游响应（含明文 key），落库前必须脱敏
+        event.setOldValue(toRedactedJson(oldValue));
+        event.setNewValue(toRedactedJson(newValue));
         event.setSeverity("INFO");
         event.setMessage(message);
         event.setInUse(inUse);
@@ -1324,13 +1326,7 @@ public class CollectionService {
      * 密钥脱敏展示：保留前 6 位与后 4 位。
      */
     private String maskKey(String key) {
-        if (key == null || key.isBlank()) {
-            return null;
-        }
-        if (key.contains("*") || key.length() <= 12) {
-            return key;
-        }
-        return key.substring(0, 6) + "****" + key.substring(key.length() - 4);
+        return SecretMasker.mask(key);
     }
 
     /**
@@ -1506,6 +1502,16 @@ public class CollectionService {
     /**
      * 将对象序列化为 JSON，用于保存原始响应或变更前后值。
      */
+    /**
+     * 序列化变更事件前后值，并对密钥字段脱敏。
+     *
+     * <p>上游密钥列表返回的 {@code key} 是明文，直接写入变更事件会让明文密钥长期留在
+     * 数据库里（页面详情与提醒邮件都会读到），因此统一脱敏后再落库。</p>
+     */
+    private String toRedactedJson(Object value) {
+        return SecretMasker.redactSecretField(toJson(value), objectMapper);
+    }
+
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
