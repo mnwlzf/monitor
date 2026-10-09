@@ -1,0 +1,86 @@
+package com.monitor.platform.bot;
+
+import com.monitor.platform.bot.onebot.OneBotClient;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * 端到端：真实 OneBot 事件 JSON → HTTP 接口 → 路由 → 回复。
+ *
+ * <p>这里用的是真实的 {@link BotMessageService} 与 {@link QqBotWebhookController}，
+ * 只有 OneBot 客户端与查询工具是 mock，覆盖 JSON 绑定、鉴权、路由到出站调用的整条链路。</p>
+ */
+class QqBotWebhookIntegrationTest {
+
+    private OneBotClient client;
+    private MonitorChatTools tools;
+    private MockMvc mockMvc;
+
+    @BeforeEach
+    @SuppressWarnings("unchecked")
+    void setUp() {
+        QqBotProperties properties = new QqBotProperties();
+        properties.setEnabled(true);
+        properties.setWebhookToken("secret");
+        properties.setApiBaseUrl("http://127.0.0.1:3000");
+
+        client = mock(OneBotClient.class);
+        tools = mock(MonitorChatTools.class);
+        when(tools.poolOverview(anyString())).thenReturn("号池监控（近 24h）：账号 A 请求 10，缓存率 80.0%");
+
+        ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+
+        BotMessageService service = new BotMessageService(properties, client, tools, provider);
+        mockMvc = MockMvcBuilders
+                .standaloneSetup(new QqBotWebhookController(properties, service))
+                .build();
+    }
+
+    @Test
+    void shouldHandleRealOneBotEventAndReply() throws Exception {
+        // 字段照抄 OneBot v11 真实上报，多出来的字段（sub_type/font/sender）必须被忽略
+        String body = """
+                {"post_type":"message","message_type":"private","sub_type":"friend","message_id":1024,
+                 "user_id":999,"self_id":1,"raw_message":"/号池","font":0,
+                 "sender":{"user_id":999,"nickname":"me","role":"member"},
+                 "message":[{"type":"text","data":{"text":"/号池"}}]}
+                """;
+
+        mockMvc.perform(post("/api/v1/bot/onebot")
+                        .header("Authorization", "Bearer secret")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNoContent());
+
+        verify(tools, timeout(3000)).poolOverview(anyString());
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("号池监控"));
+    }
+
+    @Test
+    void shouldRejectWrongTokenOverHttp() throws Exception {
+        mockMvc.perform(post("/api/v1/bot/onebot")
+                        .header("Authorization", "Bearer nope")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"post_type\":\"message\",\"message_type\":\"private\",\"user_id\":1}"))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(client);
+    }
+}
