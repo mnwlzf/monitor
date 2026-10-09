@@ -52,7 +52,8 @@ services:
       # QQ 机器人（OneBot v11）与大模型（Spring AI），默认关闭
       MONITOR_BOT_ENABLED: ${MONITOR_BOT_ENABLED:-false}
       MONITOR_BOT_WEBHOOK_TOKEN: ${MONITOR_BOT_WEBHOOK_TOKEN:-}
-      MONITOR_BOT_API_BASE_URL: ${MONITOR_BOT_API_BASE_URL:-}
+      # 默认直连同 compose 内的 napcat 容器（容器内端口固定 3000）
+      MONITOR_BOT_API_BASE_URL: ${MONITOR_BOT_API_BASE_URL:-http://napcat:3000}
       MONITOR_BOT_API_TOKEN: ${MONITOR_BOT_API_TOKEN:-}
       MONITOR_BOT_ALLOWED_GROUPS: ${MONITOR_BOT_ALLOWED_GROUPS:-}
       MONITOR_BOT_ALLOWED_USERS: ${MONITOR_BOT_ALLOWED_USERS:-}
@@ -112,6 +113,44 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # ============================================================
+  # QQ 机器人（OneBot v11）：和 app 在同一个 compose 网络里，直接用容器名互访。
+  #   app    → napcat:3000    发消息（MONITOR_BOT_API_BASE_URL）
+  #   napcat → monitor:8080   反向 HTTP 上报（/api/v1/bot/onebot）
+  #
+  # 首次使用：
+  #   1) docker compose logs napcat          拿 WebUI 的 token
+  #   2) 本机执行 ssh -L 6099:127.0.0.1:6099 root@<服务器IP>，
+  #      浏览器打开 http://127.0.0.1:6099/webui?token=<token> 扫码登录 QQ（建议小号）
+  #   3) 在 WebUI 的「网络配置」里开：
+  #        - HTTP 服务端 0.0.0.0:3000
+  #        - 反向 HTTP 上报 http://monitor:8080/api/v1/bot/onebot
+  #          Header: Authorization: Bearer <MONITOR_BOT_WEBHOOK_TOKEN>
+  #   4) .env 里设 MONITOR_BOT_ENABLED=true 后重启 app
+  #
+  # 不用 QQ 机器人时：删掉这个服务，或只起需要的服务
+  #   docker compose up -d app postgres redis
+  # ============================================================
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    environment:
+      # Linux 下可改成 `id -u` / `id -g`；Docker Desktop（Win/mac）保持 0
+      NAPCAT_UID: 0
+      NAPCAT_GID: 0
+    ports:
+      # WebUI：扫码登录 + 配置 OneBot 网络（只绑 127.0.0.1，远程用 SSH 隧道）
+      - "127.0.0.1:6099:6099"
+      # OneBot HTTP API：容器内固定 3000；宿主机 5000 仅供本机排查，
+      # app 走 compose 网络直连 napcat:3000，不依赖这个映射。
+      - "127.0.0.1:5000:3000"
+    volumes:
+      # 登录态与配置，重启免扫码；部署目录不同就改这三行
+      - /app/napcat/qq:/app/.config/QQ
+      - /app/napcat/config:/app/napcat/config
+      - /app/napcat/plugins:/app/napcat/plugins
 
 volumes:
   postgres-data:

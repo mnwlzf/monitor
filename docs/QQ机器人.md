@@ -25,19 +25,21 @@ OneBot 只是**协议**，本身不是服务 —— 需要有个程序真的登�
 个人开发者推荐 [NapCat](https://github.com/NapNeko/NapCatQQ)（官方 Docker 镜像 `mlikiowa/napcat-docker`）：
 
 ```bash
-# 1) 起 NapCat（本仓库自带 compose.qqbot.yaml）
-docker compose -f compose.qqbot.yaml up -d
+# 1) 起 NapCat（已包含在主 compose.yaml 里）
+docker compose up -d
 
 # 2) 从日志里拿 WebUI 的登录 token
-docker compose -f compose.qqbot.yaml logs napcat
+docker compose logs napcat
 
-# 3) 浏览器打开 WebUI，扫码登录 QQ
-#    http://127.0.0.1:6099/webui
-#    建议用**小号**：自建机器人有风控/封号风险
+# 3) 本机执行 SSH 隧道（WebUI 只绑在服务器的 127.0.0.1）
+ssh -L 6099:127.0.0.1:6099 root@<服务器IP>
+
+# 4) 浏览器打开 WebUI，扫码登录 QQ（建议用**小号**：自建机器人有风控/封号风险）
+#    http://127.0.0.1:6099/webui?token=<上一步日志里的 token>
 ```
 
 > 登录态与配置直接挂在宿主机 `/app/napcat/` 下（`qq` / `config` / `plugins` 三个子目录），
-> 重启容器不用重新扫码。**NapCat 侧不需要 `.env`**：端口与目录都写在 `compose.qqbot.yaml` 里，部署目录不同就改那三行 volume。
+> 重启容器不用重新扫码。**NapCat 侧不需要 `.env`**：端口与目录都写在 `compose.yaml` 的 napcat 服务里，部署目录不同就改那三行 volume。
 
 登录成功后，在 WebUI 的「网络配置」里开两样：
 
@@ -48,24 +50,20 @@ docker compose -f compose.qqbot.yaml logs napcat
 
 ### 两个容器怎么互访
 
-monitor 和 napcat 是两套独立的 compose（比如 `/app/monitor` 与 `/app/napcat`），
-`compose.qqbot.yaml` 里已经把 napcat 挂到 **monitor 项目的默认网络** `monitor_default` 上，
-所以两边直接用**容器名 + 容器内端口**互访，不经过宿主机端口：
+`napcat` 与 `app` 在**同一个 compose 文件**里，天然处于同一个网络（项目名 `monitor` → 网络 `monitor_default`），
+所以直接用**容器名 + 容器内端口**互访，不经过宿主机端口：
 
 | 方向 | 地址 |
 |---|---|
-| monitor → napcat（发消息） | `http://napcat:3000`（`MONITOR_BOT_API_BASE_URL`） |
-| napcat → monitor（反向 HTTP 上报） | `http://monitor:8080/api/v1/bot/onebot` |
+| app → napcat（发消息） | `http://napcat:3000`（`MONITOR_BOT_API_BASE_URL`） |
+| napcat → app（反向 HTTP 上报） | `http://monitor:8080/api/v1/bot/onebot` |
 
-> ⚠️ 顺序：**先起 monitor**（`docker compose -f compose.yaml up -d`，它会创建 `monitor_default` 网络），
-> 再起 napcat。反过来会报 `network monitor_default declared as external, but could not be found`。
->
 > ⚠️ 不要用 `host.docker.internal` 走宿主机端口：NapCat 的端口只绑在 `127.0.0.1`，
 > 容器从网卡 IP 访问回环端口是连不通的。
 >
 > 宿主机端口被占用（`Bind for 127.0.0.1:xxxx failed: port is already allocated`）时：
 > `docker ps` / `ss -lntp | grep <端口>` 找出占用者；或直接换端口 ——
-> 直接改 `compose.qqbot.yaml` 里的端口映射（宿主机侧），容器内始终是 3000。
+> 改 `compose.yaml` 里 napcat 的 `ports` 映射（宿主机侧），容器内始终是 3000。
 
 其它可选实现：Lagrange.Core、LLOneBot。`go-cqhttp` 已停更，不建议再用。
 
