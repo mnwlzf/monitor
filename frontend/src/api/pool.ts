@@ -197,6 +197,7 @@ interface PoolCacheRateMatrixDto {
   accounts?: Array<{
     externalAccountId: number
     name?: string | null
+    platform?: string | null
     boundKeyName?: string | null
     boundKeyMasked?: string | null
     cells?: Array<{
@@ -232,6 +233,7 @@ export async function listPoolCacheRates(platformId: number, windows: string[]):
     accounts: (dto?.accounts ?? []).map(row => ({
       externalAccountId: Number(row.externalAccountId),
       name: row.name ?? null,
+      platform: row.platform ?? null,
       boundKeyName: row.boundKeyName ?? null,
       boundKeyMasked: row.boundKeyMasked ?? null,
       cells: (row.cells ?? []).map(cell => ({

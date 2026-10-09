@@ -13,6 +13,23 @@
           <el-radio-button value="30d">近 30 天</el-radio-button>
           <el-radio-button value="90d">近 90 天</el-radio-button>
         </el-radio-group>
+
+        <span class="pool-toolbar-label">账号平台</span>
+        <el-select
+          v-model="platformFilter"
+          multiple
+          clearable
+          collapse-tags
+          :max-collapse-tags="2"
+          placeholder="全部平台"
+          style="width: 220px"
+        >
+          <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
+        </el-select>
+        <el-button v-if="platformFilter.length" link type="primary" @click="platformFilter = []">清除筛选</el-button>
+        <span class="pool-toolbar-count">
+          账号 {{ filteredAccounts.length }} / {{ accounts.length }}
+        </span>
       </div>
 
       <div class="pool-toolbar-actions">
@@ -63,7 +80,7 @@
       <el-card shadow="never" class="admin-card pool-table-card">
         <el-table
           v-loading="loading"
-          :data="accounts"
+          :data="filteredAccounts"
           row-key="externalAccountId"
           size="small"
           class="pool-table"
@@ -164,7 +181,11 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-if="!loading && !accounts.length" description="暂无号池账号，请先执行一次「立即采集」" :image-size="80" />
+        <el-empty
+          v-if="!loading && !filteredAccounts.length"
+          :description="accounts.length ? '没有符合筛选条件的账号' : '暂无号池账号，请先执行一次「立即采集」'"
+          :image-size="80"
+        />
       </el-card>
 
       <el-card shadow="never" class="admin-card pool-table-card">
@@ -194,13 +215,13 @@
             </el-select>
           </div>
         </template>
-        <el-table v-loading="matrixLoading" :data="matrixRows" size="small" border>
+        <el-table v-loading="matrixLoading" :data="filteredMatrixRows" size="small" border>
           <el-table-column label="号池账号" min-width="220" fixed>
             <template #default="{ row }">
               <div class="pool-account-cell">
                 <strong>{{ row.name || ('账号 ' + row.externalAccountId) }}</strong>
-                <small v-if="row.boundKeyName">{{ row.boundKeyName }} · {{ row.boundKeyMasked }}</small>
-                <small v-else class="pool-muted">未绑定本地密钥</small>
+                <small>{{ row.platform || '-' }}<template v-if="row.boundKeyName"> · {{ row.boundKeyName }} {{ row.boundKeyMasked }}</template></small>
+                <small v-if="!row.boundKeyName" class="pool-muted">未绑定本地密钥</small>
               </div>
             </template>
           </el-table-column>
@@ -223,7 +244,7 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-if="!matrixLoading && !matrixRows.length" description="暂无数据" :image-size="60" />
+        <el-empty v-if="!matrixLoading && !filteredMatrixRows.length" :description="matrixRows.length ? '没有符合筛选条件的账号' : '暂无数据'" :image-size="60" />
       </el-card>
     </template>
 
@@ -395,10 +416,14 @@ const MAX_WINDOWS = 6
 interface MatrixRowView {
   externalAccountId: number
   name: string | null
+  platform: string | null
   boundKeyName: string | null
   boundKeyMasked: string | null
   cells: Record<string, PoolCacheRateCell>
 }
+
+/** 账号平台筛选（openai / anthropic / grok ...），空数组表示全部。 */
+const platformFilter = ref<string[]>([])
 
 const selectedWindows = ref<string[]>(['1h', '6h', '24h', '7d', '30d'])
 const matrixWindows = ref<PoolCacheRateWindow[]>([])
@@ -416,6 +441,25 @@ const activeAccount = ref<PoolAccount | null>(null)
 const bindKeyId = ref<number | null>(null)
 
 const selectedPlatform = computed(() => poolSources.value.find(item => item.id === selectedPlatformId.value) ?? null)
+
+/** 可选平台：来自当前已加载的号池账号。 */
+const platformOptions = computed(() => {
+  const names = new Set<string>()
+  for (const account of accounts.value) {
+    if (account.platform) names.add(account.platform)
+  }
+  return [...names].sort()
+})
+
+/** 账号列表（按平台筛选后）。 */
+const filteredAccounts = computed(() => platformFilter.value.length
+  ? accounts.value.filter(account => account.platform != null && platformFilter.value.includes(account.platform))
+  : accounts.value)
+
+/** 多时间窗矩阵（按平台筛选后，与账号列表保持一致）。 */
+const filteredMatrixRows = computed(() => platformFilter.value.length
+  ? matrixRows.value.filter(row => row.platform != null && platformFilter.value.includes(row.platform))
+  : matrixRows.value)
 
 const detailTitle = computed(() => activeAccount.value
   ? `${activeAccount.value.name || activeAccount.value.externalAccountId} · 号池详情`
@@ -573,6 +617,7 @@ async function loadMatrix() {
       return {
         externalAccountId: row.externalAccountId,
         name: row.name,
+        platform: row.platform,
         boundKeyName: row.boundKeyName,
         boundKeyMasked: row.boundKeyMasked,
         cells,
@@ -744,6 +789,13 @@ function formatBucket(value: string): string {
     ? date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
     : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit' })
 }
+
+// 换平台/账号列表更新后，清掉已经不存在的筛选项，避免筛选把自己筛空
+watch(platformOptions, options => {
+  if (!platformFilter.value.length) return
+  const kept = platformFilter.value.filter(name => options.includes(name))
+  if (kept.length !== platformFilter.value.length) platformFilter.value = kept
+})
 
 watch(poolSources, list => {
   if (!list.length) {

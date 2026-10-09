@@ -130,6 +130,7 @@ public class PoolQueryService {
             rows.add(new PoolCacheRateMatrixResponse.AccountRow(
                     account.getExternalAccountId(),
                     account.getName(),
+                    account.getPlatform(),
                     key == null ? null : key.getKeyName(),
                     key == null ? null : key.getKeyMasked(),
                     cells));

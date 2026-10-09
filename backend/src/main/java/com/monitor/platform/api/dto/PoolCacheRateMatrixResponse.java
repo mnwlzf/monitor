@@ -33,6 +33,7 @@ public record PoolCacheRateMatrixResponse(
      *
      * @param externalAccountId 号池账号 ID
      * @param name              号池账号名称
+     * @param platform          号池账号的上游平台（openai / anthropic / grok ...），用于按平台筛选
      * @param boundKeyName      绑定的本地密钥名称
      * @param boundKeyMasked    绑定的本地密钥脱敏值
      * @param cells             各时间窗的指标，顺序与 {@code windows} 一致
@@ -40,6 +41,7 @@ public record PoolCacheRateMatrixResponse(
     public record AccountRow(
             Long externalAccountId,
             String name,
+            String platform,
             String boundKeyName,
             String boundKeyMasked,
             List<Cell> cells

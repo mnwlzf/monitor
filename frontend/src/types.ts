@@ -317,6 +317,8 @@ export interface PoolCacheRateCell {
 export interface PoolCacheRateRow {
   externalAccountId: number
   name: string | null
+  /** 号池账号的上游平台（openai / anthropic / grok ...），用于按平台筛选。 */
+  platform: string | null
   boundKeyName: string | null
   boundKeyMasked: string | null
   cells: PoolCacheRateCell[]

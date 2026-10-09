@@ -1073,3 +1073,5 @@ body {
 .pool-matrix-cell strong { font-size: 13px; }
 .pool-matrix-cell small { color: #9aa8a4; font-size: 10px; }
 .pool-matrix-cell small.pool-matrix-thin { color: #d99a2b; }
+
+.pool-toolbar-count { color: #9aa8a4; font-size: 11px; }
