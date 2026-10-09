@@ -36,6 +36,9 @@ docker compose -f compose.qqbot.yaml logs napcat
 #    建议用**小号**：自建机器人有风控/封号风险
 ```
 
+> 登录态与配置默认落在宿主机 `/app/napcat/`（`qq` / `config` / `plugins` 三个子目录），
+> 重启容器不用重新扫码。仓库不在 `/app` 下时，在 `.env` 里设 `NAPCAT_DATA_DIR=/你的路径/napcat`。
+
 登录成功后，在 WebUI 的「网络配置」里开两样：
 
 | 类型 | 作用 | 配置 |

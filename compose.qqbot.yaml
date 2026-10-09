@@ -12,6 +12,11 @@
 #          Authorization 填：Bearer <与 MONITOR_BOT_WEBHOOK_TOKEN 相同>
 #   5) 回到主 compose 打开 monitor 的 MONITOR_BOT_ENABLED=true 并重启
 #
+# 数据目录：默认全部落在 /app/napcat 下（宿主机侧），需要换位置就设 NAPCAT_DATA_DIR。
+#   /app/napcat/qq       ← 容器 /app/.config/QQ   QQ 登录态
+#   /app/napcat/config   ← 容器 /app/napcat/config  NapCat 配置
+#   /app/napcat/plugins  ← 容器 /app/napcat/plugins 插件
+#
 # 说明：这里把端口只绑到 127.0.0.1，避免 NapCat 的 WebUI/HTTP 直接暴露到公网。
 #       monitor 与 napcat 通过宿主机端口互访（host.docker.internal）。
 # ============================================================
@@ -32,10 +37,10 @@ services:
       # OneBot HTTP API：monitor 通过它把回复发出去
       - "127.0.0.1:3000:3000"
     volumes:
-      # QQ 登录态 / NapCat 配置，挂出来才能重启免扫码
-      - ./napcat/qq:/app/.config/QQ
-      - ./napcat/config:/app/napcat/config
-      - ./napcat/plugins:/app/napcat/plugins
+      # 统一挂在 /app/napcat 基准目录下，重启免扫码
+      - ${NAPCAT_DATA_DIR:-/app/napcat}/qq:/app/.config/QQ
+      - ${NAPCAT_DATA_DIR:-/app/napcat}/config:/app/napcat/config
+      - ${NAPCAT_DATA_DIR:-/app/napcat}/plugins:/app/napcat/plugins
     extra_hosts:
       # 让 NapCat 能用 host.docker.internal 回调宿主机的 monitor
       - "host.docker.internal:host-gateway"
