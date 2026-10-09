@@ -6,30 +6,6 @@
         <el-select v-model="selectedPlatformId" placeholder="选择 Sub2API 平台" style="width: 260px" @change="reload">
           <el-option v-for="platform in poolSources" :key="platform.id" :label="platform.name" :value="platform.id" />
         </el-select>
-
-        <el-radio-group v-model="range" @change="reload">
-          <el-radio-button value="1d">近 1 天</el-radio-button>
-          <el-radio-button value="7d">近 7 天</el-radio-button>
-          <el-radio-button value="30d">近 30 天</el-radio-button>
-          <el-radio-button value="90d">近 90 天</el-radio-button>
-        </el-radio-group>
-
-        <span class="pool-toolbar-label">账号平台</span>
-        <el-select
-          v-model="platformFilter"
-          multiple
-          clearable
-          collapse-tags
-          :max-collapse-tags="2"
-          placeholder="全部平台"
-          style="width: 220px"
-        >
-          <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
-        </el-select>
-        <el-button v-if="platformFilter.length" link type="primary" @click="platformFilter = []">清除筛选</el-button>
-        <span class="pool-toolbar-count">
-          账号 {{ filteredAccounts.length }} / {{ accounts.length }}
-        </span>
       </div>
 
       <div class="pool-toolbar-actions">
@@ -60,274 +36,304 @@
       description="请到「平台管理」编辑该平台并填写管理员密钥，否则无法同步号池账号与用量明细。"
     />
 
-    <template v-if="poolSources.length">
-      <div class="pool-metrics">
-        <MetricCard label="号池账号" :value="String(accounts.length)" hint="当前平台下的号池账号数" />
-        <MetricCard
-          label="平均缓存命中率"
-          :value="formatPercent(averageHitRate)"
-          hint="缓存读取 / (输入 + 缓存读取 + 缓存写入)"
-          :tone="hitRateTone(averageHitRate)"
-        />
-        <MetricCard
-          label="平均首 Token"
-          :value="formatMs(averageFirstToken)"
-          :hint="`按样本加权 · 合计 ${formatNumber(totalFirstTokenSamples)} 个样本`"
-        />
-        <MetricCard label="P95 首 Token" :value="formatMs(maxP95FirstToken)" hint="取各账号 P95 最大值" :tone="maxP95FirstToken && maxP95FirstToken > 30000 ? 'warning' : 'neutral'" />
-        <MetricCard label="平均耗时" :value="formatMs(averageDuration)" hint="请求平均总耗时" />
-        <MetricCard label="请求总数" :value="formatNumber(totalRequests)" hint="所选时间窗内" />
-        <MetricCard label="实际成本" :value="formatCost(totalActualCost)" hint="所选时间窗内" />
-      </div>
+    <el-tabs v-if="poolSources.length" v-model="activeTab" class="pool-tabs">
+      <el-tab-pane label="账号列表" name="accounts">
+        <div class="pool-tab-bar">
+          <el-radio-group v-model="range" @change="reload">
+            <el-radio-button value="1d">近 1 天</el-radio-button>
+            <el-radio-button value="7d">近 7 天</el-radio-button>
+            <el-radio-button value="30d">近 30 天</el-radio-button>
+            <el-radio-button value="90d">近 90 天</el-radio-button>
+          </el-radio-group>
 
-      <el-card shadow="never" class="admin-card pool-table-card">
-        <el-table
-          v-loading="loading"
-          :data="filteredAccounts"
-          row-key="externalAccountId"
-          size="small"
-          class="pool-table"
-          @row-click="openDetail"
-        >
-          <el-table-column label="号池账号" min-width="200" fixed>
-            <template #default="{ row }">
-              <div class="pool-account-cell">
-                <strong>{{ row.name || ('账号 ' + row.externalAccountId) }}</strong>
-                <small>{{ row.platform || '-' }} · ID {{ row.externalAccountId }}</small>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="健康状态" width="130">
-            <template #default="{ row }">
-              <el-tag :type="healthTag(asAccount(row)).type" size="small" effect="light">{{ healthTag(asAccount(row)).label }}</el-tag>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="绑定密钥" min-width="180">
-            <template #default="{ row }">
-              <span v-if="row.boundKeyId" class="pool-key-bound">{{ row.boundKeyName || ('#' + row.boundKeyId) }}</span>
-              <el-tag v-else type="warning" size="small" effect="plain">未绑定</el-tag>
-              <small v-if="row.boundKeyMasked" class="pool-key-masked">{{ row.boundKeyMasked }}</small>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="缓存命中率" width="150" sortable :sort-by="'cacheHitRate'">
-            <template #default="{ row }">
-              <div class="pool-rate-cell">
-                <strong :class="hitRateClass(row.cacheHitRate)">{{ formatPercent(row.cacheHitRate) }}</strong>
-                <small>{{ formatNumber(row.cacheReadTokens) }} / {{ formatNumber(row.inputTokens + row.cacheReadTokens + row.cacheCreationTokens) }}</small>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="首 Token（平均 / P95）" width="190">
-            <template #default="{ row }">
-              <div class="pool-sample-cell">
-                <span>{{ formatMs(row.avgFirstTokenMs) }} / {{ formatMs(row.p95FirstTokenMs) }}</span>
-                <el-tag :type="sampleTag(row.firstTokenSamples).type" size="small" effect="plain">
-                  {{ sampleTag(row.firstTokenSamples).label }}
-                </el-tag>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="平均耗时" width="120">
-            <template #default="{ row }">{{ formatMs(row.avgDurationMs) }}</template>
-          </el-table-column>
-
-          <el-table-column label="请求数" width="100" sortable :sort-by="'requests'">
-            <template #default="{ row }">{{ formatNumber(row.requests) }}</template>
-          </el-table-column>
-
-          <el-table-column label="Token 结构（输入/输出/缓存读）" width="230">
-            <template #default="{ row }">
-              <div class="pool-token-cell">
-                <span>{{ formatNumber(row.inputTokens) }} / {{ formatNumber(row.outputTokens) }} / {{ formatNumber(row.cacheReadTokens) }}</span>
-                <div class="pool-token-bar">
-                  <span
-                    v-for="part in tokenParts(asAccount(row))"
-                    :key="part.label"
-                    class="pool-token-bar-seg"
-                    :style="{ width: part.width, background: part.color }"
-                    :title="`${part.label}: ${formatNumber(part.value)}`"
-                  />
-                </div>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="实际成本" width="120" sortable :sort-by="'totalActualCost'">
-            <template #default="{ row }">{{ formatCost(row.totalActualCost) }}</template>
-          </el-table-column>
-
-          <el-table-column label="最近使用" width="150">
-            <template #default="{ row }">{{ formatDateTime(row.lastUsedAt) }}</template>
-          </el-table-column>
-
-          <el-table-column label="采样水位" width="150">
-            <template #default="{ row }">{{ formatDateTime(row.lastSampleAt) }}</template>
-          </el-table-column>
-
-          <el-table-column label="错误" min-width="200">
-            <template #default="{ row }">
-              <span v-if="row.lastSyncError" class="pool-error-text" :title="row.lastSyncError">{{ row.lastSyncError }}</span>
-              <span v-else-if="row.errorMessage" class="pool-error-text" :title="row.errorMessage">{{ row.errorMessage }}</span>
-              <span v-else class="pool-muted">—</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="操作" width="120" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click.stop="openDetail(asAccount(row))">详情</el-button>
-              <el-button v-if="canWrite" link type="primary" @click.stop="openBind(asAccount(row))">绑定</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty
-          v-if="!loading && !filteredAccounts.length"
-          :description="accounts.length ? '没有符合筛选条件的账号' : '暂无号池账号，请先执行一次「立即采集」'"
-          :image-size="80"
-        />
-      </el-card>
-
-            <el-card shadow="never" class="admin-card pool-table-card">
-        <template #header>
-          <div class="pool-heatmap-header">
-            <div>
-              <h3>号池趋势（色块矩阵）</h3>
-              <p class="admin-form-hint">
-                行 = 平台 / 号池账号，列 = 一个统计区间（{{ heatGranularityLabel }}）；悬停看明细，点击行进入详情，灰色表示该区间没有流量。
-              </p>
-            </div>
-            <div class="pool-heatmap-controls">
-              <el-radio-group v-model="heatRange" size="small" @change="loadHeatmap">
-                <el-radio-button v-for="option in HEAT_RANGES" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
-              </el-radio-group>
-              <el-select
-                v-model="heatPlatforms"
-                multiple
-                collapse-tags
-                :max-collapse-tags="1"
-                clearable
-                size="small"
-                placeholder="平台：全部"
-                style="width: 170px"
-                @change="loadHeatmap"
-              >
-                <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
-              </el-select>
-              <el-select
-                v-model="heatModels"
-                multiple
-                collapse-tags
-                :max-collapse-tags="1"
-                clearable
-                size="small"
-                placeholder="模型：全部"
-                style="width: 180px"
-                @change="loadHeatmap"
-              >
-                <el-option v-for="name in modelOptions" :key="name" :label="name" :value="name" />
-              </el-select>
-              <el-select
-                v-model="heatAccounts"
-                multiple
-                collapse-tags
-                :max-collapse-tags="1"
-                clearable
-                filterable
-                size="small"
-                placeholder="账号：全部"
-                style="width: 190px"
-                @change="loadHeatmap"
-              >
-                <el-option
-                  v-for="account in accounts"
-                  :key="account.externalAccountId"
-                  :label="account.name || String(account.externalAccountId)"
-                  :value="account.externalAccountId"
-                />
-              </el-select>
-              <el-button link type="primary" size="small" @click="resetHeatmapFilters">重置</el-button>
-              <el-radio-group v-model="heatMetric" size="small">
-                <el-radio-button value="cacheRate">缓存率</el-radio-button>
-                <el-radio-button value="firstToken">首 Token</el-radio-button>
-                <el-radio-button value="tps">每秒 Token</el-radio-button>
-                <el-radio-button value="requests">请求数</el-radio-button>
-              </el-radio-group>
-            </div>
-          </div>
-        </template>
-
-        <div class="pool-metrics pool-heatmap-metrics">
-          <MetricCard label="缓存率" :value="formatPercent(heatSummary.cacheHitRate)" hint="缓存读取 / (输入 + 缓存读 + 缓存写)" :tone="hitRateTone(heatSummary.cacheHitRate)" />
-          <MetricCard label="首 Token 平均" :value="formatMs(heatSummary.avgFirstTokenMs)" hint="按有效样本加权" />
-          <MetricCard label="每秒 TOKEN" :value="formatTps(heatSummary.tokensPerSecond)" hint="输出 token ÷ 总耗时" />
-          <MetricCard label="RPM" :value="formatRpm(heatSummary.rpm)" hint="每分钟请求数" />
-          <MetricCard label="请求数" :value="formatNumber(heatSummary.requests)" hint="所选窗口内" />
-        </div>
-
-        <div v-loading="heatLoading" class="pool-heatmap">
-          <div class="pool-heatmap-fixed">
-            <div class="pool-heatmap-head">
-              <span class="pool-heatmap-name">平台 / 账号</span>
-              <span class="pool-heatmap-num">缓存率</span>
-              <span class="pool-heatmap-num">首 TOKEN</span>
-              <span class="pool-heatmap-num">每秒 TOKEN</span>
-              <span class="pool-heatmap-num">请求</span>
-            </div>
-            <div
-              v-for="row in heatRows"
-              :key="row.externalAccountId"
-              class="pool-heatmap-row pool-heatmap-row-clickable"
-              @click="openDetailById(row.externalAccountId)"
-            >
-              <span class="pool-heatmap-name">
-                <i class="pool-heatmap-dot" :style="{ background: heatDotColor(row.total) }" />
-                <span class="pool-heatmap-path">{{ row.platform || '-' }} / {{ row.name || ('账号 ' + row.externalAccountId) }}</span>
-              </span>
-              <span class="pool-heatmap-num" :class="hitRateClass(row.total.cacheHitRate)">{{ formatPercent(row.total.cacheHitRate) }}</span>
-              <span class="pool-heatmap-num">{{ formatMs(row.total.avgFirstTokenMs) }}</span>
-              <span class="pool-heatmap-num">{{ formatTps(row.total.tokensPerSecond) }}</span>
-              <span class="pool-heatmap-num">{{ formatNumber(row.total.requests) }}</span>
-            </div>
-          </div>
-
-          <div class="pool-heatmap-scroll">
-            <div class="pool-heatmap-head">
-              <span
-                v-for="(bucket, index) in heatBuckets"
-                :key="bucket"
-                class="pool-heatmap-tick"
-                :style="{ width: heatPitch + 'px' }"
-              >{{ heatAxisLabel(index) }}</span>
-            </div>
-            <div v-for="row in heatRows" :key="row.externalAccountId" class="pool-heatmap-row">
-              <span
-                v-for="(cell, index) in row.cells"
-                :key="index"
-                class="pool-heatmap-cell"
-                :style="heatCellStyle(cell)"
-                :title="heatCellTip(row, cell, index)"
-                @click="openDetailById(row.externalAccountId)"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div class="pool-heatmap-legend">
-          <span class="pool-heatmap-legend-label">差</span>
-          <span class="pool-heatmap-legend-bar" />
-          <span class="pool-heatmap-legend-label">好</span>
-          <span class="pool-heatmap-legend-item">
-            <i class="pool-heatmap-swatch" :style="{ background: heatNoDataColor }" />无流量 / 样本不足
+          <span class="pool-toolbar-label">账号平台</span>
+          <el-select
+            v-model="platformFilter"
+            multiple
+            clearable
+            collapse-tags
+            :max-collapse-tags="2"
+            placeholder="全部平台"
+            style="width: 220px"
+          >
+            <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
+          </el-select>
+          <el-button v-if="platformFilter.length" link type="primary" @click="platformFilter = []">清除筛选</el-button>
+          <span class="pool-toolbar-count">
+            账号 {{ filteredAccounts.length }} / {{ accounts.length }}
           </span>
         </div>
 
-        <el-empty v-if="!heatLoading && !heatRows.length" description="所选窗口内暂无号池明细" :image-size="60" />
-      </el-card>
-    </template>
+        <div class="pool-metrics">
+          <MetricCard label="号池账号" :value="String(accounts.length)" hint="当前平台下的号池账号数" />
+          <MetricCard
+            label="平均缓存命中率"
+            :value="formatPercent(averageHitRate)"
+            hint="缓存读取 / (输入 + 缓存读取 + 缓存写入)"
+            :tone="hitRateTone(averageHitRate)"
+          />
+          <MetricCard
+            label="平均首 Token"
+            :value="formatMs(averageFirstToken)"
+            :hint="`按样本加权 · 合计 ${formatNumber(totalFirstTokenSamples)} 个样本`"
+          />
+          <MetricCard label="P95 首 Token" :value="formatMs(maxP95FirstToken)" hint="取各账号 P95 最大值" :tone="maxP95FirstToken && maxP95FirstToken > 30000 ? 'warning' : 'neutral'" />
+          <MetricCard label="平均耗时" :value="formatMs(averageDuration)" hint="请求平均总耗时" />
+          <MetricCard label="请求总数" :value="formatNumber(totalRequests)" hint="所选时间窗内" />
+          <MetricCard label="实际成本" :value="formatCost(totalActualCost)" hint="所选时间窗内" />
+        </div>
+
+        <el-card shadow="never" class="admin-card pool-table-card">
+          <el-table
+            v-loading="loading"
+            :data="filteredAccounts"
+            row-key="externalAccountId"
+            size="small"
+            class="pool-table"
+            @row-click="openDetail"
+          >
+            <el-table-column label="号池账号" min-width="200" fixed>
+              <template #default="{ row }">
+                <div class="pool-account-cell">
+                  <strong>{{ row.name || ('账号 ' + row.externalAccountId) }}</strong>
+                  <small>{{ row.platform || '-' }} · ID {{ row.externalAccountId }}</small>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="健康状态" width="130">
+              <template #default="{ row }">
+                <el-tag :type="healthTag(asAccount(row)).type" size="small" effect="light">{{ healthTag(asAccount(row)).label }}</el-tag>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="绑定密钥" min-width="180">
+              <template #default="{ row }">
+                <span v-if="row.boundKeyId" class="pool-key-bound">{{ row.boundKeyName || ('#' + row.boundKeyId) }}</span>
+                <el-tag v-else type="warning" size="small" effect="plain">未绑定</el-tag>
+                <small v-if="row.boundKeyMasked" class="pool-key-masked">{{ row.boundKeyMasked }}</small>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="缓存命中率" width="150" sortable :sort-by="'cacheHitRate'">
+              <template #default="{ row }">
+                <div class="pool-rate-cell">
+                  <strong :class="hitRateClass(row.cacheHitRate)">{{ formatPercent(row.cacheHitRate) }}</strong>
+                  <small>{{ formatNumber(row.cacheReadTokens) }} / {{ formatNumber(row.inputTokens + row.cacheReadTokens + row.cacheCreationTokens) }}</small>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="首 Token（平均 / P95）" width="190">
+              <template #default="{ row }">
+                <div class="pool-sample-cell">
+                  <span>{{ formatMs(row.avgFirstTokenMs) }} / {{ formatMs(row.p95FirstTokenMs) }}</span>
+                  <el-tag :type="sampleTag(row.firstTokenSamples).type" size="small" effect="plain">
+                    {{ sampleTag(row.firstTokenSamples).label }}
+                  </el-tag>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="平均耗时" width="120">
+              <template #default="{ row }">{{ formatMs(row.avgDurationMs) }}</template>
+            </el-table-column>
+
+            <el-table-column label="请求数" width="100" sortable :sort-by="'requests'">
+              <template #default="{ row }">{{ formatNumber(row.requests) }}</template>
+            </el-table-column>
+
+            <el-table-column label="Token 结构（输入/输出/缓存读）" width="230">
+              <template #default="{ row }">
+                <div class="pool-token-cell">
+                  <span>{{ formatNumber(row.inputTokens) }} / {{ formatNumber(row.outputTokens) }} / {{ formatNumber(row.cacheReadTokens) }}</span>
+                  <div class="pool-token-bar">
+                    <span
+                      v-for="part in tokenParts(asAccount(row))"
+                      :key="part.label"
+                      class="pool-token-bar-seg"
+                      :style="{ width: part.width, background: part.color }"
+                      :title="`${part.label}: ${formatNumber(part.value)}`"
+                    />
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="实际成本" width="120" sortable :sort-by="'totalActualCost'">
+              <template #default="{ row }">{{ formatCost(row.totalActualCost) }}</template>
+            </el-table-column>
+
+            <el-table-column label="最近使用" width="150">
+              <template #default="{ row }">{{ formatDateTime(row.lastUsedAt) }}</template>
+            </el-table-column>
+
+            <el-table-column label="采样水位" width="150">
+              <template #default="{ row }">{{ formatDateTime(row.lastSampleAt) }}</template>
+            </el-table-column>
+
+            <el-table-column label="错误" min-width="200">
+              <template #default="{ row }">
+                <span v-if="row.lastSyncError" class="pool-error-text" :title="row.lastSyncError">{{ row.lastSyncError }}</span>
+                <span v-else-if="row.errorMessage" class="pool-error-text" :title="row.errorMessage">{{ row.errorMessage }}</span>
+                <span v-else class="pool-muted">—</span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="操作" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click.stop="openDetail(asAccount(row))">详情</el-button>
+                <el-button v-if="canWrite" link type="primary" @click.stop="openBind(asAccount(row))">绑定</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty
+            v-if="!loading && !filteredAccounts.length"
+            :description="accounts.length ? '没有符合筛选条件的账号' : '暂无号池账号，请先执行一次「立即采集」'"
+            :image-size="80"
+          />
+        </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane label="趋势矩阵" name="heatmap">
+              <el-card shadow="never" class="admin-card pool-table-card">
+          <template #header>
+            <div class="pool-heatmap-header">
+              <div>
+                <h3>号池趋势（色块矩阵）</h3>
+                <p class="admin-form-hint">
+                  行 = 平台 / 号池账号，列 = 一个统计区间（{{ heatGranularityLabel }}）；悬停看明细，点击行进入详情，灰色表示该区间没有流量。
+                </p>
+              </div>
+              <div class="pool-heatmap-controls">
+                <el-radio-group v-model="heatRange" size="small" @change="loadHeatmap">
+                  <el-radio-button v-for="option in HEAT_RANGES" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
+                </el-radio-group>
+                <el-select
+                  v-model="heatPlatforms"
+                  multiple
+                  collapse-tags
+                  :max-collapse-tags="1"
+                  clearable
+                  size="small"
+                  placeholder="平台：全部"
+                  style="width: 170px"
+                  @change="loadHeatmap"
+                >
+                  <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
+                </el-select>
+                <el-select
+                  v-model="heatModels"
+                  multiple
+                  collapse-tags
+                  :max-collapse-tags="1"
+                  clearable
+                  size="small"
+                  placeholder="模型：全部"
+                  style="width: 180px"
+                  @change="loadHeatmap"
+                >
+                  <el-option v-for="name in modelOptions" :key="name" :label="name" :value="name" />
+                </el-select>
+                <el-select
+                  v-model="heatAccounts"
+                  multiple
+                  collapse-tags
+                  :max-collapse-tags="1"
+                  clearable
+                  filterable
+                  size="small"
+                  placeholder="账号：全部"
+                  style="width: 190px"
+                  @change="loadHeatmap"
+                >
+                  <el-option
+                    v-for="account in accounts"
+                    :key="account.externalAccountId"
+                    :label="account.name || String(account.externalAccountId)"
+                    :value="account.externalAccountId"
+                  />
+                </el-select>
+                <el-button link type="primary" size="small" @click="resetHeatmapFilters">重置</el-button>
+                <el-radio-group v-model="heatMetric" size="small">
+                  <el-radio-button value="cacheRate">缓存率</el-radio-button>
+                  <el-radio-button value="firstToken">首 Token</el-radio-button>
+                  <el-radio-button value="tps">每秒 Token</el-radio-button>
+                  <el-radio-button value="requests">请求数</el-radio-button>
+                </el-radio-group>
+              </div>
+            </div>
+          </template>
+
+          <div class="pool-metrics pool-heatmap-metrics">
+            <MetricCard label="缓存率" :value="formatPercent(heatSummary.cacheHitRate)" hint="缓存读取 / (输入 + 缓存读 + 缓存写)" :tone="hitRateTone(heatSummary.cacheHitRate)" />
+            <MetricCard label="首 Token 平均" :value="formatMs(heatSummary.avgFirstTokenMs)" hint="按有效样本加权" />
+            <MetricCard label="每秒 TOKEN" :value="formatTps(heatSummary.tokensPerSecond)" hint="输出 token ÷ 总耗时" />
+            <MetricCard label="RPM" :value="formatRpm(heatSummary.rpm)" hint="每分钟请求数" />
+            <MetricCard label="请求数" :value="formatNumber(heatSummary.requests)" hint="所选窗口内" />
+          </div>
+
+          <div v-loading="heatLoading" class="pool-heatmap">
+            <div class="pool-heatmap-fixed">
+              <div class="pool-heatmap-head">
+                <span class="pool-heatmap-name">平台 / 账号</span>
+                <span class="pool-heatmap-num">缓存率</span>
+                <span class="pool-heatmap-num">首 TOKEN</span>
+                <span class="pool-heatmap-num">每秒 TOKEN</span>
+                <span class="pool-heatmap-num">请求</span>
+              </div>
+              <div
+                v-for="row in heatRows"
+                :key="row.externalAccountId"
+                class="pool-heatmap-row pool-heatmap-row-clickable"
+                @click="openDetailById(row.externalAccountId)"
+              >
+                <span class="pool-heatmap-name">
+                  <i class="pool-heatmap-dot" :style="{ background: heatDotColor(row.total) }" />
+                  <span class="pool-heatmap-path">{{ row.platform || '-' }} / {{ row.name || ('账号 ' + row.externalAccountId) }}</span>
+                </span>
+                <span class="pool-heatmap-num" :class="hitRateClass(row.total.cacheHitRate)">{{ formatPercent(row.total.cacheHitRate) }}</span>
+                <span class="pool-heatmap-num">{{ formatMs(row.total.avgFirstTokenMs) }}</span>
+                <span class="pool-heatmap-num">{{ formatTps(row.total.tokensPerSecond) }}</span>
+                <span class="pool-heatmap-num">{{ formatNumber(row.total.requests) }}</span>
+              </div>
+            </div>
+
+            <div class="pool-heatmap-scroll">
+              <div class="pool-heatmap-head">
+                <span
+                  v-for="(bucket, index) in heatBuckets"
+                  :key="bucket"
+                  class="pool-heatmap-tick"
+                  :style="{ width: heatPitch + 'px' }"
+                >{{ heatAxisLabel(index) }}</span>
+              </div>
+              <div v-for="row in heatRows" :key="row.externalAccountId" class="pool-heatmap-row">
+                <span
+                  v-for="(cell, index) in row.cells"
+                  :key="index"
+                  class="pool-heatmap-cell"
+                  :style="heatCellStyle(cell)"
+                  :title="heatCellTip(row, cell, index)"
+                  @click="openDetailById(row.externalAccountId)"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="pool-heatmap-legend">
+            <span class="pool-heatmap-legend-label">差</span>
+            <span class="pool-heatmap-legend-bar" />
+            <span class="pool-heatmap-legend-label">好</span>
+            <span class="pool-heatmap-legend-item">
+              <i class="pool-heatmap-swatch" :style="{ background: heatNoDataColor }" />无流量 / 样本不足
+            </span>
+          </div>
+
+          <el-empty v-if="!heatLoading && !heatRows.length" description="所选窗口内暂无号池明细" :image-size="60" />
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
 
     <!-- 号池账号详情抽屉 -->
     <el-drawer v-model="detailVisible" :title="detailTitle" size="70%" destroy-on-close>
@@ -478,6 +484,8 @@ const props = defineProps<{ platforms: Platform[]; canWrite?: boolean }>()
 const poolSources = computed(() => props.platforms.filter(platform => platform.poolMonitoringEnabled === true))
 
 const selectedPlatformId = ref<number | null>(null)
+/** 号池页两个视图：账号列表 / 趋势矩阵。 */
+const activeTab = ref<'accounts' | 'heatmap'>('accounts')
 const range = ref<PoolRange>('7d')
 const granularity = ref<PoolGranularity>('minute')
 

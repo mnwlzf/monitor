@@ -1097,4 +1097,10 @@ body {
 .pool-heatmap-legend-item { display: inline-flex; align-items: center; gap: 4px; margin-left: 12px; }
 .pool-heatmap-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
 
+/* 号池：账号列表 / 趋势矩阵 用顶部 tab 切换，避免上下长滚动 */
+.pool-tabs { margin-top: 12px; }
+.pool-tabs .el-tabs__header { margin-bottom: 12px; }
+.pool-tabs .el-tabs__item { font-size: 14px; }
+.pool-tab-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+
 .pool-toolbar-count { color: #9aa8a4; font-size: 11px; }
