@@ -8,7 +8,7 @@
 #   4) 在 WebUI 的「网络配置」里：
 #        - 开启 HTTP 服务端（默认 3000）→ monitor 通过它发消息
 #        - 开启 HTTP 客户端 / 反向 HTTP 上报，地址填：
-#            http://host.docker.internal:8080/api/v1/bot/onebot
+#            http://monitor:8080/api/v1/bot/onebot
 #          Authorization 填：Bearer <与 MONITOR_BOT_WEBHOOK_TOKEN 相同>
 #   5) 回到主 compose 打开 monitor 的 MONITOR_BOT_ENABLED=true 并重启
 #
@@ -18,10 +18,10 @@
 #   /app/napcat/plugins  ← 容器 /app/napcat/plugins 插件
 #
 # 端口：容器内固定 3000（OneBot HTTP）/ 6099（WebUI）；宿主机侧默认 5000 / 6099，
-#       可用 NAPCAT_HTTP_PORT、NAPCAT_WEBUI_PORT 覆盖。若报 "port is already allocated"，说明宿主机端口被占，
+#       可用 NAPCAT_HTTP_PORT、NAPCAT_WEBUI_PORT 覆盖（容器互访走 3000，不用改）。若报 "port is already allocated"，说明宿主机端口被占，
 #       用 docker ps / ss -lntp 找出占用者，或直接换端口。
 # 说明：这里把端口只绑到 127.0.0.1，避免 NapCat 的 WebUI/HTTP 直接暴露到公网。
-#       monitor 与 napcat 通过宿主机端口互访（host.docker.internal）。
+#       两个容器在同一个 Docker 网络里，直接用容器名互访，不依赖宿主机端口。
 # ============================================================
 name: monitor-qqbot
 
@@ -47,5 +47,14 @@ services:
       - ${NAPCAT_DATA_DIR:-/app/napcat}/config:/app/napcat/config
       - ${NAPCAT_DATA_DIR:-/app/napcat}/plugins:/app/napcat/plugins
     extra_hosts:
-      # 让 NapCat 能用 host.docker.internal 回调宿主机的 monitor
+      # 保留 host.docker.internal：排查问题时可以直接从容器里 curl 宿主机
       - "host.docker.internal:host-gateway"
+
+networks:
+  # 复用 monitor 项目的默认网络：compose.yaml 里 name: monitor，所以网络叫 monitor_default。
+  # 这样 napcat 与 monitor 在同一网络内，可以直接用容器名互访，
+  # 不受「宿主机端口只绑 127.0.0.1、容器访问不到」的限制。
+  # 前提：monitor 那套已经起来（docker compose -f compose.yaml up -d）。
+  default:
+    name: monitor_default
+    external: true
