@@ -36,6 +36,7 @@
               <strong>{{ platform.name }}</strong>
               <el-tag size="small" :type="platform.type === 'newapi' ? 'primary' : 'success'" effect="plain">{{ typeLabel(platform.type) }}</el-tag>
               <el-tag size="small" :type="platform.status ? 'success' : 'info'" effect="light">{{ platform.status ? '启用' : '停用' }}</el-tag>
+              <el-tag v-if="platform.poolMonitoringEnabled" size="small" type="warning" effect="dark">号池源</el-tag>
             </div>
             <small class="admin-platform-url" :title="platform.url">{{ platform.url }}</small>
           </div>
@@ -117,13 +118,20 @@
         <el-form-item label="Base URL" prop="baseUrl" required>
           <el-input v-model="form.baseUrl" placeholder="https://example.com" />
         </el-form-item>
-        <el-form-item v-if="form.type === 'sub2api'" label="Sub2API 管理员密钥">
+        <el-form-item v-if="form.type === 'sub2api'" label="号池监控源">
+          <el-switch v-model="form.poolMonitoringEnabled" />
+          <p class="admin-form-hint">
+            只有<b>你自己搭建的 Sub2API</b>才打开：它提供管理员只读接口，用来监控号池账号与用量。
+            其它 Sub2API / New API 只是它的上游，保持关闭即可，不需要管理员密钥。
+          </p>
+        </el-form-item>
+        <el-form-item v-if="form.type === 'sub2api' && form.poolMonitoringEnabled" label="Sub2API 管理员密钥">
           <el-input
             v-model="form.adminKey"
             type="password"
             show-password
             clearable
-            :placeholder="editingPlatform?.adminKeyConfigured ? '已配置，留空表示不修改' : '用于号池监控的只读管理员密钥（x-api-key）'"
+            :placeholder="editingPlatform?.adminKeyConfigured ? '已配置，留空表示不修改' : '管理员只读密钥（x-api-key）'"
           />
           <p class="admin-form-hint">
             仅用于只读调用号池账号与用量接口，密钥会加密保存且不会回显；
@@ -176,6 +184,7 @@ const form = reactive<CreatePlatformInput & { clearAdminKey: boolean }>({
   baseUrl: '',
   type: 'sub2api',
   adminKey: '',
+  poolMonitoringEnabled: false,
   clearAdminKey: false,
 })
 
@@ -243,13 +252,13 @@ function formatMoney(value: number | null | undefined) {
 
 function openCreate() {
   editingPlatform.value = null
-  Object.assign(form, { name: '', baseUrl: '', type: 'sub2api', adminKey: '', clearAdminKey: false })
+  Object.assign(form, { name: '', baseUrl: '', type: 'sub2api', adminKey: '', poolMonitoringEnabled: false, clearAdminKey: false })
   showForm.value = true
 }
 
 function openEdit(platform: Platform) {
   editingPlatform.value = platform
-  Object.assign(form, { name: platform.name, baseUrl: platform.url, type: platform.type, adminKey: '', clearAdminKey: false })
+  Object.assign(form, { name: platform.name, baseUrl: platform.url, type: platform.type, adminKey: '', poolMonitoringEnabled: platform.poolMonitoringEnabled === true, clearAdminKey: false })
   showForm.value = true
 }
 

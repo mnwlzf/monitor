@@ -123,6 +123,7 @@ public class UpstreamAdminService {
         entity.setStatus(true);
         entity.setSettings("{}");
         applyAdminKey(entity, request.adminKey(), false);
+        entity.setPoolMonitoringEnabled(Boolean.TRUE.equals(request.poolMonitoringEnabled()));
         platformRepository.save(entity);
 
         log.info("创建上游平台成功: platformId={}, name={}, type={}, baseUrl={}",
@@ -165,6 +166,9 @@ public class UpstreamAdminService {
             entity.setStatus(request.status());
         }
         applyAdminKey(entity, request.adminKey(), Boolean.TRUE.equals(request.clearAdminKey()));
+        if (request.poolMonitoringEnabled() != null) {
+            entity.setPoolMonitoringEnabled(request.poolMonitoringEnabled());
+        }
 
         platformRepository.save(entity);
 
@@ -411,7 +415,8 @@ public class UpstreamAdminService {
                 entity.getUrl(),
                 entity.getPlatformType(),
                 entity.getStatus(),
-                entity.hasAdminKey()
+                entity.hasAdminKey(),
+                Boolean.TRUE.equals(entity.getPoolMonitoringEnabled())
         );
     }
 

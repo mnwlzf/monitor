@@ -27,6 +27,7 @@ interface InstanceDto {
   platform: string
   status?: boolean
   adminKeyConfigured?: boolean
+  poolMonitoringEnabled?: boolean
 }
 
 interface AccountDto {
@@ -116,8 +117,10 @@ export interface CreatePlatformInput {
   name: string
   baseUrl: string
   type: PlatformType
-  /** Sub2API 管理员密钥，仅 sub2api 平台使用；留空表示不配置。 */
+  /** Sub2API 管理员密钥，仅「号池监控源」需要；留空表示不配置。 */
   adminKey?: string
+  /** 是否作为号池监控源（用户自建的 Sub2API）。 */
+  poolMonitoringEnabled?: boolean
 }
 
 /**
@@ -131,6 +134,7 @@ export async function createPlatformRecord(input: CreatePlatformInput): Promise<
       baseUrl: input.baseUrl,
       platform: input.type,
       adminKey: input.adminKey || undefined,
+      poolMonitoringEnabled: input.poolMonitoringEnabled === true,
     }),
   })
 
@@ -143,6 +147,7 @@ export async function createPlatformRecord(input: CreatePlatformInput): Promise<
     accountCount: 0,
     lastCollectedAt: null,
     adminKeyConfigured: row.adminKeyConfigured ?? false,
+    poolMonitoringEnabled: row.poolMonitoringEnabled ?? false,
   }
 }
 
@@ -155,6 +160,8 @@ export interface UpdatePlatformInput {
   adminKey?: string
   /** 是否清除已保存的管理员密钥。 */
   clearAdminKey?: boolean
+  /** 是否作为号池监控源（用户自建的 Sub2API）。 */
+  poolMonitoringEnabled?: boolean
 }
 
 /**
@@ -168,6 +175,7 @@ export async function updatePlatformRecord(platform: Platform, input: UpdatePlat
   if (input.status !== undefined) body.status = input.status
   if (input.adminKey) body.adminKey = input.adminKey
   if (input.clearAdminKey !== undefined) body.clearAdminKey = input.clearAdminKey
+  if (input.poolMonitoringEnabled !== undefined) body.poolMonitoringEnabled = input.poolMonitoringEnabled
 
   const row = await apiRequest<InstanceDto>(`/api/v1/upstream/instances/${platform.id}`, {
     method: 'PUT',
@@ -183,6 +191,7 @@ export async function updatePlatformRecord(platform: Platform, input: UpdatePlat
     accountCount: platform.accountCount,
     lastCollectedAt: platform.lastCollectedAt,
     adminKeyConfigured: row.adminKeyConfigured ?? platform.adminKeyConfigured ?? false,
+    poolMonitoringEnabled: row.poolMonitoringEnabled ?? platform.poolMonitoringEnabled ?? false,
   }
 }
 
@@ -204,6 +213,7 @@ export async function listPlatformRecords(): Promise<Platform[]> {
     accountCount: 0,
     lastCollectedAt: null,
     adminKeyConfigured: row.adminKeyConfigured ?? false,
+    poolMonitoringEnabled: row.poolMonitoringEnabled ?? false,
   }))
 }
 

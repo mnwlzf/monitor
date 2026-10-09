@@ -34,7 +34,6 @@ public class PoolSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(PoolSyncService.class);
 
-    private static final String PLATFORM_SUB2_API = "sub2api";
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     /** 号池账号列表每页条数。 */
     private static final int ACCOUNT_PAGE_SIZE = 100;
@@ -93,7 +92,9 @@ public class PoolSyncService {
         int skipped = 0;
         int failed = 0;
         for (PlatformEntity platform : platformRepository.findEnabled()) {
-            if (!PLATFORM_SUB2_API.equals(platform.getPlatformType())) {
+            // 只有被显式标记为「号池监控源」的平台才需要管理员密钥；
+            // 其它 Sub2API / New API 只是它的上游，不参与号池监控。
+            if (!isPoolSource(platform)) {
                 continue;
             }
             if (!platform.hasAdminKey()) {
@@ -167,6 +168,7 @@ public class PoolSyncService {
     public void syncHealth(Integer platformId) {
         PlatformEntity platform = platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
+        requirePoolSource(platform);
         syncHealth(platform);
     }
 
@@ -178,7 +180,9 @@ public class PoolSyncService {
         int skipped = 0;
         int failed = 0;
         for (PlatformEntity platform : platformRepository.findEnabled()) {
-            if (!PLATFORM_SUB2_API.equals(platform.getPlatformType())) {
+            // 只有被显式标记为「号池监控源」的平台才需要管理员密钥；
+            // 其它 Sub2API / New API 只是它的上游，不参与号池监控。
+            if (!isPoolSource(platform)) {
                 continue;
             }
             if (!platform.hasAdminKey()) {
@@ -238,6 +242,7 @@ public class PoolSyncService {
     public void syncSamples(Integer platformId) {
         PlatformEntity platform = platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
+        requirePoolSource(platform);
         syncSamples(platform);
     }
 
@@ -390,6 +395,18 @@ public class PoolSyncService {
         entity.setActualCost(logEntry.actualCost());
         entity.setIngestedAt(OffsetDateTime.now());
         return entity;
+    }
+
+    /** 是否为号池监控源（用户自建的 Sub2API）。 */
+    private boolean isPoolSource(PlatformEntity platform) {
+        return Boolean.TRUE.equals(platform.getPoolMonitoringEnabled());
+    }
+
+    /** 校验平台已被标记为号池监控源。 */
+    private void requirePoolSource(PlatformEntity platform) {
+        if (!isPoolSource(platform)) {
+            throw BusinessException.of("该平台不是号池监控源，无法执行号池采集: " + platform.getPlatformName());
+        }
     }
 
     private String requireAdminKey(PlatformEntity platform) {

@@ -48,6 +48,13 @@ public class PlatformEntity {
     private String adminKeyInitializationVector;
     /** 管理员密钥加密密钥版本。 */
     private Integer adminKeyKeyVersion;
+    /**
+     * 是否作为号池监控源。
+     *
+     * <p>只有用户自己搭建的 Sub2API 才提供管理员只读接口，因此需要显式标记，
+     * 而不是按平台类型推断；其他 Sub2API / New API 平台只是它的上游。</p>
+     */
+    private Boolean poolMonitoringEnabled;
 
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
@@ -79,6 +86,8 @@ public class PlatformEntity {
     public void setAdminKeyInitializationVector(String adminKeyInitializationVector) { this.adminKeyInitializationVector = adminKeyInitializationVector; }
     public Integer getAdminKeyKeyVersion() { return adminKeyKeyVersion; }
     public void setAdminKeyKeyVersion(Integer adminKeyKeyVersion) { this.adminKeyKeyVersion = adminKeyKeyVersion; }
+    public Boolean getPoolMonitoringEnabled() { return poolMonitoringEnabled; }
+    public void setPoolMonitoringEnabled(Boolean poolMonitoringEnabled) { this.poolMonitoringEnabled = poolMonitoringEnabled; }
 
     /** 是否已配置 Sub2API 管理员密钥。 */
     public boolean hasAdminKey() {

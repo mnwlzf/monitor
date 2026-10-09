@@ -4,7 +4,7 @@
       <div class="pool-toolbar-filters">
         <span class="pool-toolbar-label">监控平台</span>
         <el-select v-model="selectedPlatformId" placeholder="选择 Sub2API 平台" style="width: 260px" @change="reload">
-          <el-option v-for="platform in sub2Platforms" :key="platform.id" :label="platform.name" :value="platform.id" />
+          <el-option v-for="platform in poolSources" :key="platform.id" :label="platform.name" :value="platform.id" />
         </el-select>
 
         <el-radio-group v-model="range" @change="reload">
@@ -24,12 +24,12 @@
     </div>
 
     <el-alert
-      v-if="!sub2Platforms.length"
+      v-if="!poolSources.length"
       type="info"
       show-icon
       :closable="false"
       title="暂无 Sub2API 平台"
-      description="号池监控依赖 Sub2API 平台的管理员密钥，请先在「平台管理」新建 Sub2API 平台并填写管理员密钥。"
+      description="请到「平台管理」把你自建的 Sub2API 平台标记为「号池监控源」并填写管理员密钥；其余上游平台不需要配置。"
     />
     <el-alert
       v-else-if="selectedPlatform && !selectedPlatform.adminKeyConfigured"
@@ -40,7 +40,7 @@
       description="请到「平台管理」编辑该平台并填写管理员密钥，否则无法同步号池账号与用量明细。"
     />
 
-    <template v-if="sub2Platforms.length">
+    <template v-if="poolSources.length">
       <div class="pool-metrics">
         <MetricCard label="号池账号" :value="String(accounts.length)" hint="当前平台下的号池账号数" />
         <MetricCard
@@ -304,7 +304,11 @@ import type { ApiKey, Platform, PoolAccount, PoolGranularity, PoolModelMetrics, 
 
 const props = defineProps<{ platforms: Platform[]; canWrite?: boolean }>()
 
-const sub2Platforms = computed(() => props.platforms.filter(platform => platform.type === 'sub2api'))
+/**
+ * 号池监控源：只有「用户自己搭建并显式标记的 Sub2API」才需要管理员密钥。
+ * 其余 Sub2API / New API 只是它的上游，没有管理员只读接口。
+ */
+const poolSources = computed(() => props.platforms.filter(platform => platform.poolMonitoringEnabled === true))
 
 const selectedPlatformId = ref<number | null>(null)
 const range = ref<PoolRange>('7d')
@@ -325,7 +329,7 @@ const bindVisible = ref(false)
 const activeAccount = ref<PoolAccount | null>(null)
 const bindKeyId = ref<number | null>(null)
 
-const selectedPlatform = computed(() => sub2Platforms.value.find(item => item.id === selectedPlatformId.value) ?? null)
+const selectedPlatform = computed(() => poolSources.value.find(item => item.id === selectedPlatformId.value) ?? null)
 
 const detailTitle = computed(() => activeAccount.value
   ? `${activeAccount.value.name || activeAccount.value.externalAccountId} · 号池详情`
@@ -579,7 +583,7 @@ function formatBucket(value: string): string {
     : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit' })
 }
 
-watch(sub2Platforms, list => {
+watch(poolSources, list => {
   if (!list.length) {
     selectedPlatformId.value = null
     return

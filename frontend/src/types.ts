@@ -10,6 +10,13 @@ export interface Platform {
   lastCollectedAt: string | null
   /** 是否已配置 Sub2API 管理员密钥（用于号池监控）。 */
   adminKeyConfigured?: boolean
+  /**
+   * 是否作为号池监控源。
+   *
+   * 只有「用户自己搭建的 Sub2API」才提供管理员只读接口，因此需要显式标记；
+   * 其余 Sub2API / New API 只是它的上游，不参与号池监控。
+   */
+  poolMonitoringEnabled?: boolean
 }
 
 export interface Account {
