@@ -23,3 +23,6 @@ Thumbs.db
 config/application.yml
 config/*.local.yml
 logs/*.log
+
+# QQ 机器人（NapCat）的登录态与配置，不进仓库
+napcat/

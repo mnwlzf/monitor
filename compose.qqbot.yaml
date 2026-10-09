@@ -1,0 +1,41 @@
+# ============================================================
+# QQ 机器人（OneBot v11）：只跑 NapCat，配合已有的 monitor 服务使用。
+#
+# 用法：
+#   1) docker compose -f compose.qqbot.yaml up -d
+#   2) docker compose -f compose.qqbot.yaml logs napcat   # 拿 WebUI 登录 token
+#   3) 浏览器打开 http://127.0.0.1:6099/webui 扫码登录 QQ（建议用**小号**）
+#   4) 在 WebUI 的「网络配置」里：
+#        - 开启 HTTP 服务端（默认 3000）→ monitor 通过它发消息
+#        - 开启 HTTP 客户端 / 反向 HTTP 上报，地址填：
+#            http://host.docker.internal:8080/api/v1/bot/onebot
+#          Authorization 填：Bearer <与 MONITOR_BOT_WEBHOOK_TOKEN 相同>
+#   5) 回到主 compose 打开 monitor 的 MONITOR_BOT_ENABLED=true 并重启
+#
+# 说明：这里把端口只绑到 127.0.0.1，避免 NapCat 的 WebUI/HTTP 直接暴露到公网。
+#       monitor 与 napcat 通过宿主机端口互访（host.docker.internal）。
+# ============================================================
+name: monitor-qqbot
+
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    environment:
+      # Linux 下用 `id -u` / `id -g` 的值；Docker Desktop（Win/mac）保持 0 即可
+      NAPCAT_UID: ${NAPCAT_UID:-0}
+      NAPCAT_GID: ${NAPCAT_GID:-0}
+    ports:
+      # WebUI：扫码登录 + 配置 OneBot 网络
+      - "127.0.0.1:6099:6099"
+      # OneBot HTTP API：monitor 通过它把回复发出去
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # QQ 登录态 / NapCat 配置，挂出来才能重启免扫码
+      - ./napcat/qq:/app/.config/QQ
+      - ./napcat/config:/app/napcat/config
+      - ./napcat/plugins:/app/napcat/plugins
+    extra_hosts:
+      # 让 NapCat 能用 host.docker.internal 回调宿主机的 monitor
+      - "host.docker.internal:host-gateway"

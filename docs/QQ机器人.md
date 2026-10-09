@@ -19,20 +19,36 @@ QQ 客户端 ──► NapCat / Lagrange / go-cqhttp（OneBot v11 实现）
 
 所有查询都是**只读**的，机器人不会触发采集、删除等写操作。
 
-## 1. 配置 OneBot 实现
+## 1. 先跑一个 OneBot 实现（NapCat）
 
-以 NapCat / Lagrange 为例，在它的配置里开启「反向 HTTP 上报」（reverse HTTP / HTTP 上报）：
+OneBot 只是**协议**，本身不是服务 —— 需要有个程序真的登录你的 QQ 账号。
+个人开发者推荐 [NapCat](https://github.com/NapNeko/NapCatQQ)（官方 Docker 镜像 `mlikiowa/napcat-docker`）：
 
-| 项 | 值 |
-|---|---|
-| 上报地址 | `http://<本服务地址>:8080/api/v1/bot/onebot` |
-| Authorization | `Bearer <MONITOR_BOT_WEBHOOK_TOKEN>` |
-| 消息格式 | `array`（默认即可；`string` 也兼容） |
+```bash
+# 1) 起 NapCat（本仓库自带 compose.qqbot.yaml）
+docker compose -f compose.qqbot.yaml up -d
 
-同时记下它的 **HTTP API 地址**（例如 `http://127.0.0.1:3000`）和 access token，稍后填到本服务。
+# 2) 从日志里拿 WebUI 的登录 token
+docker compose -f compose.qqbot.yaml logs napcat
 
-> 容器部署时注意网络：`MONITOR_BOT_API_BASE_URL` 是**本服务访问 OneBot** 的地址，
-> 用 `host.docker.internal` 指向宿主机，或填 OneBot 容器的服务名。
+# 3) 浏览器打开 WebUI，扫码登录 QQ
+#    http://127.0.0.1:6099/webui
+#    建议用**小号**：自建机器人有风控/封号风险
+```
+
+登录成功后，在 WebUI 的「网络配置」里开两样：
+
+| 类型 | 作用 | 配置 |
+|---|---|---|
+| **HTTP 服务端** | monitor 通过它把回复发出去 | 监听 `0.0.0.0:3000`（compose 已映射到宿主机 `127.0.0.1:3000`） |
+| **HTTP 客户端（反向 HTTP 上报）** | NapCat 把收到的消息推给 monitor | URL `http://host.docker.internal:8080/api/v1/bot/onebot`，Header `Authorization: Bearer <MONITOR_BOT_WEBHOOK_TOKEN>` |
+
+> monitor 若不在宿主机的 8080 端口，把上报地址换成实际可达的地址。
+
+其它可选实现：Lagrange.Core、LLOneBot。`go-cqhttp` 已停更，不建议再用。
+
+> 不想自建 QQ 客户端，可以走 **QQ 官方机器人开放平台**（不用挂 QQ、不怕封号），
+> 但要主体资质与审核，协议也不同（Webhook + AppID/Secret），需要另外加一层适配。
 
 ## 2. 配置本服务
 
