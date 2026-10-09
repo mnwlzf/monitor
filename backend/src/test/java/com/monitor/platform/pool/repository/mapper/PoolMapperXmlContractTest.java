@@ -22,7 +22,7 @@ class PoolMapperXmlContractTest {
         Resource[] resources = new PathMatchingResourcePatternResolver()
                 .getResources("classpath*:/mapper/pool/*.xml");
 
-        assertEquals(2, resources.length);
+        assertEquals(3, resources.length);
         for (Resource resource : resources) {
             try (InputStream inputStream = resource.getInputStream()) {
                 XMLMapperBuilder builder = new XMLMapperBuilder(
@@ -45,5 +45,7 @@ class PoolMapperXmlContractTest {
                 "com.monitor.platform.pool.repository.mapper.PoolSampleMapper.selectSeries"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.pool.repository.mapper.PoolSampleMapper.selectByModel"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.pool.ingest.Sub2ApiIngestCursorMapper.upsertLastUsageLogId"));
     }
 }

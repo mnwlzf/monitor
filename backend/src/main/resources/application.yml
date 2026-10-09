@@ -51,6 +51,20 @@ monitor:
   # 上游请求伪装：默认使用内置的浏览器 User-Agent / Accept-Language，
   # 可用 MONITOR_UPSTREAM_USER_AGENT、MONITOR_UPSTREAM_ACCEPT_LANGUAGE 环境变量覆盖。
   upstream: {}
+
+  # 号池直连库增量采集（可选）
+  #   自建 Sub2API 的 usage_logs.id 是 BIGSERIAL，可直接做真增量；
+  #   配置后由 pool-samples-db 任务每 30 秒按 id 游标同步，数据滞后可到 30 秒级。
+  #   不配置（enabled=false）时该任务每轮直接跳过，走 admin 接口的 pool-samples 采集。
+  #   建议上游只给 SELECT 权限的只读账号。
+  pool:
+    ingest:
+      enabled: ${SUB2API_DB_ENABLED:false}
+      url: ${SUB2API_DB_URL:}
+      username: ${SUB2API_DB_USERNAME:}
+      password: ${SUB2API_DB_PASSWORD:}
+      batch-size: ${SUB2API_DB_BATCH_SIZE:2000}
+      max-batches-per-run: ${SUB2API_DB_MAX_BATCHES:20}
   # 登录与权限：ADMIN 可读写，VIEWER 只读
   security:
     enabled: ${MONITOR_SECURITY_ENABLED:true}

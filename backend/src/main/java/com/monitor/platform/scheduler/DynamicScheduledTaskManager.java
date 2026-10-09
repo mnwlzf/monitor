@@ -120,7 +120,8 @@ public class DynamicScheduledTaskManager implements ApplicationRunner {
             }
 
             scheduledTaskRepository.updateRunStatus(taskId, java.time.OffsetDateTime.now(), "RUNNING", null);
-            log.info("定时任务开始执行: taskId={}, taskName={}", taskId, task.getTaskName());
+            // 高频任务（如 30 秒级）用 DEBUG，避免刷屏；执行结果仍按 INFO/WARN 记录
+            log.debug("定时任务开始执行: taskId={}, taskName={}", taskId, task.getTaskName());
             long started = System.currentTimeMillis();
             try {
                 handler.execute();
