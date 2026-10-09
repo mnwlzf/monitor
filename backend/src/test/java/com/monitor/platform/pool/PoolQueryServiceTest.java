@@ -2,10 +2,13 @@ package com.monitor.platform.pool;
 
 import com.monitor.platform.api.dto.PoolAccountResponse;
 import com.monitor.platform.api.dto.PoolCacheRateMatrixResponse;
+import com.monitor.platform.api.dto.PoolIngestStatusResponse;
 import com.monitor.platform.api.dto.PoolSeriesPointResponse;
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.pool.ingest.PoolIngestProperties;
+import com.monitor.platform.pool.ingest.Sub2ApiIngestCursorRepository;
 import com.monitor.platform.pool.repository.PoolAccountRepository;
 import com.monitor.platform.pool.repository.PoolSampleRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +24,11 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -34,12 +40,15 @@ class PoolQueryServiceTest {
     @Mock private PoolAccountRepository poolAccountRepository;
     @Mock private PoolSampleRepository poolSampleRepository;
     @Mock private AccountApiKeyRepository apiKeyRepository;
+    @Mock private Sub2ApiIngestCursorRepository ingestCursorRepository;
+    @Mock private PoolIngestProperties ingestProperties;
 
     private PoolQueryService service;
 
     @BeforeEach
     void setUp() {
-        service = new PoolQueryService(poolAccountRepository, poolSampleRepository, apiKeyRepository);
+        service = new PoolQueryService(poolAccountRepository, poolSampleRepository, apiKeyRepository,
+                ingestCursorRepository, ingestProperties);
     }
 
     private PoolAccountEntity account(long externalId, String name, Long boundKeyId) {
@@ -174,10 +183,60 @@ class PoolQueryServiceTest {
 
         PoolCacheRateMatrixResponse matrix = service.cacheRateMatrix(1, "bogus,,,");
 
-        // 默认 1h,6h,24h,7d,30d
+        // 默认 5m,15m,1h,24h,7d（含分钟档）
         assertEquals(5, matrix.windows().size());
-        assertEquals(List.of("1h", "6h", "24h", "7d", "30d"),
+        assertEquals(List.of("5m", "15m", "1h", "24h", "7d"),
                 matrix.windows().stream().map(PoolCacheRateMatrixResponse.Window::key).toList());
+    }
+
+    @Test
+    void shouldDefaultToMinuteGranularityForShortWindows() {
+        when(poolAccountRepository.findByPlatformAndExternalId(1, 52064L))
+                .thenReturn(Optional.of(account(52064L, "满血", null)));
+        when(poolSampleRepository.series(ArgumentMatchers.eq(1), ArgumentMatchers.eq(52064L),
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq("minute")))
+                .thenReturn(List.of());
+
+        service.series(1, 52064L, "6h", null);
+
+        verify(poolSampleRepository).series(ArgumentMatchers.eq(1), ArgumentMatchers.eq(52064L),
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq("minute"));
+    }
+
+    @Test
+    void shouldDowngradeMinuteGranularityForLongWindows() {
+        when(poolAccountRepository.findByPlatformAndExternalId(1, 52064L))
+                .thenReturn(Optional.of(account(52064L, "满血", null)));
+        when(poolSampleRepository.series(ArgumentMatchers.eq(1), ArgumentMatchers.eq(52064L),
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq("hour")))
+                .thenReturn(List.of());
+
+        service.series(1, 52064L, "30d", "minute");
+
+        // 30 天 × 每分钟 = 12.9 万个桶，超出 1 天自动降级为小时
+        verify(poolSampleRepository).series(ArgumentMatchers.eq(1), ArgumentMatchers.eq(52064L),
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq("hour"));
+    }
+
+    @Test
+    void shouldReportIngestStatusWithLag() {
+        OffsetDateTime latest = OffsetDateTime.now().minusSeconds(45);
+        when(poolSampleRepository.findLatestCreatedAt(1)).thenReturn(latest);
+        when(ingestCursorRepository.lastUsageLogId()).thenReturn(12345L);
+        when(ingestCursorRepository.lastRunAt()).thenReturn(latest);
+        when(ingestProperties.isEnabled()).thenReturn(true);
+        when(ingestProperties.isConfigured()).thenReturn(true);
+        when(ingestProperties.getPassword()).thenReturn("readonly-secret");
+
+        PoolIngestStatusResponse status = service.ingestStatus(1);
+
+        assertTrue(status.enabled());
+        assertTrue(status.configured());
+        assertTrue(status.passwordConfigured());
+        assertEquals(12345L, status.lastUsageLogId());
+        assertEquals(latest, status.latestSampleAt());
+        assertNotNull(status.lagSeconds());
+        assertTrue(status.lagSeconds() >= 45);
     }
 
     @Test
