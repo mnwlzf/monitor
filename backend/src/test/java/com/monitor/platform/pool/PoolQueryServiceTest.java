@@ -1,7 +1,6 @@
 package com.monitor.platform.pool;
 
 import com.monitor.platform.api.dto.PoolAccountResponse;
-import com.monitor.platform.api.dto.PoolCacheRateMatrixResponse;
 import com.monitor.platform.api.dto.PoolHeatmapResponse;
 import com.monitor.platform.api.dto.PoolIngestStatusResponse;
 import com.monitor.platform.api.dto.PoolSeriesPointResponse;
@@ -146,49 +145,6 @@ class PoolQueryServiceTest {
         assertEquals(12L, result.get(0).requests());
         // 300 / (100 + 300 + 100) = 0.6
         assertEquals(0.6, result.get(0).cacheHitRate(), 0.0001);
-    }
-
-    @Test
-    void shouldBuildCacheRateMatrixAcrossWindows() {
-        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(account(52064L, "满血", null)));
-        // 每个时间窗一次聚合：1h 有样本、6h 无样本、24h 有样本
-        when(poolSampleRepository.aggregateByPlatform(ArgumentMatchers.eq(1),
-                ArgumentMatchers.any(), ArgumentMatchers.any()))
-                .thenReturn(List.of(metrics(52064L, 100L, 300L, 0L)))
-                .thenReturn(List.of())
-                .thenReturn(List.of(metrics(52064L, 200L, 200L, 0L)));
-
-        PoolCacheRateMatrixResponse matrix = service.cacheRateMatrix(1, "1h,6h,24h");
-
-        assertEquals(3, matrix.windows().size());
-        assertEquals("1h", matrix.windows().get(0).key());
-        assertEquals("近 1 小时", matrix.windows().get(0).label());
-        assertEquals("24h", matrix.windows().get(2).key());
-
-        assertEquals(1, matrix.accounts().size());
-        List<PoolCacheRateMatrixResponse.Cell> cells = matrix.accounts().get(0).cells();
-        assertEquals(3, cells.size());
-        assertEquals(160L, cells.get(0).requests());
-        assertEquals(0.75, cells.get(0).cacheHitRate(), 0.0001);
-        // 6h 窗口没有样本：请求数为 0、命中率为 null（不补 0，避免误判成 0%）
-        assertEquals(0L, cells.get(1).requests());
-        assertNull(cells.get(1).cacheHitRate());
-        assertEquals(0.5, cells.get(2).cacheHitRate(), 0.0001);
-    }
-
-    @Test
-    void shouldFallBackToDefaultWindowsWhenParamInvalid() {
-        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of());
-        when(poolSampleRepository.aggregateByPlatform(ArgumentMatchers.eq(1),
-                ArgumentMatchers.any(), ArgumentMatchers.any()))
-                .thenReturn(List.of());
-
-        PoolCacheRateMatrixResponse matrix = service.cacheRateMatrix(1, "bogus,,,");
-
-        // 默认 5m,15m,1h,24h,7d（含分钟档）
-        assertEquals(5, matrix.windows().size());
-        assertEquals(List.of("5m", "15m", "1h", "24h", "7d"),
-                matrix.windows().stream().map(PoolCacheRateMatrixResponse.Window::key).toList());
     }
 
     @Test

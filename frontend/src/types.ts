@@ -287,57 +287,6 @@ export interface PoolSeriesPoint {
   cacheHitRate: number | null
 }
 
-/**
- * 号池「多时间窗缓存率对比」的一列（一个时间窗）。
- */
-export interface PoolCacheRateWindow {
-  key: string
-  label: string
-  from: string
-}
-
-/**
- * 多时间窗对比的单元格：某账号在某时间窗内的缓存表现。
- */
-export interface PoolCacheRateCell {
-  key: string
-  requests: number
-  cacheHitRate: number | null
-  /** 命中率分子：窗口内缓存读取 token。 */
-  cacheRateNumerator: number
-  /** 命中率分母：窗口内 输入 + 缓存读取 + 缓存写入 token。 */
-  cacheRateDenominator: number
-  inputTokens: number | null
-  cacheReadTokens: number | null
-  cacheCreationTokens: number | null
-  firstTokenSamples: number | null
-  avgFirstTokenMs: number | null
-  avgDurationMs: number | null
-}
-
-/**
- * 多时间窗对比的一行（一个号池账号）。
- */
-export interface PoolCacheRateRow {
-  externalAccountId: number
-  name: string | null
-  /** 号池账号的上游平台（openai / anthropic / grok ...），用于按平台筛选。 */
-  platform: string | null
-  boundKeyName: string | null
-  boundKeyMasked: string | null
-  cells: PoolCacheRateCell[]
-}
-
-/**
- * 多时间窗缓存率对比矩阵。
- */
-export interface PoolCacheRateMatrix {
-  windows: PoolCacheRateWindow[]
-  /** 可信展示所需的最小样本量（请求数），低于该值的格子应标注「样本不足」。 */
-  minimumSample: number
-  accounts: PoolCacheRateRow[]
-}
-
 /** 号池直连库增量采集状态（用于判断分钟级数据是否可用）。 */
 export interface PoolIngestStatus {
   enabled: boolean

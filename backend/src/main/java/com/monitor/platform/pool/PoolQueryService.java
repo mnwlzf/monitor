@@ -1,7 +1,6 @@
 package com.monitor.platform.pool;
 
 import com.monitor.platform.api.dto.PoolAccountResponse;
-import com.monitor.platform.api.dto.PoolCacheRateMatrixResponse;
 import com.monitor.platform.api.dto.PoolHeatmapResponse;
 import com.monitor.platform.api.dto.PoolIngestStatusResponse;
 import com.monitor.platform.api.dto.PoolModelMetricsResponse;
@@ -25,7 +24,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -44,36 +42,6 @@ public class PoolQueryService {
     private static final int CACHE_RATE_SCALE = 4;
     /** 业务时区：与 Mapper 里的 date_trunc 口径保持一致。 */
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
-
-    /** 多时间窗对比默认列。 */
-    private static final String DEFAULT_WINDOWS = "5m,15m,1h,24h,7d";
-    /** 多时间窗对比最多允许的列数，避免前端表格过宽、后端聚合次数过多。 */
-    private static final int MAX_WINDOWS = 6;
-    /**
-     * 可信展示所需的最小样本量（请求数）。
-     *
-     * <p>分钟窗口本身样本就少，低于该值时页面应标注「样本不足」而不是直接给百分比
-     * —— 1 条 16 万 token 的请求就能把比率拉到 99% 或 0%，那不是精度问题而是没有意义。</p>
-     */
-    private static final long MINIMUM_SAMPLE_REQUESTS = 5;
-    /** 支持的时间窗预设：key -> [标签, 时长]。 */
-    private static final Map<String, Object[]> WINDOW_PRESETS = windowPresets();
-
-    private static Map<String, Object[]> windowPresets() {
-        Map<String, Object[]> presets = new LinkedHashMap<>();
-        presets.put("1m", new Object[]{"近 1 分钟", Duration.ofMinutes(1)});
-        presets.put("5m", new Object[]{"近 5 分钟", Duration.ofMinutes(5)});
-        presets.put("15m", new Object[]{"近 15 分钟", Duration.ofMinutes(15)});
-        presets.put("30m", new Object[]{"近 30 分钟", Duration.ofMinutes(30)});
-        presets.put("1h", new Object[]{"近 1 小时", Duration.ofHours(1)});
-        presets.put("6h", new Object[]{"近 6 小时", Duration.ofHours(6)});
-        presets.put("12h", new Object[]{"近 12 小时", Duration.ofHours(12)});
-        presets.put("24h", new Object[]{"近 24 小时", Duration.ofHours(24)});
-        presets.put("7d", new Object[]{"近 7 天", Duration.ofDays(7)});
-        presets.put("30d", new Object[]{"近 30 天", Duration.ofDays(30)});
-        presets.put("90d", new Object[]{"近 90 天", Duration.ofDays(90)});
-        return presets;
-    }
 
     private final PoolAccountRepository poolAccountRepository;
     private final PoolSampleRepository poolSampleRepository;
@@ -148,61 +116,6 @@ public class PoolQueryService {
             result.add(toResponse(account, metrics));
         }
         return result;
-    }
-
-    /**
-     * 多时间窗缓存率对比矩阵。
-     *
-     * <p>每个时间窗做一次平台级聚合（{@code pool_request_samples.created_at} 有索引，
-     * 单次查询很轻），再按账号拼成「行=账号、列=时间窗」的表格。</p>
-     *
-     * @param platformId   平台 ID
-     * @param windowsParam 逗号分隔的时间窗，如 {@code 1h,6h,24h,7d,30d}；非法或为空时用默认值
-     */
-    public PoolCacheRateMatrixResponse cacheRateMatrix(Integer platformId, String windowsParam) {
-        List<String> keys = resolveWindows(windowsParam);
-        OffsetDateTime to = OffsetDateTime.now();
-
-        Map<String, Map<Long, PoolAccountMetrics>> metricsByWindow = new LinkedHashMap<>();
-        for (String key : keys) {
-            OffsetDateTime from = to.minus(windowDuration(key));
-            Map<Long, PoolAccountMetrics> bucket = new HashMap<>();
-            for (PoolAccountMetrics metrics : poolSampleRepository.aggregateByPlatform(platformId, from, to)) {
-                if (metrics.getExternalAccountId() != null) {
-                    bucket.put(metrics.getExternalAccountId(), metrics);
-                }
-            }
-            metricsByWindow.put(key, bucket);
-        }
-
-        List<PoolCacheRateMatrixResponse.Window> windows = new ArrayList<>(keys.size());
-        for (String key : keys) {
-            windows.add(new PoolCacheRateMatrixResponse.Window(key, windowLabel(key), to.minus(windowDuration(key))));
-        }
-
-        List<PoolCacheRateMatrixResponse.AccountRow> rows = new ArrayList<>();
-        for (PoolAccountEntity account : poolAccountRepository.findByPlatform(platformId)) {
-            List<PoolCacheRateMatrixResponse.Cell> cells = new ArrayList<>(keys.size());
-            long totalRequests = 0L;
-            for (String key : keys) {
-                PoolAccountMetrics metrics = metricsByWindow.get(key).get(account.getExternalAccountId());
-                totalRequests += metrics == null || metrics.getRequests() == null ? 0L : metrics.getRequests();
-                cells.add(toCell(key, metrics));
-            }
-            AccountApiKeyEntity key = findBoundKey(account.getBoundKeyId());
-            rows.add(new PoolCacheRateMatrixResponse.AccountRow(
-                    account.getExternalAccountId(),
-                    account.getName(),
-                    account.getPlatform(),
-                    key == null ? null : key.getKeyName(),
-                    key == null ? null : key.getKeyMasked(),
-                    cells));
-        }
-        // 活跃账号排在前面，避免大量零请求账号把有数据的一屏挤下去
-        rows.sort(Comparator.comparingLong(this::sumRequests).reversed()
-                .thenComparing(row -> row.name() == null ? "" : row.name()));
-
-        return new PoolCacheRateMatrixResponse(windows, MINIMUM_SAMPLE_REQUESTS, rows);
     }
 
     /**
@@ -416,71 +329,6 @@ public class PoolQueryService {
         private static long value(Long value) {
             return value == null ? 0L : value;
         }
-    }
-
-    private long safe(Long value) {
-        return value == null ? 0L : value;
-    }
-
-    private long sumRequests(PoolCacheRateMatrixResponse.AccountRow row) {
-        long total = 0L;
-        for (PoolCacheRateMatrixResponse.Cell cell : row.cells()) {
-            total += cell.requests();
-        }
-        return total;
-    }
-
-    private PoolCacheRateMatrixResponse.Cell toCell(String key, PoolAccountMetrics metrics) {
-        long numerator = metrics == null || metrics.getCacheReadTokens() == null ? 0L : metrics.getCacheReadTokens();
-        long denominator = metrics == null ? 0L
-                : safe(metrics.getInputTokens()) + safe(metrics.getCacheReadTokens()) + safe(metrics.getCacheCreationTokens());
-        return new PoolCacheRateMatrixResponse.Cell(
-                key,
-                metrics == null || metrics.getRequests() == null ? 0L : metrics.getRequests(),
-                metrics == null ? null
-                        : cacheHitRate(metrics.getInputTokens(), metrics.getCacheReadTokens(),
-                        metrics.getCacheCreationTokens()),
-                numerator,
-                denominator,
-                metrics == null ? null : metrics.getInputTokens(),
-                metrics == null ? null : metrics.getCacheReadTokens(),
-                metrics == null ? null : metrics.getCacheCreationTokens(),
-                metrics == null ? null : metrics.getFirstTokenSamples(),
-                metrics == null ? null : metrics.getAvgFirstTokenMs(),
-                metrics == null ? null : metrics.getAvgDurationMs()
-        );
-    }
-
-    /** 解析时间窗参数，去重、限制列数，非法值忽略；全部非法时回退默认值。 */
-    private List<String> resolveWindows(String windowsParam) {
-        List<String> keys = new ArrayList<>();
-        String source = windowsParam == null || windowsParam.isBlank() ? DEFAULT_WINDOWS : windowsParam;
-        for (String raw : source.split(",")) {
-            String key = raw.trim().toLowerCase();
-            if (key.isEmpty() || !WINDOW_PRESETS.containsKey(key) || keys.contains(key)) {
-                continue;
-            }
-            keys.add(key);
-            if (keys.size() >= MAX_WINDOWS) {
-                break;
-            }
-        }
-        if (keys.isEmpty()) {
-            for (String key : DEFAULT_WINDOWS.split(",")) {
-                keys.add(key.trim());
-            }
-        }
-        return keys;
-    }
-
-    private String windowLabel(String key) {
-        Object[] preset = WINDOW_PRESETS.get(key);
-        return preset == null ? key : (String) preset[0];
-    }
-
-    private Duration windowDuration(String key) {
-        Object[] preset = WINDOW_PRESETS.get(key);
-        return preset == null ? Duration.ofHours(1) : (Duration) preset[1];
     }
 
     /** 查询号池账号绑定的本地密钥（可能为空）。 */

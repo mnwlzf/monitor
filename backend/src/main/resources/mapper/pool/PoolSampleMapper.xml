@@ -101,28 +101,10 @@
         </foreach>
     </delete>
 
-    <select id="selectMaxCreatedAt" resultType="java.time.OffsetDateTime">
-        SELECT MAX(created_at)
-        FROM pool_request_samples
-        WHERE platform_id = #{platformId}
-          AND external_account_id = #{externalAccountId}
-    </select>
-
     <select id="selectLatestCreatedAt" resultType="java.time.OffsetDateTime">
         SELECT MAX(created_at)
         FROM pool_request_samples
         WHERE platform_id = #{platformId}
-    </select>
-
-    <select id="selectAggregate" resultMap="PoolAccountMetricsResultMap">
-        SELECT
-            #{externalAccountId} AS external_account_id,
-            <include refid="MetricAggregates"/>
-        FROM pool_request_samples
-        WHERE platform_id = #{platformId}
-          AND external_account_id = #{externalAccountId}
-          AND created_at &gt;= #{from}
-          AND created_at &lt; #{to}
     </select>
 
     <select id="selectAggregatesByPlatform" resultMap="PoolAccountMetricsResultMap">

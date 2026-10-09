@@ -19,18 +19,8 @@ public interface PoolSampleMapper {
     /** 批量写入请求明细，按 (platform_id, request_id) 幂等去重。 */
     int insertSamples(@Param("samples") List<PoolSampleEntity> samples);
 
-    /** 查询某号已入库明细的最大请求时间，作为增量采集水位。 */
-    OffsetDateTime selectMaxCreatedAt(@Param("platformId") Integer platformId,
-                                      @Param("externalAccountId") Long externalAccountId);
-
     /** 平台下已入库明细的最新请求时间（用于展示采集滞后）。 */
     OffsetDateTime selectLatestCreatedAt(@Param("platformId") Integer platformId);
-
-    /** 按时间窗聚合单个号池账号的指标。 */
-    PoolAccountMetrics selectAggregate(@Param("platformId") Integer platformId,
-                                       @Param("externalAccountId") Long externalAccountId,
-                                       @Param("from") OffsetDateTime from,
-                                       @Param("to") OffsetDateTime to);
 
     /** 按时间窗聚合平台下全部号池账号的指标。 */
     List<PoolAccountMetrics> selectAggregatesByPlatform(@Param("platformId") Integer platformId,

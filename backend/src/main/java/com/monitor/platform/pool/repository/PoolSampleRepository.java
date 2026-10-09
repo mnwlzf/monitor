@@ -62,11 +62,6 @@ public class PoolSampleRepository {
         return poolSampleMapper.deleteByExternalIds(platformId, externalAccountIds);
     }
 
-    /** 查询某号已入库明细的最大请求时间。 */
-    public OffsetDateTime findMaxCreatedAt(Integer platformId, Long externalAccountId) {
-        return poolSampleMapper.selectMaxCreatedAt(platformId, externalAccountId);
-    }
-
     /** 平台下已入库明细的最新请求时间（用于展示采集滞后）。 */
     public OffsetDateTime findLatestCreatedAt(Integer platformId) {
         return poolSampleMapper.selectLatestCreatedAt(platformId);
@@ -82,12 +77,6 @@ public class PoolSampleRepository {
     /** 平台下出现过的模型名（用于筛选下拉）。 */
     public List<String> modelOptions(Integer platformId, OffsetDateTime from, OffsetDateTime to) {
         return poolSampleMapper.selectModelOptions(platformId, from, to);
-    }
-
-    /** 按时间窗聚合单个号池账号的指标。 */
-    public PoolAccountMetrics aggregate(Integer platformId, Long externalAccountId,
-                                        OffsetDateTime from, OffsetDateTime to) {
-        return poolSampleMapper.selectAggregate(platformId, externalAccountId, from, to);
     }
 
     /** 按时间窗聚合平台下全部号池账号的指标。 */

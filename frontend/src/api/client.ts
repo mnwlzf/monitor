@@ -15,11 +15,6 @@ export function isUnauthorized(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401
 }
 
-/** 是否为权限不足（403）。 */
-export function isForbidden(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 403
-}
-
 export async function apiRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
