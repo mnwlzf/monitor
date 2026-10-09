@@ -130,7 +130,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(authorize -> authorize
                         // 前端静态资源与登录接口匿名开放
-                        .requestMatchers("/", "/index.html", "/favicon.ico", "/vite.svg", "/assets/**", "/error").permitAll()
+                        .requestMatchers("/", "/index.html", "/favicon.ico", "/favicon.svg", "/robots.txt", "/assets/**", "/error").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                         .requestMatchers("/api/v1/auth/**").authenticated()

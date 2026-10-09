@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -140,6 +141,20 @@ public class GlobalExceptionHandler {
     public void handleClientAbort(Exception ex, HttpServletRequest request) {
         log.debug("客户端提前断开连接: {} {} - {}",
                 request.getMethod(), request.getRequestURI(), ex.getMessage());
+    }
+
+    /**
+     * 静态资源不存在 -> 404（而不是 500）。
+     *
+     * <p>Spring 把 {@code /**} 交给静态资源处理器，找不到文件时抛
+     * {@link NoResourceFoundException}。这类请求（浏览器自动探测的 favicon、robots.txt、
+     * 前端路由刷新、写错的路径）不是服务端故障：以前它们落到兜底分支，被记成 ERROR 堆栈
+     * 并返回 500，既误导排查又刷日志。这里按真实语义返回 404，日志只留 DEBUG。</p>
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex, HttpServletRequest request) {
+        log.debug("资源不存在: {} {}", request.getMethod(), request.getRequestURI());
+        return response(HttpStatus.NOT_FOUND, "NOT_FOUND", "资源不存在", Map.of());
     }
 
     /** 兜底 -> 500，务必打印堆栈 */
