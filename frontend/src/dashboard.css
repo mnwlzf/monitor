@@ -1100,7 +1100,10 @@ body {
 /* 号池：账号列表 / 趋势矩阵 用顶部 tab 切换，避免上下长滚动 */
 .pool-tabs { margin-top: 12px; }
 .pool-tabs .el-tabs__header { margin-bottom: 12px; }
+/* Element Plus 把第一个 tab 的 padding-left 置为 0（.el-tabs__item:nth-child(2)，
+   因为 active-bar 才是 nav 的第一个子元素），标签会贴在内容区最左边、比卡片内容还靠左；
+   这里整体右移 20px，与卡片内边距对齐。 */
+.pool-tabs .el-tabs__nav-scroll { padding-left: 20px; }
 .pool-tabs .el-tabs__item { font-size: 14px; }
-.pool-tab-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 
 .pool-toolbar-count { color: #9aa8a4; font-size: 11px; }
