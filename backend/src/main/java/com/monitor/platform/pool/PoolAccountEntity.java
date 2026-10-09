@@ -28,6 +28,8 @@ public class PoolAccountEntity {
     private OffsetDateTime lastUsedAt;
     private Long boundKeyId;
     private OffsetDateTime lastSampleAt;
+    /** 往回补齐游标：非空表示还有更早的缺口未取。 */
+    private OffsetDateTime backfillUntil;
     private String lastSyncError;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
@@ -72,6 +74,8 @@ public class PoolAccountEntity {
     public void setBoundKeyId(Long boundKeyId) { this.boundKeyId = boundKeyId; }
     public OffsetDateTime getLastSampleAt() { return lastSampleAt; }
     public void setLastSampleAt(OffsetDateTime lastSampleAt) { this.lastSampleAt = lastSampleAt; }
+    public OffsetDateTime getBackfillUntil() { return backfillUntil; }
+    public void setBackfillUntil(OffsetDateTime backfillUntil) { this.backfillUntil = backfillUntil; }
     public String getLastSyncError() { return lastSyncError; }
     public void setLastSyncError(String lastSyncError) { this.lastSyncError = lastSyncError; }
     public OffsetDateTime getCreatedAt() { return createdAt; }

@@ -47,6 +47,11 @@ public class PoolAccountRepository {
         poolAccountMapper.updateSampleWatermark(platformId, externalAccountId, lastSampleAt);
     }
 
+    /** 设置/清除「往回补齐」游标。 */
+    public void updateBackfillUntil(Integer platformId, Long externalAccountId, OffsetDateTime backfillUntil) {
+        poolAccountMapper.updateBackfillUntil(platformId, externalAccountId, backfillUntil);
+    }
+
     /** 记录号池账号最近一次采集错误。 */
     public void updateSyncError(Integer platformId, Long externalAccountId, String error) {
         poolAccountMapper.updateSyncError(platformId, externalAccountId, error);

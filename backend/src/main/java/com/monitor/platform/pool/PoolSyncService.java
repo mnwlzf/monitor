@@ -41,8 +41,13 @@ public class PoolSyncService {
     private static final int ACCOUNT_MAX_PAGES = 50;
     /** 逐请求明细每页条数。 */
     private static final int SAMPLE_PAGE_SIZE = 1000;
-    /** 逐请求明细单个账号单轮最大翻页数（每页 1000 条），避免异常账号拖垮整轮采集。 */
-    private static final int SAMPLE_MAX_PAGES = 5;
+    /**
+     * 逐请求明细单个账号单轮最大翻页数（每页 1000 条），避免异常账号拖垮整轮采集。
+     *
+     * <p>触顶不再丢数据：改为记下 {@code backfill_until} 游标，下一轮继续往更早的方向补齐
+     * （见 {@link #syncAccountSamples}）。只有「单日明细本身就超过该上限」时才无法补齐。</p>
+     */
+    private static final int SAMPLE_MAX_PAGES = 20;
     /**
      * 单轮明细采集的总时长预算。
      *
@@ -222,7 +227,6 @@ public class PoolSyncService {
             // 指标采集不依赖「本地密钥绑定」：绑定只用于展示这个号池账号对应本项目的哪个 Key。
             try {
                 totalInserted += syncAccountSamples(platform, adminKey, account, today);
-                poolAccountRepository.updateSyncError(platform.getId(), account.getExternalAccountId(), null);
                 collected++;
             } catch (Exception ex) {
                 failed++;
@@ -246,34 +250,92 @@ public class PoolSyncService {
         syncSamples(platform);
     }
 
+    /**
+     * 单个号池账号的增量采集。
+     *
+     * <p>上游 {@code /admin/usage} 只支持按天过滤，且单轮翻页有上限。当待取区间超过上限时，
+     * 分页按时间倒序只会拿到「最新」的一段，因此这里改为：</p>
+     * <ul>
+     *     <li>触顶 → 把 {@code backfill_until} 设为本次取到的最早一条时间，<strong>不推进水位</strong>；</li>
+     *     <li>下一轮以 {@code backfill_until} 作为查询上界继续往更早取，直到补齐到目标起点；</li>
+     *     <li>补齐完成后清空游标，恢复正常增量推进。</li>
+     * </ul>
+     */
     private int syncAccountSamples(PlatformEntity platform, String adminKey,
                                    PoolAccountEntity account, LocalDate today) {
+        Integer platformId = platform.getId();
+        Long externalAccountId = account.getExternalAccountId();
         OffsetDateTime watermark = account.getLastSampleAt();
-        LocalDate start = watermark == null
-                ? today.minusDays(LOOKBACK_DAYS)
-                : watermark.atZoneSameInstant(ZONE).toLocalDate().minusDays(1);
-        if (start.isAfter(today)) {
-            start = today;
+        OffsetDateTime backfillUntil = account.getBackfillUntil();
+
+        // 最远只回溯 LOOKBACK_DAYS 天，不做全量回溯
+        LocalDate floor = today.minusDays(LOOKBACK_DAYS);
+        // 往回补齐时，起点必须回到「最远目标起点」，否则用「水位-1天」会算出 start > end，
+        // 反而把中间缺口当成"已补齐"跳过去。
+        LocalDate start = backfillUntil != null
+                ? floor
+                : (watermark == null ? floor : watermark.atZoneSameInstant(ZONE).toLocalDate().minusDays(1));
+        if (start.isBefore(floor)) {
+            start = floor;
+        }
+        // 查询上界：还在往回补齐时以游标为上界，否则到今天
+        LocalDate end = backfillUntil == null
+                ? today
+                : backfillUntil.atZoneSameInstant(ZONE).toLocalDate();
+        if (start.isAfter(end)) {
+            // 已经没有更早的缺口了，清掉游标即可
+            poolAccountRepository.updateBackfillUntil(platformId, externalAccountId, null);
+            return 0;
         }
 
-        List<Sub2UsageLog> logs = fetchAllUsage(platform.getUrl(), adminKey,
-                account.getExternalAccountId(), start, today);
-        List<PoolSampleEntity> entities = new ArrayList<>(logs.size());
-        OffsetDateTime maxCreatedAt = watermark;
-        for (Sub2UsageLog entry : logs) {
+        UsageFetch fetch = fetchAllUsage(platform.getUrl(), adminKey, externalAccountId, start, end);
+
+        List<PoolSampleEntity> entities = new ArrayList<>(fetch.logs().size());
+        OffsetDateTime newest = watermark;
+        OffsetDateTime oldest = null;
+        for (Sub2UsageLog entry : fetch.logs()) {
             if (entry.requestId() == null || entry.createdAt() == null) {
                 continue;
             }
-            entities.add(toEntity(platform.getId(), account.getExternalAccountId(), entry));
-            if (maxCreatedAt == null || entry.createdAt().isAfter(maxCreatedAt)) {
-                maxCreatedAt = entry.createdAt();
+            entities.add(toEntity(platformId, externalAccountId, entry));
+            if (newest == null || entry.createdAt().isAfter(newest)) {
+                newest = entry.createdAt();
+            }
+            if (oldest == null || entry.createdAt().isBefore(oldest)) {
+                oldest = entry.createdAt();
             }
         }
 
         int inserted = poolSampleRepository.insertBatch(entities);
-        if (maxCreatedAt != null && !maxCreatedAt.equals(watermark)) {
-            poolAccountRepository.updateSampleWatermark(platform.getId(), account.getExternalAccountId(), maxCreatedAt);
+
+        if (fetch.truncated() && oldest != null) {
+            boolean progressed = backfillUntil == null || oldest.isBefore(backfillUntil);
+            if (progressed) {
+                // 只取到最新一段：记下游标继续往更早补齐，本期不推进水位，避免跳过中间缺口
+                poolAccountRepository.updateBackfillUntil(platformId, externalAccountId, oldest);
+                poolAccountRepository.updateSyncError(platformId, externalAccountId, null);
+                log.info("号池明细触顶，转为往回补齐: platformId={}, externalAccountId={}, backfillUntil={}",
+                        platformId, externalAccountId, oldest);
+                return inserted;
+            }
+            // 往回取仍是同一批数据：说明「单日明细」本身就超过上限，继续重试也不会前进，避免死循环
+            poolAccountRepository.updateBackfillUntil(platformId, externalAccountId, null);
+            poolAccountRepository.updateSyncError(platformId, externalAccountId,
+                    "单日明细超过翻页上限 " + (SAMPLE_MAX_PAGES * SAMPLE_PAGE_SIZE) + " 条，该日可能存在缺口");
+            log.warn("号池明细单日超出翻页上限，跳过该缺口: platformId={}, externalAccountId={}",
+                    platformId, externalAccountId);
+            return inserted;
         }
+
+        if (backfillUntil != null) {
+            // 缺口补齐完成，恢复正常的增量推进
+            poolAccountRepository.updateBackfillUntil(platformId, externalAccountId, null);
+            log.info("号池明细往回补齐完成: platformId={}, externalAccountId={}", platformId, externalAccountId);
+        }
+        if (newest != null && (watermark == null || newest.isAfter(watermark))) {
+            poolAccountRepository.updateSampleWatermark(platformId, externalAccountId, newest);
+        }
+        poolAccountRepository.updateSyncError(platformId, externalAccountId, null);
         return inserted;
     }
 
@@ -333,10 +395,17 @@ public class PoolSyncService {
         return false;
     }
 
-    private List<Sub2UsageLog> fetchAllUsage(String baseUrl, String adminKey, Long accountId,
-                                             LocalDate start, LocalDate end) {
+    /**
+     * 翻完指定时间窗的用量明细。
+     *
+     * <p>返回 {@code truncated=true} 表示「页数用满且最后一页仍是满页」，即还有更早的数据没取到。</p>
+     */
+    private UsageFetch fetchAllUsage(String baseUrl, String adminKey, Long accountId,
+                                     LocalDate start, LocalDate end) {
         List<Sub2UsageLog> all = new ArrayList<>();
-        for (int page = 1; page <= SAMPLE_MAX_PAGES; page++) {
+        boolean truncated = false;
+        int page = 1;
+        while (true) {
             List<Sub2UsageLog> batch = adminClient.fetchUsage(baseUrl, adminKey, accountId,
                     start, end, page, SAMPLE_PAGE_SIZE);
             if (batch.isEmpty()) {
@@ -346,8 +415,17 @@ public class PoolSyncService {
             if (batch.size() < SAMPLE_PAGE_SIZE) {
                 break;
             }
+            if (page >= SAMPLE_MAX_PAGES) {
+                truncated = true;
+                break;
+            }
+            page++;
         }
-        return all;
+        return new UsageFetch(all, truncated);
+    }
+
+    /** 一轮用量拉取结果。 */
+    private record UsageFetch(List<Sub2UsageLog> logs, boolean truncated) {
     }
 
     private PoolAccountEntity toEntity(Integer platformId, Sub2AdminAccount account, OffsetDateTime now) {

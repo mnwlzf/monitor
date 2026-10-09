@@ -32,6 +32,15 @@ public interface PoolAccountMapper {
                               @Param("externalAccountId") Long externalAccountId,
                               @Param("lastSampleAt") OffsetDateTime lastSampleAt);
 
+    /**
+     * 设置「往回补齐」游标；传入 null 表示缺口已补齐。
+     *
+     * <p>触顶时把游标设为本次取到的最早一条时间，下一轮以此为查询上界继续往更早取。</p>
+     */
+    int updateBackfillUntil(@Param("platformId") Integer platformId,
+                            @Param("externalAccountId") Long externalAccountId,
+                            @Param("backfillUntil") OffsetDateTime backfillUntil);
+
     /** 记录号池账号最近一次采集错误；传入 null 表示清除错误。 */
     int updateSyncError(@Param("platformId") Integer platformId,
                         @Param("externalAccountId") Long externalAccountId,
