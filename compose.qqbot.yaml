@@ -17,6 +17,9 @@
 #   /app/napcat/config   ← 容器 /app/napcat/config  NapCat 配置
 #   /app/napcat/plugins  ← 容器 /app/napcat/plugins 插件
 #
+# 端口：容器内固定 3000（OneBot HTTP）/ 6099（WebUI）；宿主机侧默认 5000 / 6099，
+#       可用 NAPCAT_HTTP_PORT、NAPCAT_WEBUI_PORT 覆盖。若报 "port is already allocated"，说明宿主机端口被占，
+#       用 docker ps / ss -lntp 找出占用者，或直接换端口。
 # 说明：这里把端口只绑到 127.0.0.1，避免 NapCat 的 WebUI/HTTP 直接暴露到公网。
 #       monitor 与 napcat 通过宿主机端口互访（host.docker.internal）。
 # ============================================================
@@ -32,10 +35,12 @@ services:
       NAPCAT_UID: ${NAPCAT_UID:-0}
       NAPCAT_GID: ${NAPCAT_GID:-0}
     ports:
-      # WebUI：扫码登录 + 配置 OneBot 网络
-      - "127.0.0.1:6099:6099"
-      # OneBot HTTP API：monitor 通过它把回复发出去
-      - "127.0.0.1:3000:3000"
+      # WebUI：扫码登录 + 配置 OneBot 网络（宿主机端口被占用时设 NAPCAT_WEBUI_PORT）
+      - "127.0.0.1:${NAPCAT_WEBUI_PORT:-6099}:6099"
+      # OneBot HTTP API：monitor 通过它把回复发出去。
+      # 容器内固定 3000（NapCat 的 HTTP 服务端），宿主机默认映射到 5000；
+      # 换端口时同步改 monitor 的 MONITOR_BOT_API_BASE_URL，例如 http://host.docker.internal:5000
+      - "127.0.0.1:${NAPCAT_HTTP_PORT:-5000}:3000"
     volumes:
       # 统一挂在 /app/napcat 基准目录下，重启免扫码
       - ${NAPCAT_DATA_DIR:-/app/napcat}/qq:/app/.config/QQ

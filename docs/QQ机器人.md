@@ -43,10 +43,15 @@ docker compose -f compose.qqbot.yaml logs napcat
 
 | 类型 | 作用 | 配置 |
 |---|---|---|
-| **HTTP 服务端** | monitor 通过它把回复发出去 | 监听 `0.0.0.0:3000`（compose 已映射到宿主机 `127.0.0.1:3000`） |
+| **HTTP 服务端** | monitor 通过它把回复发出去 | 容器内监听 `0.0.0.0:3000`（NapCat 侧固定），compose 映射到宿主机 `127.0.0.1:5000` |
 | **HTTP 客户端（反向 HTTP 上报）** | NapCat 把收到的消息推给 monitor | URL `http://host.docker.internal:8080/api/v1/bot/onebot`，Header `Authorization: Bearer <MONITOR_BOT_WEBHOOK_TOKEN>` |
 
 > monitor 若不在宿主机的 8080 端口，把上报地址换成实际可达的地址。
+>
+> 宿主机端口被占用（`Bind for 127.0.0.1:xxxx failed: port is already allocated`）时：
+> `docker ps` / `ss -lntp | grep <端口>` 找出占用者；或直接换端口 ——
+> 在 `.env` 里设 `NAPCAT_HTTP_PORT=5000`（宿主机侧），并同步改 `MONITOR_BOT_API_BASE_URL`。
+> 容器内始终是 3000，不用动 NapCat 里的监听端口。
 
 其它可选实现：Lagrange.Core、LLOneBot。`go-cqhttp` 已停更，不建议再用。
 
@@ -60,7 +65,7 @@ docker compose -f compose.qqbot.yaml logs napcat
 ```dotenv
 MONITOR_BOT_ENABLED=true
 MONITOR_BOT_WEBHOOK_TOKEN=<与 OneBot 侧一致>
-MONITOR_BOT_API_BASE_URL=http://host.docker.internal:3000
+MONITOR_BOT_API_BASE_URL=http://host.docker.internal:5000
 MONITOR_BOT_API_TOKEN=<OneBot 的 access token，没设置就留空>
 
 # 白名单：逗号分隔的群号 / QQ，留空表示不限制（建议显式配置）
