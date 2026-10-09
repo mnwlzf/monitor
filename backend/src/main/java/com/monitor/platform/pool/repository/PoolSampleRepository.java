@@ -66,6 +66,11 @@ public class PoolSampleRepository {
         return poolSampleMapper.selectMaxCreatedAt(platformId, externalAccountId);
     }
 
+    /** 平台下已入库明细的最新请求时间（用于展示采集滞后）。 */
+    public OffsetDateTime findLatestCreatedAt(Integer platformId) {
+        return poolSampleMapper.selectLatestCreatedAt(platformId);
+    }
+
     /** 按时间窗聚合单个号池账号的指标。 */
     public PoolAccountMetrics aggregate(Integer platformId, Long externalAccountId,
                                         OffsetDateTime from, OffsetDateTime to) {

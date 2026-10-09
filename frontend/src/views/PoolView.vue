@@ -33,6 +33,9 @@
       </div>
 
       <div class="pool-toolbar-actions">
+        <el-tooltip v-if="ingestStatus" :content="ingestTooltip" placement="bottom-end">
+          <el-tag :type="ingestTag.type" size="small" effect="plain">{{ ingestTag.label }}</el-tag>
+        </el-tooltip>
         <el-button :loading="loading" @click="reload">刷新</el-button>
         <el-button v-if="canWrite" type="primary" :loading="syncing" @click="triggerSync">
           立即采集
@@ -193,7 +196,7 @@
           <div class="pool-chart-header">
             <div>
               <h3>多时间窗缓存率对比</h3>
-              <p class="admin-form-hint">行 = 号池账号，列 = 时间窗；角标为请求数，样本过少时仅供参考。</p>
+              <p class="admin-form-hint">行 = 号池账号，列 = 时间窗；角标为请求数，低于 {{ matrixMinimumSample }} 条标注「样本不足」。分钟级窗口依赖「号池明细增量（直连库）」任务，未配置时只会长期为空。</p>
             </div>
             <el-select
               v-model="selectedWindows"
@@ -233,11 +236,11 @@
             align="right"
           >
             <template #default="{ row }">
-              <div class="pool-matrix-cell">
+              <div class="pool-matrix-cell" :title="matrixCellTip(cellOf(row, window.key))">
                 <strong :class="hitRateClass(cellOf(row, window.key)?.cacheHitRate ?? null)">
                   {{ formatPercent(cellOf(row, window.key)?.cacheHitRate ?? null) }}
                 </strong>
-                <small :class="{ 'pool-matrix-thin': (cellOf(row, window.key)?.requests ?? 0) < 20 }">
+                <small :class="{ 'pool-matrix-thin': isThinSample(cellOf(row, window.key)) }">
                   {{ cellOf(row, window.key)?.requests ?? 0 }} 条
                 </small>
               </div>
@@ -303,10 +306,16 @@
           <template #header>
             <div class="pool-chart-header">
               <span>缓存命中率趋势</span>
-              <el-radio-group v-model="granularity" size="small" @change="loadDetail(activeAccount)">
-                <el-radio-button value="hour">按小时</el-radio-button>
-                <el-radio-button value="day">按天</el-radio-button>
-              </el-radio-group>
+              <div class="pool-chart-controls">
+                <el-select v-model="detailRange" size="small" style="width: 118px" @change="onDetailRangeChange">
+                  <el-option v-for="option in DETAIL_RANGE_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
+                </el-select>
+                <el-radio-group v-model="granularity" size="small" @change="loadDetail(activeAccount)">
+                  <el-radio-button value="minute" :disabled="!minuteAvailable">按分钟</el-radio-button>
+                  <el-radio-button value="hour">按小时</el-radio-button>
+                  <el-radio-button value="day">按天</el-radio-button>
+                </el-radio-group>
+              </div>
             </div>
           </template>
           <EChart :option="hitRateOption" height="260px" />
@@ -378,9 +387,9 @@ import { ElMessage } from 'element-plus'
 import type { EChartsCoreOption } from 'echarts/core'
 import EChart from '../components/EChart.vue'
 import MetricCard from '../components/MetricCard.vue'
-import { bindPoolAccount, listPoolAccounts, listPoolCacheRates, listPoolModels, listPoolSeries, syncPoolPlatform } from '../api/pool'
+import { bindPoolAccount, getPoolIngestStatus, listPoolAccounts, listPoolCacheRates, listPoolModels, listPoolSeries, syncPoolPlatform } from '../api/pool'
 import { listApiKeyRecords } from '../api/accounts'
-import type { ApiKey, Platform, PoolAccount, PoolCacheRateCell, PoolCacheRateWindow, PoolGranularity, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
+import type { ApiKey, Platform, PoolAccount, PoolCacheRateCell, PoolCacheRateWindow, PoolGranularity, PoolIngestStatus, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
 
 const props = defineProps<{ platforms: Platform[]; canWrite?: boolean }>()
 
@@ -392,15 +401,21 @@ const poolSources = computed(() => props.platforms.filter(platform => platform.p
 
 const selectedPlatformId = ref<number | null>(null)
 const range = ref<PoolRange>('7d')
-const granularity = ref<PoolGranularity>('hour')
+const granularity = ref<PoolGranularity>('minute')
 
 const accounts = ref<PoolAccount[]>([])
 const series = ref<PoolSeriesPoint[]>([])
 const models = ref<PoolModelMetrics[]>([])
 const bindableKeys = ref<ApiKey[]>([])
+/** 直连库增量采集状态：分钟级窗口有没有数据，全看这里。 */
+const ingestStatus = ref<PoolIngestStatus | null>(null)
 
 /** 多时间窗对比：可选时间窗（与后端 preset 保持一致）。 */
 const WINDOW_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: '1m', label: '近 1 分钟' },
+  { key: '5m', label: '近 5 分钟' },
+  { key: '15m', label: '近 15 分钟' },
+  { key: '30m', label: '近 30 分钟' },
   { key: '1h', label: '近 1 小时' },
   { key: '6h', label: '近 6 小时' },
   { key: '12h', label: '近 12 小时' },
@@ -425,10 +440,25 @@ interface MatrixRowView {
 /** 账号平台筛选（openai / anthropic / grok ...），空数组表示全部。 */
 const platformFilter = ref<string[]>([])
 
-const selectedWindows = ref<string[]>(['1h', '6h', '24h', '7d', '30d'])
+const selectedWindows = ref<string[]>(['5m', '15m', '1h', '24h', '7d'])
 const matrixWindows = ref<PoolCacheRateWindow[]>([])
 const matrixRows = ref<MatrixRowView[]>([])
 const matrixLoading = ref(false)
+/** 后端给出的「样本不足」阈值，避免前后端各写一份魔法数字。 */
+const matrixMinimumSample = ref(20)
+
+/** 详情抽屉自己的时间窗与粒度：分钟级排查和长窗口趋势互不干扰。 */
+const detailRange = ref<PoolRange>('6h')
+const DETAIL_RANGE_OPTIONS: Array<{ value: PoolRange; label: string }> = [
+  { value: '1h', label: '近 1 小时' },
+  { value: '6h', label: '近 6 小时' },
+  { value: '12h', label: '近 12 小时' },
+  { value: '1d', label: '近 24 小时' },
+  { value: '7d', label: '近 7 天' },
+  { value: '30d', label: '近 30 天' },
+]
+/** 分钟粒度只对 ≤24 小时窗口开放（与后端 resolveGranularity 的降级规则一致）。 */
+const minuteAvailable = computed(() => ['1h', '6h', '12h', '24h', '1d'].includes(detailRange.value))
 
 const loading = ref(false)
 const syncing = ref(false)
@@ -441,6 +471,33 @@ const activeAccount = ref<PoolAccount | null>(null)
 const bindKeyId = ref<number | null>(null)
 
 const selectedPlatform = computed(() => poolSources.value.find(item => item.id === selectedPlatformId.value) ?? null)
+
+/** 直连增量状态标签：滞后越小越健康，未配置/未初始化时明确提示分钟级窗口会是空的。 */
+const ingestTag = computed<{ label: string; type: 'success' | 'warning' | 'danger' | 'info' }>(() => {
+  const status = ingestStatus.value
+  if (!status) return { label: '直连增量未知', type: 'info' }
+  if (!status.enabled) return { label: '直连增量未启用', type: 'info' }
+  if (!status.configured) return { label: '直连增量未配置完整', type: 'warning' }
+  if (!status.lastUsageLogId) return { label: '直连增量未初始化', type: 'warning' }
+  if (status.lagSeconds == null) return { label: '直连增量已启用', type: 'info' }
+  const label = `直连增量 · 滞后 ${formatLag(status.lagSeconds)}`
+  if (status.lagSeconds <= 120) return { label, type: 'success' }
+  if (status.lagSeconds <= 900) return { label, type: 'warning' }
+  return { label, type: 'danger' }
+})
+
+const ingestTooltip = computed(() => {
+  const status = ingestStatus.value
+  if (!status) return '直连库增量采集状态未知'
+  return [
+    `启用：${status.enabled ? '是' : '否'}`,
+    `配置完整：${status.configured ? '是' : '否'}`,
+    `密码：${status.passwordConfigured ? '已配置' : '未配置'}`,
+    `游标 usage_logs.id：${status.lastUsageLogId || '未初始化'}`,
+    `游标推进：${formatDateTime(status.lastRunAt)}`,
+    `最新明细：${formatDateTime(status.latestSampleAt)}`,
+  ].join(' ｜ ')
+})
 
 /** 可选平台：来自当前已加载的号池账号。 */
 const platformOptions = computed(() => {
@@ -578,6 +635,7 @@ async function reload() {
     accounts.value = []
     matrixWindows.value = []
     matrixRows.value = []
+    ingestStatus.value = null
     return
   }
   loading.value = true
@@ -590,13 +648,14 @@ async function reload() {
     loading.value = false
   }
   void loadMatrix()
+  void loadIngestStatus()
 }
 
 /**
  * 拉取多时间窗缓存率对比矩阵。
  *
- * 数据来源仍是本地已落库的逐请求明细，所以刷新节奏取决于「号池明细采集」任务（每 10 分钟一轮），
- * 这里只是把多个时间窗一次算出来做横向对比。
+ * 数据来源是本地已落库的逐请求明细：配置了直连库时由「号池明细增量（直连库）」任务每 30 秒写入一批，
+ * 未配置时退回「号池明细采集」任务的 10 分钟一轮，分钟级窗口会因此长期为空。
  */
 async function loadMatrix() {
   if (!selectedPlatformId.value) {
@@ -611,6 +670,7 @@ async function loadMatrix() {
   try {
     const matrix = await listPoolCacheRates(selectedPlatformId.value, selectedWindows.value)
     matrixWindows.value = matrix.windows
+    matrixMinimumSample.value = matrix.minimumSample || 20
     matrixRows.value = matrix.accounts.map(row => {
       const cells: Record<string, PoolCacheRateCell> = {}
       for (const cell of row.cells) cells[cell.key] = cell
@@ -632,10 +692,48 @@ async function loadMatrix() {
   }
 }
 
+/** 拉取直连增量状态：失败不打扰用户，只是把标签置为「未知」。 */
+async function loadIngestStatus() {
+  if (!selectedPlatformId.value) {
+    ingestStatus.value = null
+    return
+  }
+  try {
+    ingestStatus.value = await getPoolIngestStatus(selectedPlatformId.value)
+  } catch {
+    ingestStatus.value = null
+  }
+}
+
 /** 取某行某时间窗的单元格（el-table 插槽行类型为 DefaultRow）。 */
 function cellOf(row: unknown, key: string): PoolCacheRateCell | null {
   const target = row as MatrixRowView
   return target?.cells?.[key] ?? null
+}
+
+/** 样本数低于后端阈值才标注，避免前端硬编码的阈值和后端口径漂移。 */
+function isThinSample(cell: PoolCacheRateCell | null | undefined): boolean {
+  if (!cell || cell.requests <= 0) return false
+  return cell.requests < matrixMinimumSample.value
+}
+
+/** 矩阵单元格悬停说明：口径（分子/分母）+ 样本量，避免只看百分比产生误读。 */
+function matrixCellTip(cell: PoolCacheRateCell | null): string {
+  if (!cell || cell.requests === 0) return '该时间窗内没有请求'
+  const lines = [
+    `${cell.requests} 条请求`,
+    `缓存读取 ${formatNumber(cell.cacheRateNumerator)} / 输入+缓存 ${formatNumber(cell.cacheRateDenominator)}`,
+  ]
+  if (isThinSample(cell)) lines.push(`样本不足 ${matrixMinimumSample.value} 条，仅供参考`)
+  return lines.join('\n')
+}
+
+/** 切换详情时间窗：长窗口下分钟粒度会自动降级为小时（与后端一致）。 */
+function onDetailRangeChange() {
+  if (!minuteAvailable.value && granularity.value === 'minute') {
+    granularity.value = 'hour'
+  }
+  if (activeAccount.value) void loadDetail(activeAccount.value)
 }
 
 async function triggerSync() {
@@ -663,8 +761,8 @@ async function loadDetail(row: PoolAccount) {
   detailLoading.value = true
   try {
     const [seriesRows, modelRows] = await Promise.all([
-      listPoolSeries(selectedPlatformId.value, row.externalAccountId, range.value, granularity.value),
-      listPoolModels(selectedPlatformId.value, row.externalAccountId, range.value),
+      listPoolSeries(selectedPlatformId.value, row.externalAccountId, detailRange.value, granularity.value),
+      listPoolModels(selectedPlatformId.value, row.externalAccountId, detailRange.value),
     ])
     series.value = seriesRows
     models.value = modelRows
@@ -775,6 +873,14 @@ function formatCost(value: number | null | undefined): string {
   return value == null ? '—' : `$${Number(value).toFixed(4)}`
 }
 
+/** 直连增量的滞后用紧凑单位展示（秒 / 分 / 小时 / 天）。 */
+function formatLag(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)}h`
+  return `${Math.floor(seconds / 86400)}d`
+}
+
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
   const date = new Date(value)
@@ -785,9 +891,13 @@ function formatDateTime(value: string | null | undefined): string {
 function formatBucket(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return granularity.value === 'day'
-    ? date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
-    : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit' })
+  if (granularity.value === 'day') {
+    return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+  }
+  if (granularity.value === 'minute') {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit' })
 }
 
 // 换平台/账号列表更新后，清掉已经不存在的筛选项，避免筛选把自己筛空

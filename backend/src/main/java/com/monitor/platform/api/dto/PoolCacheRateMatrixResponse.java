@@ -10,11 +10,13 @@ import java.util.List;
  * 每个格子是该账号在该时间窗内的缓存命中率与请求数。一次性返回，
  * 便于横向对比「同一个账号在短窗口和长窗口的缓存表现差异」。</p>
  *
- * @param windows  时间窗定义（列）
- * @param accounts 账号行
+ * @param windows        时间窗定义（列）
+ * @param minimumSample  可信展示所需的最小样本量（请求数）；低于该值的格子应标注「样本不足」
+ * @param accounts       账号行
  */
 public record PoolCacheRateMatrixResponse(
         List<Window> windows,
+        long minimumSample,
         List<AccountRow> accounts
 ) {
 
@@ -51,9 +53,11 @@ public record PoolCacheRateMatrixResponse(
     /**
      * 单元格指标。
      *
-     * @param key                 窗口标识
-     * @param requests            请求数（样本量，判断命中率是否可信）
-     * @param cacheHitRate        缓存命中率（0~1），没有样本时为 null
+     * @param key                   窗口标识
+     * @param requests              请求数（样本量，判断命中率是否可信）
+     * @param cacheHitRate          缓存命中率（0~1），没有样本时为 null
+     * @param cacheRateNumerator    分子：窗口内缓存读取 token（口径与命中率一致）
+     * @param cacheRateDenominator  分母：窗口内 输入 + 缓存写入 + 缓存读取 token
      * @param inputTokens         输入 token
      * @param cacheReadTokens     缓存读取 token
      * @param cacheCreationTokens 缓存写入 token
@@ -65,6 +69,8 @@ public record PoolCacheRateMatrixResponse(
             String key,
             long requests,
             Double cacheHitRate,
+            long cacheRateNumerator,
+            long cacheRateDenominator,
             Long inputTokens,
             Long cacheReadTokens,
             Long cacheCreationTokens,

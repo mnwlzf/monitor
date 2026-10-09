@@ -1067,6 +1067,7 @@ body {
 }
 .pool-chart-card { margin-bottom: 0; }
 .pool-chart-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pool-chart-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* 号池多时间窗缓存率对比 */
 .pool-matrix-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }

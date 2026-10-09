@@ -3,6 +3,7 @@ package com.monitor.platform.api.controller;
 import com.monitor.platform.api.dto.BindPoolAccountRequest;
 import com.monitor.platform.api.dto.PoolAccountResponse;
 import com.monitor.platform.api.dto.PoolCacheRateMatrixResponse;
+import com.monitor.platform.api.dto.PoolIngestStatusResponse;
 import com.monitor.platform.api.dto.PoolModelMetricsResponse;
 import com.monitor.platform.api.dto.PoolSeriesPointResponse;
 import com.monitor.platform.common.response.ApiResponse;
@@ -45,7 +46,7 @@ public class PoolMonitorController {
      * 查询平台下号池账号列表与聚合指标。
      *
      * @param instanceId 平台 ID
-     * @param range      时间维度：1d / 7d / 30d / 90d
+     * @param range      时间维度：1h / 6h / 12h / 1d（24h）/ 7d / 30d / 90d
      */
     @GetMapping
     public ApiResponse<List<PoolAccountResponse>> listPoolAccounts(
@@ -58,7 +59,7 @@ public class PoolMonitorController {
      * 多时间窗缓存率对比：行=号池账号，列=时间窗。
      *
      * @param instanceId 平台 ID
-     * @param windows    逗号分隔的时间窗，支持 1h / 6h / 12h / 24h / 7d / 30d / 90d，最多 6 列
+     * @param windows    逗号分隔的时间窗，支持 1m / 5m / 15m / 30m / 1h / 6h / 12h / 24h / 7d / 30d / 90d，最多 6 列
      */
     @GetMapping("/cache-rates")
     public ApiResponse<PoolCacheRateMatrixResponse> cacheRates(
@@ -68,12 +69,22 @@ public class PoolMonitorController {
     }
 
     /**
+     * 直连库增量采集的运行状态：是否配置生效、游标位置、最新明细的滞后。
+     *
+     * <p>用来排查「分钟级缓存率为空」：未配置 / 未初始化 / 滞后过大都会在这里体现。</p>
+     */
+    @GetMapping("/ingest-status")
+    public ApiResponse<PoolIngestStatusResponse> ingestStatus(@PathVariable Integer instanceId) {
+        return ApiResponse.of(poolQueryService.ingestStatus(instanceId), null);
+    }
+
+    /**
      * 查询单个号池账号的时序指标。
      *
      * @param instanceId        平台 ID
      * @param externalAccountId 号池账号 ID
      * @param range             时间维度
-     * @param granularity       聚合粒度：hour / day，缺省按 range 推断
+     * @param granularity       聚合粒度：minute / hour / day，缺省按 range 推断
      */
     @GetMapping("/{externalAccountId}/series")
     public ApiResponse<List<PoolSeriesPointResponse>> listSeries(

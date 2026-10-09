@@ -8,6 +8,12 @@
         WHERE id = 1
     </select>
 
+    <select id="selectLastRunAt" resultType="java.time.OffsetDateTime">
+        SELECT last_run_at
+        FROM sub2api_ingest_cursor
+        WHERE id = 1
+    </select>
+
     <update id="upsertLastUsageLogId">
         INSERT INTO sub2api_ingest_cursor (id, last_usage_log_id, last_run_at, updated_at)
         VALUES (1, #{lastUsageLogId}, now(), now())

@@ -20,6 +20,11 @@ public class Sub2ApiIngestCursorRepository {
         return value == null ? 0L : value;
     }
 
+    /** 游标最后一次推进时间；从未成功拉取过时为 null。 */
+    public java.time.OffsetDateTime lastRunAt() {
+        return mapper.selectLastRunAt();
+    }
+
     /** 推进游标。 */
     public void save(long lastUsageLogId) {
         mapper.upsertLastUsageLogId(lastUsageLogId);

@@ -265,11 +265,11 @@ export interface PoolAccount {
   cacheHitRate: number | null
 }
 
-/** 号池监控可选时间维度。 */
-export type PoolRange = '1d' | '7d' | '30d' | '90d'
+/** 号池监控可选时间维度：短窗口（1h/6h/12h）用于分钟级排查，长窗口看趋势。 */
+export type PoolRange = '1h' | '6h' | '12h' | '1d' | '7d' | '30d' | '90d'
 
-/** 号池时序聚合粒度。 */
-export type PoolGranularity = 'hour' | 'day'
+/** 号池时序聚合粒度。minute 只在 ≤24 小时窗口内可用（依赖直连库秒级增量）。 */
+export type PoolGranularity = 'minute' | 'hour' | 'day'
 
 /** 号池指标时序点。 */
 export interface PoolSeriesPoint {
@@ -303,6 +303,10 @@ export interface PoolCacheRateCell {
   key: string
   requests: number
   cacheHitRate: number | null
+  /** 命中率分子：窗口内缓存读取 token。 */
+  cacheRateNumerator: number
+  /** 命中率分母：窗口内 输入 + 缓存读取 + 缓存写入 token。 */
+  cacheRateDenominator: number
   inputTokens: number | null
   cacheReadTokens: number | null
   cacheCreationTokens: number | null
@@ -329,7 +333,20 @@ export interface PoolCacheRateRow {
  */
 export interface PoolCacheRateMatrix {
   windows: PoolCacheRateWindow[]
+  /** 可信展示所需的最小样本量（请求数），低于该值的格子应标注「样本不足」。 */
+  minimumSample: number
   accounts: PoolCacheRateRow[]
+}
+
+/** 号池直连库增量采集状态（用于判断分钟级数据是否可用）。 */
+export interface PoolIngestStatus {
+  enabled: boolean
+  configured: boolean
+  passwordConfigured: boolean
+  lastUsageLogId: number
+  lastRunAt: string | null
+  latestSampleAt: string | null
+  lagSeconds: number | null
 }
 
 /** 号池按模型聚合指标。 */

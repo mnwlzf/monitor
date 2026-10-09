@@ -94,6 +94,12 @@
           AND external_account_id = #{externalAccountId}
     </select>
 
+    <select id="selectLatestCreatedAt" resultType="java.time.OffsetDateTime">
+        SELECT MAX(created_at)
+        FROM pool_request_samples
+        WHERE platform_id = #{platformId}
+    </select>
+
     <select id="selectAggregate" resultMap="PoolAccountMetricsResultMap">
         SELECT
             #{externalAccountId} AS external_account_id,

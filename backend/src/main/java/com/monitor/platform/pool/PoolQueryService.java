@@ -2,11 +2,14 @@ package com.monitor.platform.pool;
 
 import com.monitor.platform.api.dto.PoolAccountResponse;
 import com.monitor.platform.api.dto.PoolCacheRateMatrixResponse;
+import com.monitor.platform.api.dto.PoolIngestStatusResponse;
 import com.monitor.platform.api.dto.PoolModelMetricsResponse;
 import com.monitor.platform.api.dto.PoolSeriesPointResponse;
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.pool.ingest.PoolIngestProperties;
+import com.monitor.platform.pool.ingest.Sub2ApiIngestCursorRepository;
 import com.monitor.platform.pool.repository.PoolAccountRepository;
 import com.monitor.platform.pool.repository.PoolSampleRepository;
 import org.springframework.stereotype.Service;
@@ -35,14 +38,25 @@ public class PoolQueryService {
     private static final int CACHE_RATE_SCALE = 4;
 
     /** 多时间窗对比默认列。 */
-    private static final String DEFAULT_WINDOWS = "1h,6h,24h,7d,30d";
+    private static final String DEFAULT_WINDOWS = "5m,15m,1h,24h,7d";
     /** 多时间窗对比最多允许的列数，避免前端表格过宽、后端聚合次数过多。 */
     private static final int MAX_WINDOWS = 6;
+    /**
+     * 可信展示所需的最小样本量（请求数）。
+     *
+     * <p>分钟窗口本身样本就少，低于该值时页面应标注「样本不足」而不是直接给百分比
+     * —— 1 条 16 万 token 的请求就能把比率拉到 99% 或 0%，那不是精度问题而是没有意义。</p>
+     */
+    private static final long MINIMUM_SAMPLE_REQUESTS = 5;
     /** 支持的时间窗预设：key -> [标签, 时长]。 */
     private static final Map<String, Object[]> WINDOW_PRESETS = windowPresets();
 
     private static Map<String, Object[]> windowPresets() {
         Map<String, Object[]> presets = new LinkedHashMap<>();
+        presets.put("1m", new Object[]{"近 1 分钟", Duration.ofMinutes(1)});
+        presets.put("5m", new Object[]{"近 5 分钟", Duration.ofMinutes(5)});
+        presets.put("15m", new Object[]{"近 15 分钟", Duration.ofMinutes(15)});
+        presets.put("30m", new Object[]{"近 30 分钟", Duration.ofMinutes(30)});
         presets.put("1h", new Object[]{"近 1 小时", Duration.ofHours(1)});
         presets.put("6h", new Object[]{"近 6 小时", Duration.ofHours(6)});
         presets.put("12h", new Object[]{"近 12 小时", Duration.ofHours(12)});
@@ -56,13 +70,40 @@ public class PoolQueryService {
     private final PoolAccountRepository poolAccountRepository;
     private final PoolSampleRepository poolSampleRepository;
     private final AccountApiKeyRepository apiKeyRepository;
+    private final Sub2ApiIngestCursorRepository ingestCursorRepository;
+    private final PoolIngestProperties ingestProperties;
 
     public PoolQueryService(PoolAccountRepository poolAccountRepository,
                             PoolSampleRepository poolSampleRepository,
-                            AccountApiKeyRepository apiKeyRepository) {
+                            AccountApiKeyRepository apiKeyRepository,
+                            Sub2ApiIngestCursorRepository ingestCursorRepository,
+                            PoolIngestProperties ingestProperties) {
         this.poolAccountRepository = poolAccountRepository;
         this.poolSampleRepository = poolSampleRepository;
         this.apiKeyRepository = apiKeyRepository;
+        this.ingestCursorRepository = ingestCursorRepository;
+        this.ingestProperties = ingestProperties;
+    }
+
+    /**
+     * 直连库增量采集的运行状态。
+     *
+     * <p>用来回答「分钟级缓存率为什么是空的」：直连库是否配置完整、游标推到哪、
+     * 本地最新一条明细有多旧。全部读本地表，不碰只读上游，接口本身很轻。</p>
+     */
+    public PoolIngestStatusResponse ingestStatus(Integer platformId) {
+        OffsetDateTime latestSampleAt = poolSampleRepository.findLatestCreatedAt(platformId);
+        OffsetDateTime now = OffsetDateTime.now();
+        Long lagSeconds = latestSampleAt == null ? null
+                : Math.max(0L, Duration.between(latestSampleAt, now).getSeconds());
+        return new PoolIngestStatusResponse(
+                ingestProperties.isEnabled(),
+                ingestProperties.isConfigured(),
+                ingestProperties.getPassword() != null && !ingestProperties.getPassword().isBlank(),
+                ingestCursorRepository.lastUsageLogId(),
+                ingestCursorRepository.lastRunAt(),
+                latestSampleAt,
+                lagSeconds);
     }
 
     /**
@@ -139,7 +180,11 @@ public class PoolQueryService {
         rows.sort(Comparator.comparingLong(this::sumRequests).reversed()
                 .thenComparing(row -> row.name() == null ? "" : row.name()));
 
-        return new PoolCacheRateMatrixResponse(windows, rows);
+        return new PoolCacheRateMatrixResponse(windows, MINIMUM_SAMPLE_REQUESTS, rows);
+    }
+
+    private long safe(Long value) {
+        return value == null ? 0L : value;
     }
 
     private long sumRequests(PoolCacheRateMatrixResponse.AccountRow row) {
@@ -151,12 +196,17 @@ public class PoolQueryService {
     }
 
     private PoolCacheRateMatrixResponse.Cell toCell(String key, PoolAccountMetrics metrics) {
+        long numerator = metrics == null || metrics.getCacheReadTokens() == null ? 0L : metrics.getCacheReadTokens();
+        long denominator = metrics == null ? 0L
+                : safe(metrics.getInputTokens()) + safe(metrics.getCacheReadTokens()) + safe(metrics.getCacheCreationTokens());
         return new PoolCacheRateMatrixResponse.Cell(
                 key,
                 metrics == null || metrics.getRequests() == null ? 0L : metrics.getRequests(),
                 metrics == null ? null
                         : cacheHitRate(metrics.getInputTokens(), metrics.getCacheReadTokens(),
                         metrics.getCacheCreationTokens()),
+                numerator,
+                denominator,
                 metrics == null ? null : metrics.getInputTokens(),
                 metrics == null ? null : metrics.getCacheReadTokens(),
                 metrics == null ? null : metrics.getCacheCreationTokens(),
@@ -207,7 +257,7 @@ public class PoolQueryService {
      * 查询单个号池账号的时序指标。
      *
      * @param range       时间维度：1d / 7d / 30d / 90d
-     * @param granularity 聚合粒度：hour / day，缺省时按 range 推断
+     * @param granularity 聚合粒度：minute / hour / day，缺省时按 range 推断
      */
     public List<PoolSeriesPointResponse> series(Integer platformId, Long externalAccountId,
                                                 String range, String granularity) {
@@ -327,11 +377,15 @@ public class PoolQueryService {
                 .doubleValue();
     }
 
+    /** 支持的时间维度：分钟级（1h / 6h / 12h）到天级（1d / 7d / 30d / 90d），未知值回退 7 天。 */
     private Duration resolveRange(String range) {
         if (range == null) {
             return Duration.ofDays(7);
         }
         return switch (range.trim().toLowerCase()) {
+            case "1h" -> Duration.ofHours(1);
+            case "6h" -> Duration.ofHours(6);
+            case "12h" -> Duration.ofHours(12);
             case "1d", "24h" -> Duration.ofDays(1);
             case "30d" -> Duration.ofDays(30);
             case "90d" -> Duration.ofDays(90);
@@ -339,18 +393,31 @@ public class PoolQueryService {
         };
     }
 
+    /**
+     * 解析时序聚合粒度：minute / hour / day。
+     *
+     * <p>直连库是秒级增量，短窗口（≤12 小时）默认按分钟出点，才能看出缓存率的实时波动；
+     * 长窗口（≥30 天）默认按天，避免一次返回上万个桶。</p>
+     *
+     * <p>分钟粒度只对 1 天以内的窗口开放：90 天 × 每分钟 = 12.9 万个桶，既慢又没有意义，
+     * 因此超出时自动降级为小时粒度。</p>
+     */
     private String resolveGranularity(String granularity, String range) {
+        Duration window = resolveRange(range);
         if (granularity != null) {
             String normalized = granularity.trim().toLowerCase();
+            if ("minute".equals(normalized)) {
+                return window.compareTo(Duration.ofDays(1)) <= 0 ? "minute" : "hour";
+            }
             if ("hour".equals(normalized) || "day".equals(normalized)) {
                 return normalized;
             }
         }
-        if (range != null) {
-            String normalized = range.trim().toLowerCase();
-            if ("30d".equals(normalized) || "90d".equals(normalized)) {
-                return "day";
-            }
+        if (window.compareTo(Duration.ofHours(12)) <= 0) {
+            return "minute";
+        }
+        if (window.compareTo(Duration.ofDays(30)) >= 0) {
+            return "day";
         }
         return "hour";
     }

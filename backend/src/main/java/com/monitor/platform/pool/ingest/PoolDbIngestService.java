@@ -40,6 +40,8 @@ public class PoolDbIngestService {
     private final PoolSampleRepository poolSampleRepository;
     /** 上次失败是否已提示过：高频任务（30 秒）避免同一错误刷屏。 */
     private volatile boolean failureLogged = false;
+    /** 配置诊断只提示一次。 */
+    private volatile boolean configHintLogged = false;
 
     public PoolDbIngestService(PoolIngestProperties properties,
                                Sub2ApiUsageLogReader reader,
@@ -61,6 +63,7 @@ public class PoolDbIngestService {
      * <p>每批写入成功后就推进游标，因此中途异常也不会重复拉取（且 {@code request_id} 仍然幂等）。</p>
      */
     public void ingestOnce() {
+        logConfigurationHint();
         if (!properties.isConfigured() || !reader.isAvailable()) {
             log.debug("未配置 Sub2API 直连只读库，跳过直连增量采集");
             return;
@@ -76,6 +79,34 @@ public class PoolDbIngestService {
                 log.warn("直连库增量采集失败（相同错误不再重复提示，恢复后会自动继续）: {}", ex.getMessage());
             }
         }
+    }
+
+    /**
+     * 启动后第一次运行时把「配置是否生效」讲清楚。
+     *
+     * <p>这条链路最容易踩的坑：.env 里只写了 {@code SUB2API_DB_ENABLED=true} 却没写
+     * url / 用户名 / 密码，任务每轮静默跳过，游标一直停在 0，看起来「配置好了」其实没有。</p>
+     */
+    private void logConfigurationHint() {
+        if (configHintLogged) {
+            return;
+        }
+        configHintLogged = true;
+        if (!properties.isEnabled()) {
+            log.info("号池直连库增量采集未启用（SUB2API_DB_ENABLED=false），明细仍由 admin 接口任务采集");
+            return;
+        }
+        if (properties.getUrl() == null || properties.getUrl().isBlank()
+                || properties.getUsername() == null || properties.getUsername().isBlank()) {
+            log.warn("号池直连库增量采集已启用，但 SUB2API_DB_URL / SUB2API_DB_USERNAME 未配置完整，任务每轮跳过");
+            return;
+        }
+        if (properties.getPassword() == null || properties.getPassword().isBlank()) {
+            log.warn("号池直连库增量采集已启用但 SUB2API_DB_PASSWORD 为空；"
+                    + "若上游要求密码认证，连接会失败且游标不会推进（分钟级缓存率将没有数据）");
+            return;
+        }
+        log.info("号池直连库增量采集已启用: url={}, user={}", properties.getUrl(), properties.getUsername());
     }
 
     private void doIngest() {

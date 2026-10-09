@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { PoolAccount, PoolCacheRateMatrix, PoolGranularity, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
+import type { PoolAccount, PoolCacheRateMatrix, PoolGranularity, PoolIngestStatus, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
 
 interface PoolAccountDto {
   externalAccountId: number
@@ -173,6 +173,34 @@ export async function listPoolModels(
   }))
 }
 
+interface PoolIngestStatusDto {
+  enabled?: boolean
+  configured?: boolean
+  passwordConfigured?: boolean
+  lastUsageLogId?: number | null
+  lastRunAt?: string | null
+  latestSampleAt?: string | null
+  lagSeconds?: number | null
+}
+
+/**
+ * 查询号池直连库增量采集状态，用于判断分钟级缓存率是否真的有数据。
+ */
+export async function getPoolIngestStatus(platformId: number): Promise<PoolIngestStatus> {
+  const dto = await apiRequest<PoolIngestStatusDto>(
+    `/api/v1/upstream/instances/${platformId}/pool-accounts/ingest-status`,
+  )
+  return {
+    enabled: dto?.enabled ?? false,
+    configured: dto?.configured ?? false,
+    passwordConfigured: dto?.passwordConfigured ?? false,
+    lastUsageLogId: num(dto?.lastUsageLogId),
+    lastRunAt: dto?.lastRunAt ?? null,
+    latestSampleAt: dto?.latestSampleAt ?? null,
+    lagSeconds: dto?.lagSeconds == null ? null : Number(dto.lagSeconds),
+  }
+}
+
 /**
  * 手动绑定号池账号与本地密钥；keyId 为空表示解除绑定。
  */
@@ -194,6 +222,7 @@ export async function syncPoolPlatform(platformId: number): Promise<void> {
 }
 interface PoolCacheRateMatrixDto {
   windows?: Array<{ key?: string; label?: string; from?: string }>
+  minimumSample?: number | null
   accounts?: Array<{
     externalAccountId: number
     name?: string | null
@@ -204,6 +233,8 @@ interface PoolCacheRateMatrixDto {
       key?: string
       requests?: number | null
       cacheHitRate?: number | null
+      cacheRateNumerator?: number | null
+      cacheRateDenominator?: number | null
       inputTokens?: number | null
       cacheReadTokens?: number | null
       cacheCreationTokens?: number | null
@@ -230,6 +261,7 @@ export async function listPoolCacheRates(platformId: number, windows: string[]):
       label: item.label || item.key || '',
       from: item.from || '',
     })),
+    minimumSample: num(dto?.minimumSample),
     accounts: (dto?.accounts ?? []).map(row => ({
       externalAccountId: Number(row.externalAccountId),
       name: row.name ?? null,
@@ -240,6 +272,8 @@ export async function listPoolCacheRates(platformId: number, windows: string[]):
         key: cell.key || '',
         requests: num(cell.requests),
         cacheHitRate: nullableNum(cell.cacheHitRate),
+        cacheRateNumerator: num(cell.cacheRateNumerator),
+        cacheRateDenominator: num(cell.cacheRateDenominator),
         inputTokens: cell.inputTokens == null ? null : num(cell.inputTokens),
         cacheReadTokens: cell.cacheReadTokens == null ? null : num(cell.cacheReadTokens),
         cacheCreationTokens: cell.cacheCreationTokens == null ? null : num(cell.cacheCreationTokens),
