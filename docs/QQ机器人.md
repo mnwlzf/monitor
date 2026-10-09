@@ -36,8 +36,8 @@ docker compose -f compose.qqbot.yaml logs napcat
 #    建议用**小号**：自建机器人有风控/封号风险
 ```
 
-> 登录态与配置默认落在宿主机 `/app/napcat/`（`qq` / `config` / `plugins` 三个子目录），
-> 重启容器不用重新扫码。仓库不在 `/app` 下时，在 `.env` 里设 `NAPCAT_DATA_DIR=/你的路径/napcat`。
+> 登录态与配置直接挂在宿主机 `/app/napcat/` 下（`qq` / `config` / `plugins` 三个子目录），
+> 重启容器不用重新扫码。**NapCat 侧不需要 `.env`**：端口与目录都写在 `compose.qqbot.yaml` 里，部署目录不同就改那三行 volume。
 
 登录成功后，在 WebUI 的「网络配置」里开两样：
 
@@ -65,8 +65,7 @@ monitor 和 napcat 是两套独立的 compose（比如 `/app/monitor` 与 `/app/
 >
 > 宿主机端口被占用（`Bind for 127.0.0.1:xxxx failed: port is already allocated`）时：
 > `docker ps` / `ss -lntp | grep <端口>` 找出占用者；或直接换端口 ——
-> 在 `.env` 里设 `NAPCAT_HTTP_PORT=5000`（宿主机侧），并同步改 `MONITOR_BOT_API_BASE_URL`。
-> 容器内始终是 3000，不用动 NapCat 里的监听端口。
+> 直接改 `compose.qqbot.yaml` 里的端口映射（宿主机侧），容器内始终是 3000。
 
 其它可选实现：Lagrange.Core、LLOneBot。`go-cqhttp` 已停更，不建议再用。
 
