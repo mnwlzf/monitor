@@ -133,6 +133,8 @@ public class SecurityConfig {
                         .requestMatchers("/", "/index.html", "/favicon.ico", "/favicon.svg", "/robots.txt", "/assets/**", "/error").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+                        // QQ 机器人回调：无会话，鉴权靠 monitor.bot.webhook-token 共享密钥
+                        .requestMatchers("/api/v1/bot/**").permitAll()
                         .requestMatchers("/api/v1/auth/**").authenticated()
                         // 系统设置（含 SMTP 等敏感配置）：仅 ADMIN
                         .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")

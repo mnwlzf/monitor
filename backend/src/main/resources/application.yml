@@ -11,6 +11,19 @@ server:
         secure: ${MONITOR_SESSION_COOKIE_SECURE:false}
 
 spring:
+  # 对话式问答（QQ 机器人使用）。
+  # 默认 spring.ai.model.chat=none：不配 Key 也能正常启动，机器人只支持命令；
+  # 配好 Key 后把它改成 openai 即可开启自然语言问答。
+  ai:
+    model:
+      chat: ${SPRING_AI_MODEL_CHAT:none}
+    openai:
+      api-key: ${SPRING_AI_OPENAI_API_KEY:}
+      base-url: ${SPRING_AI_OPENAI_BASE_URL:https://api.openai.com}
+      chat:
+        options:
+          model: ${SPRING_AI_OPENAI_MODEL:gpt-4o-mini}
+          temperature: ${SPRING_AI_OPENAI_TEMPERATURE:0.2}
   config:
     import:
       - optional:file:.env[.properties]
@@ -48,6 +61,23 @@ mybatis-plus:
     banner: false
 
 monitor:
+  # QQ 机器人（OneBot v11 协议，NapCat / Lagrange / go-cqhttp 都支持），默认关闭。
+  # 在机器人端把「反向 HTTP 上报」指到 http://<本服务>:8080/api/v1/bot/onebot，
+  # 并把 Authorization 配成与 webhook-token 相同的 Bearer 值。
+  # 开启后可用命令（/help）或直接自然语言提问（需另配大模型）。
+  bot:
+    enabled: ${MONITOR_BOT_ENABLED:false}
+    webhook-token: ${MONITOR_BOT_WEBHOOK_TOKEN:}
+    api-base-url: ${MONITOR_BOT_API_BASE_URL:}
+    api-token: ${MONITOR_BOT_API_TOKEN:}
+    # 逗号分隔的群号 / QQ；留空表示不限制（建议显式配置，否则任何群都能问）
+    allowed-groups: ${MONITOR_BOT_ALLOWED_GROUPS:}
+    allowed-users: ${MONITOR_BOT_ALLOWED_USERS:}
+    require-mention: ${MONITOR_BOT_REQUIRE_MENTION:true}
+    command-prefix: ${MONITOR_BOT_COMMAND_PREFIX:/}
+    max-reply-length: ${MONITOR_BOT_MAX_REPLY_LENGTH:900}
+    memory-window: ${MONITOR_BOT_MEMORY_WINDOW:10}
+
   # 上游请求伪装：默认使用内置的浏览器 User-Agent / Accept-Language，
   # 可用 MONITOR_UPSTREAM_USER_AGENT、MONITOR_UPSTREAM_ACCEPT_LANGUAGE 环境变量覆盖。
   upstream: {}
