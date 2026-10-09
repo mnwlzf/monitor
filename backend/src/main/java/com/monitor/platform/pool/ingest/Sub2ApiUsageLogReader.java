@@ -9,7 +9,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.Collection;
 import java.util.List;
 
@@ -40,22 +46,68 @@ public class Sub2ApiUsageLogReader {
             LIMIT ?
             """;
 
-    private static final RowMapper<Sub2ApiUsageLogRow> ROW_MAPPER = (rs, rowNum) -> new Sub2ApiUsageLogRow(
+    /** 业务时区：created_at 若是无时区的 timestamp，按此时区解释。 */
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+
+    /**
+     * 行映射。
+     *
+     * <p><strong>刻意不用 {@code rs.getObject(col, Long.class)}</strong>：上游 {@code usage_logs}
+     * 的 {@code *_tokens} / {@code api_key_id} 在不同版本里可能是 int4 也可能是 int8，
+     * 而 pgjdbc 对 int4 执行 {@code getObject(col, Long.class)} 会直接抛
+     * 「conversion to class java.lang.Long from int4 not supported」，
+     * 整个增量链路就会卡住、游标不再推进。这里统一按 {@link Number} 收，宽窄都能读。</p>
+     */
+    static final RowMapper<Sub2ApiUsageLogRow> ROW_MAPPER = (rs, rowNum) -> new Sub2ApiUsageLogRow(
             rs.getLong("id"),
             rs.getLong("account_id"),
             rs.getString("request_id"),
-            rs.getObject("api_key_id", Long.class),
+            longOrNull(rs, "api_key_id"),
             rs.getString("model"),
-            rs.getObject("created_at", OffsetDateTime.class),
-            rs.getObject("first_token_ms", Integer.class),
-            rs.getObject("duration_ms", Integer.class),
-            rs.getObject("input_tokens", Long.class),
-            rs.getObject("output_tokens", Long.class),
-            rs.getObject("cache_read_tokens", Long.class),
-            rs.getObject("cache_creation_tokens", Long.class),
+            offsetDateTimeOrNull(rs, "created_at"),
+            intOrNull(rs, "first_token_ms"),
+            intOrNull(rs, "duration_ms"),
+            longOrNull(rs, "input_tokens"),
+            longOrNull(rs, "output_tokens"),
+            longOrNull(rs, "cache_read_tokens"),
+            longOrNull(rs, "cache_creation_tokens"),
             rs.getBigDecimal("total_cost"),
             rs.getBigDecimal("actual_cost")
     );
+
+    /** 宽容读取整数列：int4 / int8 / numeric 都能取。 */
+    private static Long longOrNull(ResultSet rs, String column) throws SQLException {
+        Object value = rs.getObject(column);
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
+    private static Integer intOrNull(ResultSet rs, String column) throws SQLException {
+        Object value = rs.getObject(column);
+        return value instanceof Number number ? number.intValue() : null;
+    }
+
+    /** created_at 可能是 timestamptz 也可能是 timestamp，两种都收。 */
+    private static OffsetDateTime offsetDateTimeOrNull(ResultSet rs, String column) throws SQLException {
+        try {
+            return rs.getObject(column, OffsetDateTime.class);
+        } catch (SQLException ignored) {
+            // 无时区的 timestamp 走不通上面的转换，退回按业务时区解释
+        }
+        Object value = rs.getObject(column);
+        if (value instanceof OffsetDateTime odt) {
+            return odt;
+        }
+        if (value instanceof LocalDateTime ldt) {
+            return ldt.atZone(ZONE).toOffsetDateTime();
+        }
+        if (value instanceof Timestamp ts) {
+            return ts.toLocalDateTime().atZone(ZONE).toOffsetDateTime();
+        }
+        if (value instanceof Instant instant) {
+            return instant.atZone(ZONE).toOffsetDateTime();
+        }
+        return null;
+    }
 
     private final PoolIngestProperties properties;
 
