@@ -230,12 +230,13 @@ function mapHeatmapMetrics(dto: PoolHeatmapMetricsDto | undefined | null): PoolH
  */
 export async function getPoolHeatmap(
   platformId: number,
-  params: { range: PoolRange; granularity?: PoolGranularity; models?: string[]; accounts?: number[] },
+  params: { range: PoolRange; granularity?: PoolGranularity; models?: string[]; accounts?: number[]; platforms?: string[] },
 ): Promise<PoolHeatmap> {
   const query = new URLSearchParams({ range: params.range })
   if (params.granularity) query.set('granularity', params.granularity)
   if (params.models?.length) query.set('models', params.models.join(','))
   if (params.accounts?.length) query.set('accounts', params.accounts.join(','))
+  if (params.platforms?.length) query.set('platforms', params.platforms.join(','))
   const dto = await apiRequest<PoolHeatmapDto>(
     `/api/v1/upstream/instances/${platformId}/pool-accounts/heatmap?${query.toString()}`,
   )

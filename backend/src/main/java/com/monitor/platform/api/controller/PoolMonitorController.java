@@ -88,6 +88,7 @@ public class PoolMonitorController {
      * @param granularity 聚合粒度：minute / hour / day，缺省按 range 推断
      * @param models      逗号分隔的模型过滤，缺省表示全部
      * @param accounts    逗号分隔的号池账号 ID 过滤，缺省表示全部
+     * @param platforms   逗号分隔的账号上游平台过滤（openai / anthropic ...），缺省表示全部
      */
     @GetMapping("/heatmap")
     public ApiResponse<PoolHeatmapResponse> heatmap(
@@ -95,9 +96,10 @@ public class PoolMonitorController {
             @RequestParam(defaultValue = "24h") String range,
             @RequestParam(required = false) String granularity,
             @RequestParam(required = false) String models,
-            @RequestParam(required = false) String accounts) {
+            @RequestParam(required = false) String accounts,
+            @RequestParam(required = false) String platforms) {
         return ApiResponse.of(poolQueryService.heatmap(instanceId, range, granularity,
-                splitCsv(models), splitCsvLong(accounts)), null);
+                splitCsv(models), splitCsvLong(accounts), splitCsv(platforms)), null);
     }
 
     /** 逗号分隔参数解析：空值返回空列表，非法项直接忽略，避免一个坏参数让整页 400。 */

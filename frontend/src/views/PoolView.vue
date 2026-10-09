@@ -3,9 +3,32 @@
     <div class="pool-toolbar admin-card">
       <div class="pool-toolbar-filters">
         <span class="pool-toolbar-label">监控平台</span>
-        <el-select v-model="selectedPlatformId" placeholder="选择 Sub2API 平台" style="width: 260px" @change="reload">
+        <el-select v-model="selectedPlatformId" placeholder="选择 Sub2API 平台" style="width: 230px" @change="reload">
           <el-option v-for="platform in poolSources" :key="platform.id" :label="platform.name" :value="platform.id" />
         </el-select>
+
+        <span class="pool-toolbar-label">时间维度</span>
+        <el-radio-group v-model="range" @change="reload">
+          <el-radio-button v-for="option in RANGE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
+        </el-radio-group>
+
+        <span class="pool-toolbar-label">账号平台</span>
+        <el-select
+          v-model="platformFilter"
+          multiple
+          clearable
+          collapse-tags
+          :max-collapse-tags="2"
+          placeholder="全部平台"
+          style="width: 200px"
+          @change="loadHeatmap"
+        >
+          <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
+        </el-select>
+        <el-button v-if="platformFilter.length" link type="primary" @click="clearPlatformFilter">清除筛选</el-button>
+        <span class="pool-toolbar-count">
+          账号 {{ filteredAccounts.length }} / {{ accounts.length }}
+        </span>
       </div>
 
       <div class="pool-toolbar-actions">
@@ -38,31 +61,6 @@
 
     <el-tabs v-if="poolSources.length" v-model="activeTab" class="pool-tabs">
       <el-tab-pane label="账号列表" name="accounts">
-        <div class="pool-tab-bar">
-          <el-radio-group v-model="range" @change="reload">
-            <el-radio-button value="1d">近 1 天</el-radio-button>
-            <el-radio-button value="7d">近 7 天</el-radio-button>
-            <el-radio-button value="30d">近 30 天</el-radio-button>
-            <el-radio-button value="90d">近 90 天</el-radio-button>
-          </el-radio-group>
-
-          <span class="pool-toolbar-label">账号平台</span>
-          <el-select
-            v-model="platformFilter"
-            multiple
-            clearable
-            collapse-tags
-            :max-collapse-tags="2"
-            placeholder="全部平台"
-            style="width: 220px"
-          >
-            <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
-          </el-select>
-          <el-button v-if="platformFilter.length" link type="primary" @click="platformFilter = []">清除筛选</el-button>
-          <span class="pool-toolbar-count">
-            账号 {{ filteredAccounts.length }} / {{ accounts.length }}
-          </span>
-        </div>
 
         <div class="pool-metrics">
           <MetricCard label="号池账号" :value="String(accounts.length)" hint="当前平台下的号池账号数" />
@@ -202,26 +200,10 @@
               <div>
                 <h3>号池趋势（色块矩阵）</h3>
                 <p class="admin-form-hint">
-                  行 = 平台 / 号池账号，列 = 一个统计区间（{{ heatGranularityLabel }}）；悬停看明细，点击行进入详情，灰色表示该区间没有流量。
+                  行 = 平台 / 号池账号，列 = 一个统计区间（当前窗口 {{ rangeLabel }}，每格 {{ heatGranularityLabel }}）；悬停看明细，点击行进入详情，灰色表示该区间没有流量。
                 </p>
               </div>
               <div class="pool-heatmap-controls">
-                <el-radio-group v-model="heatRange" size="small" @change="loadHeatmap">
-                  <el-radio-button v-for="option in HEAT_RANGES" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
-                </el-radio-group>
-                <el-select
-                  v-model="heatPlatforms"
-                  multiple
-                  collapse-tags
-                  :max-collapse-tags="1"
-                  clearable
-                  size="small"
-                  placeholder="平台：全部"
-                  style="width: 170px"
-                  @change="loadHeatmap"
-                >
-                  <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
-                </el-select>
                 <el-select
                   v-model="heatModels"
                   multiple
@@ -486,7 +468,7 @@ const poolSources = computed(() => props.platforms.filter(platform => platform.p
 const selectedPlatformId = ref<number | null>(null)
 /** 号池页两个视图：账号列表 / 趋势矩阵。 */
 const activeTab = ref<'accounts' | 'heatmap'>('accounts')
-const range = ref<PoolRange>('7d')
+const range = ref<PoolRange>('24h')
 const granularity = ref<PoolGranularity>('minute')
 
 const accounts = ref<PoolAccount[]>([])
@@ -496,12 +478,16 @@ const bindableKeys = ref<ApiKey[]>([])
 /** 直连库增量采集状态：分钟级窗口有没有数据，全看这里。 */
 const ingestStatus = ref<PoolIngestStatus | null>(null)
 
-/** 色块矩阵的时间维度（与后端 preset 一致）。 */
-const HEAT_RANGES: Array<{ value: PoolRange; label: string }> = [
+/**
+ * 全页统一的时间维度：账号列表与趋势矩阵共用同一个窗口，
+ * 否则同一个账号在两个 tab 里会给出不同的请求数与缓存率（曾经就是这样）。
+ */
+const RANGE_OPTIONS: Array<{ value: PoolRange; label: string }> = [
   { value: '90m', label: '90 分钟' },
   { value: '24h', label: '24 小时' },
   { value: '7d', label: '7 天' },
   { value: '30d', label: '30 天' },
+  { value: '90d', label: '90 天' },
 ]
 
 /** 色块矩阵可选的着色指标。 */
@@ -513,9 +499,7 @@ const heatNoDataColor = '#e5e9ec'
 /** 账号平台筛选（openai / anthropic / grok ...），空数组表示全部。 */
 const platformFilter = ref<string[]>([])
 
-/** 色块矩阵的筛选与状态（与上方账号列表的筛选相互独立）。 */
-const heatRange = ref<PoolRange>('24h')
-const heatPlatforms = ref<string[]>([])
+/** 色块矩阵自己的筛选（时间维度与账号平台已提到共享工具栏）。 */
 const heatModels = ref<string[]>([])
 const heatAccounts = ref<number[]>([])
 const heatMetric = ref<HeatMetric>('cacheRate')
@@ -602,6 +586,9 @@ const filteredAccounts = computed(() => platformFilter.value.length
 
 /** 色块矩阵的格子宽度：列少时铺开，列多时压成细色块并横向滚动。 */
 const heatPitch = computed(() => (heatBuckets.value.length <= 48 ? 30 : 14))
+
+/** 当前时间维度文案（两个 tab 共用同一窗口）。 */
+const rangeLabel = computed(() => RANGE_OPTIONS.find(item => item.value === range.value)?.label ?? range.value)
 
 /** 当前色块矩阵的时间粒度文案。 */
 const heatGranularityLabel = computed(() => {
@@ -764,7 +751,8 @@ async function loadHeatmap() {
   heatLoading.value = true
   try {
     const heatmap = await getPoolHeatmap(selectedPlatformId.value, {
-      range: heatRange.value,
+      range: range.value,
+      platforms: platformFilter.value,
       models: heatModels.value,
       accounts: heatAccounts.value,
     })
@@ -917,9 +905,14 @@ function openDetailById(externalAccountId: number) {
 }
 
 function resetHeatmapFilters() {
-  heatPlatforms.value = []
   heatModels.value = []
   heatAccounts.value = []
+  void loadHeatmap()
+}
+
+/** 清除共享的账号平台筛选：两个 tab 都要跟着刷新。 */
+function clearPlatformFilter() {
+  platformFilter.value = []
   void loadHeatmap()
 }
 /** 切换详情时间窗：长窗口下分钟粒度会自动降级为小时（与后端一致）。 */

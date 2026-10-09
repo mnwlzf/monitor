@@ -250,7 +250,7 @@ class PoolQueryServiceTest {
                 ArgumentMatchers.eq("hour"), ArgumentMatchers.any(), ArgumentMatchers.any()))
                 .thenReturn(List.of(heatmapBucket(52064L, bucket, 10L, 100L, 300L, 0L)));
 
-        PoolHeatmapResponse heatmap = service.heatmap(1, "24h", null, List.of(), List.of());
+        PoolHeatmapResponse heatmap = service.heatmap(1, "24h", null, List.of(), List.of(), List.of());
 
         assertEquals("hour", heatmap.granularity());
         assertTrue(heatmap.buckets().size() >= 24);

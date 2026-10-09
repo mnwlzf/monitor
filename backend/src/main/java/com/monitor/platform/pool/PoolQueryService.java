@@ -215,9 +215,11 @@ public class PoolQueryService {
      * @param granularity        聚合粒度：minute / hour / day，缺省按 range 推断
      * @param models             模型过滤（空表示全部）
      * @param externalAccountIds 号池账号过滤（空表示全部）
+     * @param platforms          账号上游平台过滤（openai / anthropic ...，空表示全部）
      */
     public PoolHeatmapResponse heatmap(Integer platformId, String range, String granularity,
-                                       Collection<String> models, Collection<Long> externalAccountIds) {
+                                       Collection<String> models, Collection<Long> externalAccountIds,
+                                       Collection<String> platforms) {
         OffsetDateTime to = OffsetDateTime.now();
         OffsetDateTime from = to.minus(resolveRange(range));
         String unit = resolveGranularity(granularity, range);
@@ -230,6 +232,7 @@ public class PoolQueryService {
         }
 
         Set<String> modelFilter = normalizeModels(models);
+        Set<String> platformFilter = normalizeModels(platforms);
         Set<Long> accountFilter = new LinkedHashSet<>();
         if (externalAccountIds != null) {
             for (Long id : externalAccountIds) {
@@ -253,7 +256,6 @@ public class PoolQueryService {
             }
             cellAcc.computeIfAbsent(row.getExternalAccountId(), key -> newAccumulators(buckets.size()))[index].add(row);
             totalAcc.computeIfAbsent(row.getExternalAccountId(), key -> new HeatmapAccumulator()).add(row);
-            summaryAcc.add(row);
         }
 
         List<PoolHeatmapResponse.Row> rows = new ArrayList<>();
@@ -261,8 +263,14 @@ public class PoolQueryService {
             if (!accountFilter.isEmpty() && !accountFilter.contains(account.getExternalAccountId())) {
                 continue;
             }
+            if (!platformFilter.isEmpty() && !platformFilter.contains(account.getPlatform())) {
+                continue;
+            }
             HeatmapAccumulator[] cells = cellAcc.get(account.getExternalAccountId());
             HeatmapAccumulator total = totalAcc.get(account.getExternalAccountId());
+            if (total != null) {
+                summaryAcc.merge(total);
+            }
             List<PoolHeatmapResponse.Metrics> cellMetrics = new ArrayList<>(buckets.size());
             for (int i = 0; i < buckets.size(); i++) {
                 cellMetrics.add(cells == null ? emptyMetrics(stepMinutes) : cells[i].toMetrics(stepMinutes));
@@ -371,6 +379,19 @@ public class PoolQueryService {
             if (row.getTotalActualCost() != null) {
                 actualCost = actualCost.add(row.getTotalActualCost());
             }
+        }
+
+        /** 合并另一个累加器：用于把「通过筛选的账号」重新汇总成顶部卡片。 */
+        void merge(HeatmapAccumulator other) {
+            requests += other.requests;
+            inputTokens += other.inputTokens;
+            outputTokens += other.outputTokens;
+            cacheReadTokens += other.cacheReadTokens;
+            cacheCreationTokens += other.cacheCreationTokens;
+            firstTokenSamples += other.firstTokenSamples;
+            firstTokenWeightedMs += other.firstTokenWeightedMs;
+            durationSumMs += other.durationSumMs;
+            actualCost = actualCost.add(other.actualCost);
         }
 
         PoolHeatmapResponse.Metrics toMetrics(int stepMinutes) {
