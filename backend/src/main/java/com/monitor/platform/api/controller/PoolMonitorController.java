@@ -3,6 +3,7 @@ package com.monitor.platform.api.controller;
 import com.monitor.platform.api.dto.BindPoolAccountRequest;
 import com.monitor.platform.api.dto.PoolAccountResponse;
 import com.monitor.platform.api.dto.PoolCacheRateMatrixResponse;
+import com.monitor.platform.api.dto.PoolHeatmapResponse;
 import com.monitor.platform.api.dto.PoolIngestStatusResponse;
 import com.monitor.platform.api.dto.PoolModelMetricsResponse;
 import com.monitor.platform.api.dto.PoolSeriesPointResponse;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -76,6 +78,65 @@ public class PoolMonitorController {
     @GetMapping("/ingest-status")
     public ApiResponse<PoolIngestStatusResponse> ingestStatus(@PathVariable Integer instanceId) {
         return ApiResponse.of(poolQueryService.ingestStatus(instanceId), null);
+    }
+
+    /**
+     * 号池色块矩阵（热力图）趋势：行 = 平台 / 账号，列 = 等宽时间桶。
+     *
+     * @param instanceId  平台 ID
+     * @param range       时间维度：90m / 6h / 12h / 1d（24h）/ 7d / 30d
+     * @param granularity 聚合粒度：minute / hour / day，缺省按 range 推断
+     * @param models      逗号分隔的模型过滤，缺省表示全部
+     * @param accounts    逗号分隔的号池账号 ID 过滤，缺省表示全部
+     */
+    @GetMapping("/heatmap")
+    public ApiResponse<PoolHeatmapResponse> heatmap(
+            @PathVariable Integer instanceId,
+            @RequestParam(defaultValue = "24h") String range,
+            @RequestParam(required = false) String granularity,
+            @RequestParam(required = false) String models,
+            @RequestParam(required = false) String accounts) {
+        return ApiResponse.of(poolQueryService.heatmap(instanceId, range, granularity,
+                splitCsv(models), splitCsvLong(accounts)), null);
+    }
+
+    /** 逗号分隔参数解析：空值返回空列表，非法项直接忽略，避免一个坏参数让整页 400。 */
+    private static List<String> splitCsv(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (String part : value.split(",")) {
+            if (!part.isBlank()) {
+                result.add(part.trim());
+            }
+        }
+        return result;
+    }
+
+    private static List<Long> splitCsvLong(String value) {
+        List<Long> result = new ArrayList<>();
+        for (String part : splitCsv(value)) {
+            try {
+                result.add(Long.parseLong(part));
+            } catch (NumberFormatException ignored) {
+                // 非数字账号 ID 直接忽略
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 平台下出现过的模型名，供色块矩阵的「模型」筛选使用。
+     *
+     * @param instanceId 平台 ID
+     * @param range      时间维度，仅用于决定扫描窗口（最少 30 天）
+     */
+    @GetMapping("/model-options")
+    public ApiResponse<List<String>> modelOptions(
+            @PathVariable Integer instanceId,
+            @RequestParam(defaultValue = "30d") String range) {
+        return ApiResponse.of(poolQueryService.modelOptions(instanceId, range), null);
     }
 
     /**

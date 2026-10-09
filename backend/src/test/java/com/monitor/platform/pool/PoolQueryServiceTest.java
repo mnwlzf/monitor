@@ -2,6 +2,7 @@ package com.monitor.platform.pool;
 
 import com.monitor.platform.api.dto.PoolAccountResponse;
 import com.monitor.platform.api.dto.PoolCacheRateMatrixResponse;
+import com.monitor.platform.api.dto.PoolHeatmapResponse;
 import com.monitor.platform.api.dto.PoolIngestStatusResponse;
 import com.monitor.platform.api.dto.PoolSeriesPointResponse;
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
@@ -20,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
@@ -237,6 +239,47 @@ class PoolQueryServiceTest {
         assertEquals(latest, status.latestSampleAt());
         assertNotNull(status.lagSeconds());
         assertTrue(status.lagSeconds() >= 45);
+    }
+
+    @Test
+    void shouldBuildHeatmapMatrixByAccountAndBucket() {
+        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(account(52064L, "满血", null)));
+        // 取「5 分钟前所在的整点」，保证落在窗口内且不会正好等于窗口终点
+        OffsetDateTime bucket = OffsetDateTime.now().minusMinutes(5).truncatedTo(ChronoUnit.HOURS);
+        when(poolSampleRepository.heatmapBuckets(ArgumentMatchers.eq(1), ArgumentMatchers.any(), ArgumentMatchers.any(),
+                ArgumentMatchers.eq("hour"), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(List.of(heatmapBucket(52064L, bucket, 10L, 100L, 300L, 0L)));
+
+        PoolHeatmapResponse heatmap = service.heatmap(1, "24h", null, List.of(), List.of());
+
+        assertEquals("hour", heatmap.granularity());
+        assertTrue(heatmap.buckets().size() >= 24);
+        assertEquals(1, heatmap.rows().size());
+        PoolHeatmapResponse.Row row = heatmap.rows().get(0);
+        assertEquals(heatmap.buckets().size(), row.cells().size());
+        assertEquals(10L, row.total().requests());
+        // 300 / (100 + 300 + 0) = 0.75
+        assertEquals(0.75, row.total().cacheHitRate(), 0.0001);
+        // 只有命中的那个桶有数据，其余为空（requests=0、命中率 null）
+        assertEquals(1L, row.cells().stream().filter(cell -> cell.requests() > 0).count());
+        assertEquals(10L, heatmap.summary().requests());
+    }
+
+    private PoolHeatmapBucket heatmapBucket(long externalId, OffsetDateTime bucket,
+                                            long requests, long input, long read, long creation) {
+        PoolHeatmapBucket row = new PoolHeatmapBucket();
+        row.setExternalAccountId(externalId);
+        row.setBucket(bucket);
+        row.setRequests(requests);
+        row.setInputTokens(input);
+        row.setOutputTokens(200L);
+        row.setCacheReadTokens(read);
+        row.setCacheCreationTokens(creation);
+        row.setFirstTokenSamples(requests);
+        row.setAvgFirstTokenMs(1000.0);
+        row.setAvgDurationMs(2000.0);
+        row.setTotalActualCost(new BigDecimal("0.1"));
+        return row;
     }
 
     @Test

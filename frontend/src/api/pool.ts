@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { PoolAccount, PoolCacheRateMatrix, PoolGranularity, PoolIngestStatus, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
+import type { PoolAccount, PoolCacheRateMatrix, PoolGranularity, PoolHeatmap, PoolHeatmapMetrics, PoolIngestStatus, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
 
 interface PoolAccountDto {
   externalAccountId: number
@@ -181,6 +181,90 @@ interface PoolIngestStatusDto {
   lastRunAt?: string | null
   latestSampleAt?: string | null
   lagSeconds?: number | null
+}
+
+interface PoolHeatmapMetricsDto {
+  requests?: number | null
+  cacheHitRate?: number | null
+  avgFirstTokenMs?: number | null
+  tokensPerSecond?: number | null
+  rpm?: number | null
+  actualCost?: number | null
+}
+
+interface PoolHeatmapDto {
+  from?: string
+  to?: string
+  granularity?: string
+  buckets?: string[]
+  summary?: PoolHeatmapMetricsDto
+  rows?: Array<{
+    externalAccountId: number
+    name?: string | null
+    platform?: string | null
+    boundKeyName?: string | null
+    boundKeyMasked?: string | null
+    total?: PoolHeatmapMetricsDto
+    cells?: PoolHeatmapMetricsDto[]
+  }>
+}
+
+function mapHeatmapMetrics(dto: PoolHeatmapMetricsDto | undefined | null): PoolHeatmapMetrics {
+  return {
+    requests: num(dto?.requests),
+    cacheHitRate: nullableNum(dto?.cacheHitRate),
+    avgFirstTokenMs: nullableNum(dto?.avgFirstTokenMs),
+    tokensPerSecond: nullableNum(dto?.tokensPerSecond),
+    rpm: nullableNum(dto?.rpm),
+    actualCost: num(dto?.actualCost),
+  }
+}
+
+/**
+ * 号池色块矩阵趋势：行 = 平台 / 账号，列 = 等宽时间桶。
+ *
+ * @param range       90m / 6h / 12h / 1d / 7d / 30d
+ * @param granularity minute / hour / day，缺省由后端按 range 推断
+ * @param models      模型过滤
+ * @param accounts    号池账号 ID 过滤
+ */
+export async function getPoolHeatmap(
+  platformId: number,
+  params: { range: PoolRange; granularity?: PoolGranularity; models?: string[]; accounts?: number[] },
+): Promise<PoolHeatmap> {
+  const query = new URLSearchParams({ range: params.range })
+  if (params.granularity) query.set('granularity', params.granularity)
+  if (params.models?.length) query.set('models', params.models.join(','))
+  if (params.accounts?.length) query.set('accounts', params.accounts.join(','))
+  const dto = await apiRequest<PoolHeatmapDto>(
+    `/api/v1/upstream/instances/${platformId}/pool-accounts/heatmap?${query.toString()}`,
+  )
+  return {
+    from: dto?.from || new Date().toISOString(),
+    to: dto?.to || new Date().toISOString(),
+    granularity: (dto?.granularity as PoolGranularity) || 'hour',
+    buckets: dto?.buckets ?? [],
+    summary: mapHeatmapMetrics(dto?.summary),
+    rows: (dto?.rows ?? []).map(row => ({
+      externalAccountId: Number(row.externalAccountId),
+      name: row.name ?? null,
+      platform: row.platform ?? null,
+      boundKeyName: row.boundKeyName ?? null,
+      boundKeyMasked: row.boundKeyMasked ?? null,
+      total: mapHeatmapMetrics(row.total),
+      cells: (row.cells ?? []).map(mapHeatmapMetrics),
+    })),
+  }
+}
+
+/**
+ * 平台下出现过的模型名（用于色块矩阵的「模型」筛选）。
+ */
+export async function listPoolModelOptions(platformId: number, range: PoolRange = '30d'): Promise<string[]> {
+  const rows = await apiRequest<string[]>(
+    `/api/v1/upstream/instances/${platformId}/pool-accounts/model-options?range=${range}`,
+  )
+  return rows ?? []
 }
 
 /**

@@ -191,63 +191,141 @@
         />
       </el-card>
 
-      <el-card shadow="never" class="admin-card pool-table-card">
+            <el-card shadow="never" class="admin-card pool-table-card">
         <template #header>
-          <div class="pool-chart-header">
+          <div class="pool-heatmap-header">
             <div>
-              <h3>多时间窗缓存率对比</h3>
-              <p class="admin-form-hint">行 = 号池账号，列 = 时间窗；角标为请求数，低于 {{ matrixMinimumSample }} 条标注「样本不足」。分钟级窗口依赖「号池明细增量（直连库）」任务，未配置时只会长期为空。</p>
+              <h3>号池趋势（色块矩阵）</h3>
+              <p class="admin-form-hint">
+                行 = 平台 / 号池账号，列 = 一个统计区间（{{ heatGranularityLabel }}）；悬停看明细，点击行进入详情，灰色表示该区间没有流量。
+              </p>
             </div>
-            <el-select
-              v-model="selectedWindows"
-              multiple
-              collapse-tags
-              :max-collapse-tags="3"
-              size="small"
-              placeholder="选择时间窗"
-              style="width: 300px"
-              @change="loadMatrix"
-            >
-              <el-option
-                v-for="option in WINDOW_OPTIONS"
-                :key="option.key"
-                :label="option.label"
-                :value="option.key"
-                :disabled="!selectedWindows.includes(option.key) && selectedWindows.length >= MAX_WINDOWS"
-              />
-            </el-select>
+            <div class="pool-heatmap-controls">
+              <el-radio-group v-model="heatRange" size="small" @change="loadHeatmap">
+                <el-radio-button v-for="option in HEAT_RANGES" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
+              </el-radio-group>
+              <el-select
+                v-model="heatPlatforms"
+                multiple
+                collapse-tags
+                :max-collapse-tags="1"
+                clearable
+                size="small"
+                placeholder="平台：全部"
+                style="width: 170px"
+                @change="loadHeatmap"
+              >
+                <el-option v-for="name in platformOptions" :key="name" :label="name" :value="name" />
+              </el-select>
+              <el-select
+                v-model="heatModels"
+                multiple
+                collapse-tags
+                :max-collapse-tags="1"
+                clearable
+                size="small"
+                placeholder="模型：全部"
+                style="width: 180px"
+                @change="loadHeatmap"
+              >
+                <el-option v-for="name in modelOptions" :key="name" :label="name" :value="name" />
+              </el-select>
+              <el-select
+                v-model="heatAccounts"
+                multiple
+                collapse-tags
+                :max-collapse-tags="1"
+                clearable
+                filterable
+                size="small"
+                placeholder="账号：全部"
+                style="width: 190px"
+                @change="loadHeatmap"
+              >
+                <el-option
+                  v-for="account in accounts"
+                  :key="account.externalAccountId"
+                  :label="account.name || String(account.externalAccountId)"
+                  :value="account.externalAccountId"
+                />
+              </el-select>
+              <el-button link type="primary" size="small" @click="resetHeatmapFilters">重置</el-button>
+              <el-radio-group v-model="heatMetric" size="small">
+                <el-radio-button value="cacheRate">缓存率</el-radio-button>
+                <el-radio-button value="firstToken">首 Token</el-radio-button>
+                <el-radio-button value="tps">每秒 Token</el-radio-button>
+                <el-radio-button value="requests">请求数</el-radio-button>
+              </el-radio-group>
+            </div>
           </div>
         </template>
-        <el-table v-loading="matrixLoading" :data="filteredMatrixRows" size="small" border>
-          <el-table-column label="号池账号" min-width="220" fixed>
-            <template #default="{ row }">
-              <div class="pool-account-cell">
-                <strong>{{ row.name || ('账号 ' + row.externalAccountId) }}</strong>
-                <small>{{ row.platform || '-' }}<template v-if="row.boundKeyName"> · {{ row.boundKeyName }} {{ row.boundKeyMasked }}</template></small>
-                <small v-if="!row.boundKeyName" class="pool-muted">未绑定本地密钥</small>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column
-            v-for="window in matrixWindows"
-            :key="window.key"
-            :label="window.label"
-            width="126"
-            align="right"
-          >
-            <template #default="{ row }">
-              <div class="pool-matrix-cell" :title="matrixCellTip(cellOf(row, window.key))">
-                <strong :class="hitRateClass(cellOf(row, window.key)?.cacheHitRate ?? null)">
-                  {{ formatPercent(cellOf(row, window.key)?.cacheHitRate ?? null) }}
-                </strong>
-                <small :class="{ 'pool-matrix-thin': isThinSample(cellOf(row, window.key)) }">
-                  {{ cellOf(row, window.key)?.requests ?? 0 }} 条
-                </small>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!matrixLoading && !filteredMatrixRows.length" :description="matrixRows.length ? '没有符合筛选条件的账号' : '暂无数据'" :image-size="60" />
+
+        <div class="pool-metrics pool-heatmap-metrics">
+          <MetricCard label="缓存率" :value="formatPercent(heatSummary.cacheHitRate)" hint="缓存读取 / (输入 + 缓存读 + 缓存写)" :tone="hitRateTone(heatSummary.cacheHitRate)" />
+          <MetricCard label="首 Token 平均" :value="formatMs(heatSummary.avgFirstTokenMs)" hint="按有效样本加权" />
+          <MetricCard label="每秒 TOKEN" :value="formatTps(heatSummary.tokensPerSecond)" hint="输出 token ÷ 总耗时" />
+          <MetricCard label="RPM" :value="formatRpm(heatSummary.rpm)" hint="每分钟请求数" />
+          <MetricCard label="请求数" :value="formatNumber(heatSummary.requests)" hint="所选窗口内" />
+        </div>
+
+        <div v-loading="heatLoading" class="pool-heatmap">
+          <div class="pool-heatmap-fixed">
+            <div class="pool-heatmap-head">
+              <span class="pool-heatmap-name">平台 / 账号</span>
+              <span class="pool-heatmap-num">缓存率</span>
+              <span class="pool-heatmap-num">首 TOKEN</span>
+              <span class="pool-heatmap-num">每秒 TOKEN</span>
+              <span class="pool-heatmap-num">请求</span>
+            </div>
+            <div
+              v-for="row in heatRows"
+              :key="row.externalAccountId"
+              class="pool-heatmap-row pool-heatmap-row-clickable"
+              @click="openDetailById(row.externalAccountId)"
+            >
+              <span class="pool-heatmap-name">
+                <i class="pool-heatmap-dot" :style="{ background: heatDotColor(row.total) }" />
+                <span class="pool-heatmap-path">{{ row.platform || '-' }} / {{ row.name || ('账号 ' + row.externalAccountId) }}</span>
+              </span>
+              <span class="pool-heatmap-num" :class="hitRateClass(row.total.cacheHitRate)">{{ formatPercent(row.total.cacheHitRate) }}</span>
+              <span class="pool-heatmap-num">{{ formatMs(row.total.avgFirstTokenMs) }}</span>
+              <span class="pool-heatmap-num">{{ formatTps(row.total.tokensPerSecond) }}</span>
+              <span class="pool-heatmap-num">{{ formatNumber(row.total.requests) }}</span>
+            </div>
+          </div>
+
+          <div class="pool-heatmap-scroll">
+            <div class="pool-heatmap-head">
+              <span
+                v-for="(bucket, index) in heatBuckets"
+                :key="bucket"
+                class="pool-heatmap-tick"
+                :style="{ width: heatPitch + 'px' }"
+              >{{ heatAxisLabel(index) }}</span>
+            </div>
+            <div v-for="row in heatRows" :key="row.externalAccountId" class="pool-heatmap-row">
+              <span
+                v-for="(cell, index) in row.cells"
+                :key="index"
+                class="pool-heatmap-cell"
+                :style="heatCellStyle(cell)"
+                :title="heatCellTip(row, cell, index)"
+                @click="openDetailById(row.externalAccountId)"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="pool-heatmap-legend">
+          <span class="pool-heatmap-legend-label">差</span>
+          <span class="pool-heatmap-legend-bar" />
+          <span class="pool-heatmap-legend-label">好</span>
+          <span class="pool-heatmap-legend-item">
+            <i class="pool-heatmap-swatch" :style="{ background: heatNoDataColor }" />无流量 / 样本不足
+          </span>
+        </div>
+
+        <el-empty v-if="!heatLoading && !heatRows.length" description="所选窗口内暂无号池明细" :image-size="60" />
       </el-card>
     </template>
 
@@ -387,9 +465,9 @@ import { ElMessage } from 'element-plus'
 import type { EChartsCoreOption } from 'echarts/core'
 import EChart from '../components/EChart.vue'
 import MetricCard from '../components/MetricCard.vue'
-import { bindPoolAccount, getPoolIngestStatus, listPoolAccounts, listPoolCacheRates, listPoolModels, listPoolSeries, syncPoolPlatform } from '../api/pool'
+import { bindPoolAccount, getPoolHeatmap, getPoolIngestStatus, listPoolAccounts, listPoolModelOptions, listPoolModels, listPoolSeries, syncPoolPlatform } from '../api/pool'
 import { listApiKeyRecords } from '../api/accounts'
-import type { ApiKey, Platform, PoolAccount, PoolCacheRateCell, PoolCacheRateWindow, PoolGranularity, PoolIngestStatus, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
+import type { ApiKey, Platform, PoolAccount, PoolGranularity, PoolHeatmapMetrics, PoolHeatmapRow, PoolIngestStatus, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
 
 const props = defineProps<{ platforms: Platform[]; canWrite?: boolean }>()
 
@@ -410,42 +488,43 @@ const bindableKeys = ref<ApiKey[]>([])
 /** 直连库增量采集状态：分钟级窗口有没有数据，全看这里。 */
 const ingestStatus = ref<PoolIngestStatus | null>(null)
 
-/** 多时间窗对比：可选时间窗（与后端 preset 保持一致）。 */
-const WINDOW_OPTIONS: Array<{ key: string; label: string }> = [
-  { key: '1m', label: '近 1 分钟' },
-  { key: '5m', label: '近 5 分钟' },
-  { key: '15m', label: '近 15 分钟' },
-  { key: '30m', label: '近 30 分钟' },
-  { key: '1h', label: '近 1 小时' },
-  { key: '6h', label: '近 6 小时' },
-  { key: '12h', label: '近 12 小时' },
-  { key: '24h', label: '近 24 小时' },
-  { key: '7d', label: '近 7 天' },
-  { key: '30d', label: '近 30 天' },
-  { key: '90d', label: '近 90 天' },
+/** 色块矩阵的时间维度（与后端 preset 一致）。 */
+const HEAT_RANGES: Array<{ value: PoolRange; label: string }> = [
+  { value: '90m', label: '90 分钟' },
+  { value: '24h', label: '24 小时' },
+  { value: '7d', label: '7 天' },
+  { value: '30d', label: '30 天' },
 ]
-/** 与后端 MAX_WINDOWS 保持一致。 */
-const MAX_WINDOWS = 6
 
-/** 多时间窗对比的一行（cells 转成 map，模板里取值更直接）。 */
-interface MatrixRowView {
-  externalAccountId: number
-  name: string | null
-  platform: string | null
-  boundKeyName: string | null
-  boundKeyMasked: string | null
-  cells: Record<string, PoolCacheRateCell>
-}
+/** 色块矩阵可选的着色指标。 */
+type HeatMetric = 'cacheRate' | 'firstToken' | 'tps' | 'requests'
+
+/** 无流量 / 样本不足的格子颜色。 */
+const heatNoDataColor = '#e5e9ec'
 
 /** 账号平台筛选（openai / anthropic / grok ...），空数组表示全部。 */
 const platformFilter = ref<string[]>([])
 
-const selectedWindows = ref<string[]>(['5m', '15m', '1h', '24h', '7d'])
-const matrixWindows = ref<PoolCacheRateWindow[]>([])
-const matrixRows = ref<MatrixRowView[]>([])
-const matrixLoading = ref(false)
-/** 后端给出的「样本不足」阈值，避免前后端各写一份魔法数字。 */
-const matrixMinimumSample = ref(20)
+/** 色块矩阵的筛选与状态（与上方账号列表的筛选相互独立）。 */
+const heatRange = ref<PoolRange>('24h')
+const heatPlatforms = ref<string[]>([])
+const heatModels = ref<string[]>([])
+const heatAccounts = ref<number[]>([])
+const heatMetric = ref<HeatMetric>('cacheRate')
+const heatLoading = ref(false)
+const heatBuckets = ref<string[]>([])
+const heatRows = ref<PoolHeatmapRow[]>([])
+const heatGranularity = ref<PoolGranularity>('hour')
+const heatSummary = ref<PoolHeatmapMetrics>({
+  requests: 0,
+  cacheHitRate: null,
+  avgFirstTokenMs: null,
+  tokensPerSecond: null,
+  rpm: null,
+  actualCost: 0,
+})
+/** 模型筛选下拉的可选项（平台级去重）。 */
+const modelOptions = ref<string[]>([])
 
 /** 详情抽屉自己的时间窗与粒度：分钟级排查和长窗口趋势互不干扰。 */
 const detailRange = ref<PoolRange>('6h')
@@ -513,10 +592,20 @@ const filteredAccounts = computed(() => platformFilter.value.length
   ? accounts.value.filter(account => account.platform != null && platformFilter.value.includes(account.platform))
   : accounts.value)
 
-/** 多时间窗矩阵（按平台筛选后，与账号列表保持一致）。 */
-const filteredMatrixRows = computed(() => platformFilter.value.length
-  ? matrixRows.value.filter(row => row.platform != null && platformFilter.value.includes(row.platform))
-  : matrixRows.value)
+/** 色块矩阵的格子宽度：列少时铺开，列多时压成细色块并横向滚动。 */
+const heatPitch = computed(() => (heatBuckets.value.length <= 48 ? 30 : 14))
+
+/** 当前色块矩阵的时间粒度文案。 */
+const heatGranularityLabel = computed(() => {
+  switch (heatGranularity.value) {
+    case 'minute':
+      return '分钟'
+    case 'day':
+      return '天'
+    default:
+      return '小时'
+  }
+})
 
 const detailTitle = computed(() => activeAccount.value
   ? `${activeAccount.value.name || activeAccount.value.externalAccountId} · 号池详情`
@@ -633,9 +722,9 @@ const volumeOption = computed<EChartsCoreOption>(() => ({
 async function reload() {
   if (!selectedPlatformId.value) {
     accounts.value = []
-    matrixWindows.value = []
-    matrixRows.value = []
     ingestStatus.value = null
+    heatRows.value = []
+    heatBuckets.value = []
     return
   }
   loading.value = true
@@ -647,50 +736,59 @@ async function reload() {
   } finally {
     loading.value = false
   }
-  void loadMatrix()
+  void loadHeatmap()
   void loadIngestStatus()
+  void loadModelOptions()
 }
 
 /**
- * 拉取多时间窗缓存率对比矩阵。
+ * 拉取色块矩阵趋势。
  *
  * 数据来源是本地已落库的逐请求明细：配置了直连库时由「号池明细增量（直连库）」任务每 30 秒写入一批，
- * 未配置时退回「号池明细采集」任务的 10 分钟一轮，分钟级窗口会因此长期为空。
+ * 未配置时退回「号池明细采集」任务的 10 分钟一轮，分钟级区间会因此长期为空。
  */
-async function loadMatrix() {
+async function loadHeatmap() {
   if (!selectedPlatformId.value) {
-    matrixWindows.value = []
-    matrixRows.value = []
+    heatBuckets.value = []
+    heatRows.value = []
     return
   }
-  if (!selectedWindows.value.length) {
-    selectedWindows.value = ['24h']
-  }
-  matrixLoading.value = true
+  heatLoading.value = true
   try {
-    const matrix = await listPoolCacheRates(selectedPlatformId.value, selectedWindows.value)
-    matrixWindows.value = matrix.windows
-    matrixMinimumSample.value = matrix.minimumSample || 20
-    matrixRows.value = matrix.accounts.map(row => {
-      const cells: Record<string, PoolCacheRateCell> = {}
-      for (const cell of row.cells) cells[cell.key] = cell
-      return {
-        externalAccountId: row.externalAccountId,
-        name: row.name,
-        platform: row.platform,
-        boundKeyName: row.boundKeyName,
-        boundKeyMasked: row.boundKeyMasked,
-        cells,
-      }
+    const heatmap = await getPoolHeatmap(selectedPlatformId.value, {
+      range: heatRange.value,
+      models: heatModels.value,
+      accounts: heatAccounts.value,
     })
+    heatBuckets.value = heatmap.buckets
+    heatRows.value = heatmap.rows
+    heatSummary.value = heatmap.summary
+    heatGranularity.value = heatmap.granularity
   } catch (error) {
-    matrixWindows.value = []
-    matrixRows.value = []
-    ElMessage.error(error instanceof Error ? error.message : '缓存率对比加载失败')
+    heatBuckets.value = []
+    heatRows.value = []
+    ElMessage.error(error instanceof Error ? error.message : '号池趋势加载失败')
   } finally {
-    matrixLoading.value = false
+    heatLoading.value = false
   }
 }
+
+/** 拉取模型筛选项：失败静默，下拉为空不影响主流程。 */
+async function loadModelOptions() {
+  if (!selectedPlatformId.value) {
+    modelOptions.value = []
+    return
+  }
+  try {
+    modelOptions.value = await listPoolModelOptions(selectedPlatformId.value)
+  } catch {
+    modelOptions.value = []
+  }
+}
+
+/**
+ * 拉取直连增量状态：失败不打扰用户，只是把标签置为「未知」。
+ */
 
 /** 拉取直连增量状态：失败不打扰用户，只是把标签置为「未知」。 */
 async function loadIngestStatus() {
@@ -705,29 +803,117 @@ async function loadIngestStatus() {
   }
 }
 
-/** 取某行某时间窗的单元格（el-table 插槽行类型为 DefaultRow）。 */
-function cellOf(row: unknown, key: string): PoolCacheRateCell | null {
-  const target = row as MatrixRowView
-  return target?.cells?.[key] ?? null
+/** 请求数着色需要一个基准：取所有格子的最大值。 */
+const heatMaxRequests = computed(() => {
+  let max = 0
+  for (const row of heatRows.value) {
+    for (const cell of row.cells) {
+      if (cell.requests > max) max = cell.requests
+    }
+  }
+  return max
+})
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(1, value))
 }
 
-/** 样本数低于后端阈值才标注，避免前端硬编码的阈值和后端口径漂移。 */
-function isThinSample(cell: PoolCacheRateCell | null | undefined): boolean {
-  if (!cell || cell.requests <= 0) return false
-  return cell.requests < matrixMinimumSample.value
+/** 色块颜色：0 最差（红）→ 1 最好（绿）；无流量 / 无样本一律灰色，不用 0 冒充。 */
+function heatColor(cell: PoolHeatmapMetrics): string {
+  if (!cell || cell.requests === 0) return heatNoDataColor
+  let ratio: number
+  switch (heatMetric.value) {
+    case 'firstToken': {
+      if (cell.avgFirstTokenMs == null) return heatNoDataColor
+      // 2s 以内算最好，12s 及以上算最差
+      ratio = 1 - clamp01((cell.avgFirstTokenMs - 2000) / 10000)
+      break
+    }
+    case 'tps': {
+      if (cell.tokensPerSecond == null) return heatNoDataColor
+      ratio = clamp01(cell.tokensPerSecond / 200)
+      break
+    }
+    case 'requests': {
+      ratio = clamp01(cell.requests / Math.max(1, heatMaxRequests.value))
+      break
+    }
+    default: {
+      if (cell.cacheHitRate == null) return heatNoDataColor
+      ratio = clamp01(cell.cacheHitRate)
+      break
+    }
+  }
+  return `hsl(${Math.round(ratio * 120)}, 62%, 52%)`
 }
 
-/** 矩阵单元格悬停说明：口径（分子/分母）+ 样本量，避免只看百分比产生误读。 */
-function matrixCellTip(cell: PoolCacheRateCell | null): string {
-  if (!cell || cell.requests === 0) return '该时间窗内没有请求'
-  const lines = [
-    `${cell.requests} 条请求`,
-    `缓存读取 ${formatNumber(cell.cacheRateNumerator)} / 输入+缓存 ${formatNumber(cell.cacheRateDenominator)}`,
-  ]
-  if (isThinSample(cell)) lines.push(`样本不足 ${matrixMinimumSample.value} 条，仅供参考`)
-  return lines.join('\n')
+function heatCellStyle(cell: PoolHeatmapMetrics): Record<string, string> {
+  return {
+    width: `${heatPitch.value - 4}px`,
+    background: heatColor(cell),
+  }
 }
 
+/** 整行健康度圆点：按缓存率着色，无样本为灰。 */
+function heatDotColor(total: PoolHeatmapMetrics): string {
+  if (!total || total.requests === 0 || total.cacheHitRate == null) return heatNoDataColor
+  return `hsl(${Math.round(clamp01(total.cacheHitRate) * 120)}, 62%, 46%)`
+}
+
+function formatBucketLabel(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  if (heatGranularity.value === 'day') {
+    return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+  }
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/** 横轴标签：桶太多时只标注均匀分布的若干个，避免挤成一团。 */
+function heatAxisLabel(index: number): string {
+  const total = heatBuckets.value.length
+  if (!total) return ''
+  const step = Math.max(1, Math.ceil(total / 8))
+  if (index % step !== 0 && index !== total - 1) return ''
+  return formatBucketLabel(heatBuckets.value[index])
+}
+
+/** 色块悬停明细：时间 + 平台/账号 + 该区间的全部指标。 */
+function heatCellTip(row: PoolHeatmapRow, cell: PoolHeatmapMetrics, index: number): string {
+  const time = formatBucketLabel(heatBuckets.value[index] ?? '')
+  const name = `${row.platform || '-'} / ${row.name || ('账号 ' + row.externalAccountId)}`
+  if (!cell || cell.requests === 0) {
+    return `${time}\n${name}\n无流量`
+  }
+  return [
+    time,
+    name,
+    `${cell.requests} 条请求 · RPM ${formatRpm(cell.rpm)}`,
+    `缓存率 ${formatPercent(cell.cacheHitRate)}`,
+    `首 Token ${formatMs(cell.avgFirstTokenMs)}`,
+    `每秒 TOKEN ${formatTps(cell.tokensPerSecond)}`,
+    `实际成本 ${formatCost(cell.actualCost)}`,
+  ].join('\n')
+}
+
+/** 从矩阵行打开详情抽屉：复用账号列表里的完整账号对象。 */
+function openDetailById(externalAccountId: number) {
+  const account = accounts.value.find(item => item.externalAccountId === externalAccountId)
+  if (account) void openDetail(account)
+}
+
+function resetHeatmapFilters() {
+  heatPlatforms.value = []
+  heatModels.value = []
+  heatAccounts.value = []
+  void loadHeatmap()
+}
 /** 切换详情时间窗：长窗口下分钟粒度会自动降级为小时（与后端一致）。 */
 function onDetailRangeChange() {
   if (!minuteAvailable.value && granularity.value === 'minute') {
@@ -862,6 +1048,20 @@ function formatMs(value: number | null | undefined): string {
   if (value == null) return '—'
   const ms = Math.round(value)
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+}
+
+/** 每秒输出 token：小值保留一位小数，大值用 K 缩写。 */
+function formatTps(value: number | null | undefined): string {
+  if (value == null) return '—'
+  const v = Number(value)
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}K`
+  return v.toFixed(1)
+}
+
+/** 每分钟请求数。 */
+function formatRpm(value: number | null | undefined): string {
+  if (value == null) return '—'
+  return Number(value).toFixed(2)
 }
 
 function formatNumber(value: number | null | undefined): string {

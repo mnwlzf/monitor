@@ -1,6 +1,7 @@
 package com.monitor.platform.pool.repository.mapper;
 
 import com.monitor.platform.pool.PoolAccountMetrics;
+import com.monitor.platform.pool.PoolHeatmapBucket;
 import com.monitor.platform.pool.PoolModelMetrics;
 import com.monitor.platform.pool.PoolSampleEntity;
 import com.monitor.platform.pool.PoolSeriesPoint;
@@ -42,6 +43,19 @@ public interface PoolSampleMapper {
                                        @Param("from") OffsetDateTime from,
                                        @Param("to") OffsetDateTime to,
                                        @Param("granularity") String granularity);
+
+    /** 按「账号 × 时间桶」聚合热力图数据，可按模型 / 账号过滤。 */
+    List<PoolHeatmapBucket> selectHeatmapBuckets(@Param("platformId") Integer platformId,
+                                                 @Param("from") OffsetDateTime from,
+                                                 @Param("to") OffsetDateTime to,
+                                                 @Param("granularity") String granularity,
+                                                 @Param("models") Collection<String> models,
+                                                 @Param("externalAccountIds") Collection<Long> externalAccountIds);
+
+    /** 平台下出现过的模型名（用于筛选下拉）。 */
+    List<String> selectModelOptions(@Param("platformId") Integer platformId,
+                                   @Param("from") OffsetDateTime from,
+                                   @Param("to") OffsetDateTime to);
 
     /** 按外部账号 ID 批量删除逐请求明细（清理已不再监控的账号时同步删除）。 */
     int deleteByExternalIds(@Param("platformId") Integer platformId,

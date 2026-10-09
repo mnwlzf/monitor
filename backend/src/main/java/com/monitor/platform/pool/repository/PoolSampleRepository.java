@@ -1,6 +1,7 @@
 package com.monitor.platform.pool.repository;
 
 import com.monitor.platform.pool.PoolAccountMetrics;
+import com.monitor.platform.pool.PoolHeatmapBucket;
 import com.monitor.platform.pool.PoolModelMetrics;
 import com.monitor.platform.pool.PoolSampleEntity;
 import com.monitor.platform.pool.PoolSeriesPoint;
@@ -69,6 +70,18 @@ public class PoolSampleRepository {
     /** 平台下已入库明细的最新请求时间（用于展示采集滞后）。 */
     public OffsetDateTime findLatestCreatedAt(Integer platformId) {
         return poolSampleMapper.selectLatestCreatedAt(platformId);
+    }
+
+    /** 按「账号 × 时间桶」聚合热力图数据，可按模型 / 账号过滤。 */
+    public List<PoolHeatmapBucket> heatmapBuckets(Integer platformId, OffsetDateTime from, OffsetDateTime to,
+                                                  String granularity, Collection<String> models,
+                                                  Collection<Long> externalAccountIds) {
+        return poolSampleMapper.selectHeatmapBuckets(platformId, from, to, granularity, models, externalAccountIds);
+    }
+
+    /** 平台下出现过的模型名（用于筛选下拉）。 */
+    public List<String> modelOptions(Integer platformId, OffsetDateTime from, OffsetDateTime to) {
+        return poolSampleMapper.selectModelOptions(platformId, from, to);
     }
 
     /** 按时间窗聚合单个号池账号的指标。 */

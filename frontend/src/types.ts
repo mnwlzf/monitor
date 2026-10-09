@@ -266,7 +266,7 @@ export interface PoolAccount {
 }
 
 /** 号池监控可选时间维度：短窗口（1h/6h/12h）用于分钟级排查，长窗口看趋势。 */
-export type PoolRange = '1h' | '6h' | '12h' | '1d' | '7d' | '30d' | '90d'
+export type PoolRange = '90m' | '1h' | '6h' | '12h' | '1d' | '24h' | '7d' | '30d' | '90d'
 
 /** 号池时序聚合粒度。minute 只在 ≤24 小时窗口内可用（依赖直连库秒级增量）。 */
 export type PoolGranularity = 'minute' | 'hour' | 'day'
@@ -347,6 +347,37 @@ export interface PoolIngestStatus {
   lastRunAt: string | null
   latestSampleAt: string | null
   lagSeconds: number | null
+}
+
+/** 号池色块矩阵的一格（或整行汇总）指标。 */
+export interface PoolHeatmapMetrics {
+  requests: number
+  cacheHitRate: number | null
+  avgFirstTokenMs: number | null
+  tokensPerSecond: number | null
+  rpm: number | null
+  actualCost: number
+}
+
+/** 色块矩阵的一行（一个号池账号）。 */
+export interface PoolHeatmapRow {
+  externalAccountId: number
+  name: string | null
+  platform: string | null
+  boundKeyName: string | null
+  boundKeyMasked: string | null
+  total: PoolHeatmapMetrics
+  cells: PoolHeatmapMetrics[]
+}
+
+/** 号池色块矩阵趋势：行 = 平台 / 账号，列 = 等宽时间桶。 */
+export interface PoolHeatmap {
+  from: string
+  to: string
+  granularity: PoolGranularity
+  buckets: string[]
+  summary: PoolHeatmapMetrics
+  rows: PoolHeatmapRow[]
 }
 
 /** 号池按模型聚合指标。 */
