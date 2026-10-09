@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { PoolAccount, PoolGranularity, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
+import type { PoolAccount, PoolCacheRateMatrix, PoolGranularity, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
 
 interface PoolAccountDto {
   externalAccountId: number
@@ -191,4 +191,60 @@ export async function syncPoolPlatform(platformId: number): Promise<void> {
     `/api/v1/upstream/instances/${platformId}/pool-accounts/sync`,
     { method: 'POST' },
   )
+}
+interface PoolCacheRateMatrixDto {
+  windows?: Array<{ key?: string; label?: string; from?: string }>
+  accounts?: Array<{
+    externalAccountId: number
+    name?: string | null
+    boundKeyName?: string | null
+    boundKeyMasked?: string | null
+    cells?: Array<{
+      key?: string
+      requests?: number | null
+      cacheHitRate?: number | null
+      inputTokens?: number | null
+      cacheReadTokens?: number | null
+      cacheCreationTokens?: number | null
+      firstTokenSamples?: number | null
+      avgFirstTokenMs?: number | null
+      avgDurationMs?: number | null
+    }>
+  }>
+}
+
+/**
+ * 多时间窗缓存率对比矩阵：行=号池账号，列=时间窗。
+ *
+ * @param windows 时间窗 key 列表，如 ['1h','24h','7d']，最多 6 个
+ */
+export async function listPoolCacheRates(platformId: number, windows: string[]): Promise<PoolCacheRateMatrix> {
+  const query = windows.length ? `?windows=${encodeURIComponent(windows.join(','))}` : ''
+  const dto = await apiRequest<PoolCacheRateMatrixDto>(
+    `/api/v1/upstream/instances/${platformId}/pool-accounts/cache-rates${query}`,
+  )
+  return {
+    windows: (dto?.windows ?? []).map(item => ({
+      key: item.key || '',
+      label: item.label || item.key || '',
+      from: item.from || '',
+    })),
+    accounts: (dto?.accounts ?? []).map(row => ({
+      externalAccountId: Number(row.externalAccountId),
+      name: row.name ?? null,
+      boundKeyName: row.boundKeyName ?? null,
+      boundKeyMasked: row.boundKeyMasked ?? null,
+      cells: (row.cells ?? []).map(cell => ({
+        key: cell.key || '',
+        requests: num(cell.requests),
+        cacheHitRate: nullableNum(cell.cacheHitRate),
+        inputTokens: cell.inputTokens == null ? null : num(cell.inputTokens),
+        cacheReadTokens: cell.cacheReadTokens == null ? null : num(cell.cacheReadTokens),
+        cacheCreationTokens: cell.cacheCreationTokens == null ? null : num(cell.cacheCreationTokens),
+        firstTokenSamples: cell.firstTokenSamples == null ? null : num(cell.firstTokenSamples),
+        avgFirstTokenMs: nullableNum(cell.avgFirstTokenMs),
+        avgDurationMs: nullableNum(cell.avgDurationMs),
+      })),
+    })),
+  }
 }

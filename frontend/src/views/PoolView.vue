@@ -166,6 +166,65 @@
         </el-table>
         <el-empty v-if="!loading && !accounts.length" description="暂无号池账号，请先执行一次「立即采集」" :image-size="80" />
       </el-card>
+
+      <el-card shadow="never" class="admin-card pool-table-card">
+        <template #header>
+          <div class="pool-chart-header">
+            <div>
+              <h3>多时间窗缓存率对比</h3>
+              <p class="admin-form-hint">行 = 号池账号，列 = 时间窗；角标为请求数，样本过少时仅供参考。</p>
+            </div>
+            <el-select
+              v-model="selectedWindows"
+              multiple
+              collapse-tags
+              :max-collapse-tags="3"
+              size="small"
+              placeholder="选择时间窗"
+              style="width: 300px"
+              @change="loadMatrix"
+            >
+              <el-option
+                v-for="option in WINDOW_OPTIONS"
+                :key="option.key"
+                :label="option.label"
+                :value="option.key"
+                :disabled="!selectedWindows.includes(option.key) && selectedWindows.length >= MAX_WINDOWS"
+              />
+            </el-select>
+          </div>
+        </template>
+        <el-table v-loading="matrixLoading" :data="matrixRows" size="small" border>
+          <el-table-column label="号池账号" min-width="220" fixed>
+            <template #default="{ row }">
+              <div class="pool-account-cell">
+                <strong>{{ row.name || ('账号 ' + row.externalAccountId) }}</strong>
+                <small v-if="row.boundKeyName">{{ row.boundKeyName }} · {{ row.boundKeyMasked }}</small>
+                <small v-else class="pool-muted">未绑定本地密钥</small>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column
+            v-for="window in matrixWindows"
+            :key="window.key"
+            :label="window.label"
+            width="126"
+            align="right"
+          >
+            <template #default="{ row }">
+              <div class="pool-matrix-cell">
+                <strong :class="hitRateClass(cellOf(row, window.key)?.cacheHitRate ?? null)">
+                  {{ formatPercent(cellOf(row, window.key)?.cacheHitRate ?? null) }}
+                </strong>
+                <small :class="{ 'pool-matrix-thin': (cellOf(row, window.key)?.requests ?? 0) < 20 }">
+                  {{ cellOf(row, window.key)?.requests ?? 0 }} 条
+                </small>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!matrixLoading && !matrixRows.length" description="暂无数据" :image-size="60" />
+      </el-card>
     </template>
 
     <!-- 号池账号详情抽屉 -->
@@ -298,9 +357,9 @@ import { ElMessage } from 'element-plus'
 import type { EChartsCoreOption } from 'echarts/core'
 import EChart from '../components/EChart.vue'
 import MetricCard from '../components/MetricCard.vue'
-import { bindPoolAccount, listPoolAccounts, listPoolModels, listPoolSeries, syncPoolPlatform } from '../api/pool'
+import { bindPoolAccount, listPoolAccounts, listPoolCacheRates, listPoolModels, listPoolSeries, syncPoolPlatform } from '../api/pool'
 import { listApiKeyRecords } from '../api/accounts'
-import type { ApiKey, Platform, PoolAccount, PoolGranularity, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
+import type { ApiKey, Platform, PoolAccount, PoolCacheRateCell, PoolCacheRateWindow, PoolGranularity, PoolModelMetrics, PoolRange, PoolSeriesPoint } from '../types'
 
 const props = defineProps<{ platforms: Platform[]; canWrite?: boolean }>()
 
@@ -318,6 +377,33 @@ const accounts = ref<PoolAccount[]>([])
 const series = ref<PoolSeriesPoint[]>([])
 const models = ref<PoolModelMetrics[]>([])
 const bindableKeys = ref<ApiKey[]>([])
+
+/** 多时间窗对比：可选时间窗（与后端 preset 保持一致）。 */
+const WINDOW_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: '1h', label: '近 1 小时' },
+  { key: '6h', label: '近 6 小时' },
+  { key: '12h', label: '近 12 小时' },
+  { key: '24h', label: '近 24 小时' },
+  { key: '7d', label: '近 7 天' },
+  { key: '30d', label: '近 30 天' },
+  { key: '90d', label: '近 90 天' },
+]
+/** 与后端 MAX_WINDOWS 保持一致。 */
+const MAX_WINDOWS = 6
+
+/** 多时间窗对比的一行（cells 转成 map，模板里取值更直接）。 */
+interface MatrixRowView {
+  externalAccountId: number
+  name: string | null
+  boundKeyName: string | null
+  boundKeyMasked: string | null
+  cells: Record<string, PoolCacheRateCell>
+}
+
+const selectedWindows = ref<string[]>(['1h', '6h', '24h', '7d', '30d'])
+const matrixWindows = ref<PoolCacheRateWindow[]>([])
+const matrixRows = ref<MatrixRowView[]>([])
+const matrixLoading = ref(false)
 
 const loading = ref(false)
 const syncing = ref(false)
@@ -418,6 +504,8 @@ const volumeOption = computed<EChartsCoreOption>(() => ({
 async function reload() {
   if (!selectedPlatformId.value) {
     accounts.value = []
+    matrixWindows.value = []
+    matrixRows.value = []
     return
   }
   loading.value = true
@@ -429,6 +517,52 @@ async function reload() {
   } finally {
     loading.value = false
   }
+  void loadMatrix()
+}
+
+/**
+ * 拉取多时间窗缓存率对比矩阵。
+ *
+ * 数据来源仍是本地已落库的逐请求明细，所以刷新节奏取决于「号池明细采集」任务（每 10 分钟一轮），
+ * 这里只是把多个时间窗一次算出来做横向对比。
+ */
+async function loadMatrix() {
+  if (!selectedPlatformId.value) {
+    matrixWindows.value = []
+    matrixRows.value = []
+    return
+  }
+  if (!selectedWindows.value.length) {
+    selectedWindows.value = ['24h']
+  }
+  matrixLoading.value = true
+  try {
+    const matrix = await listPoolCacheRates(selectedPlatformId.value, selectedWindows.value)
+    matrixWindows.value = matrix.windows
+    matrixRows.value = matrix.accounts.map(row => {
+      const cells: Record<string, PoolCacheRateCell> = {}
+      for (const cell of row.cells) cells[cell.key] = cell
+      return {
+        externalAccountId: row.externalAccountId,
+        name: row.name,
+        boundKeyName: row.boundKeyName,
+        boundKeyMasked: row.boundKeyMasked,
+        cells,
+      }
+    })
+  } catch (error) {
+    matrixWindows.value = []
+    matrixRows.value = []
+    ElMessage.error(error instanceof Error ? error.message : '缓存率对比加载失败')
+  } finally {
+    matrixLoading.value = false
+  }
+}
+
+/** 取某行某时间窗的单元格（el-table 插槽行类型为 DefaultRow）。 */
+function cellOf(row: unknown, key: string): PoolCacheRateCell | null {
+  const target = row as MatrixRowView
+  return target?.cells?.[key] ?? null
 }
 
 async function triggerSync() {

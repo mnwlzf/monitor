@@ -1067,3 +1067,9 @@ body {
 }
 .pool-chart-card { margin-bottom: 0; }
 .pool-chart-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* 号池多时间窗缓存率对比 */
+.pool-matrix-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.pool-matrix-cell strong { font-size: 13px; }
+.pool-matrix-cell small { color: #9aa8a4; font-size: 10px; }
+.pool-matrix-cell small.pool-matrix-thin { color: #d99a2b; }

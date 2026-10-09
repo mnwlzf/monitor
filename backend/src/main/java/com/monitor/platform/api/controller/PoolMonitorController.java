@@ -2,6 +2,7 @@ package com.monitor.platform.api.controller;
 
 import com.monitor.platform.api.dto.BindPoolAccountRequest;
 import com.monitor.platform.api.dto.PoolAccountResponse;
+import com.monitor.platform.api.dto.PoolCacheRateMatrixResponse;
 import com.monitor.platform.api.dto.PoolModelMetricsResponse;
 import com.monitor.platform.api.dto.PoolSeriesPointResponse;
 import com.monitor.platform.common.response.ApiResponse;
@@ -51,6 +52,19 @@ public class PoolMonitorController {
             @PathVariable Integer instanceId,
             @RequestParam(defaultValue = "7d") String range) {
         return ApiResponse.of(poolQueryService.listAccounts(instanceId, range), null);
+    }
+
+    /**
+     * 多时间窗缓存率对比：行=号池账号，列=时间窗。
+     *
+     * @param instanceId 平台 ID
+     * @param windows    逗号分隔的时间窗，支持 1h / 6h / 12h / 24h / 7d / 30d / 90d，最多 6 列
+     */
+    @GetMapping("/cache-rates")
+    public ApiResponse<PoolCacheRateMatrixResponse> cacheRates(
+            @PathVariable Integer instanceId,
+            @RequestParam(required = false) String windows) {
+        return ApiResponse.of(poolQueryService.cacheRateMatrix(instanceId, windows), null);
     }
 
     /**

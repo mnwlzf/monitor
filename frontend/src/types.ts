@@ -287,6 +287,49 @@ export interface PoolSeriesPoint {
   cacheHitRate: number | null
 }
 
+/**
+ * 号池「多时间窗缓存率对比」的一列（一个时间窗）。
+ */
+export interface PoolCacheRateWindow {
+  key: string
+  label: string
+  from: string
+}
+
+/**
+ * 多时间窗对比的单元格：某账号在某时间窗内的缓存表现。
+ */
+export interface PoolCacheRateCell {
+  key: string
+  requests: number
+  cacheHitRate: number | null
+  inputTokens: number | null
+  cacheReadTokens: number | null
+  cacheCreationTokens: number | null
+  firstTokenSamples: number | null
+  avgFirstTokenMs: number | null
+  avgDurationMs: number | null
+}
+
+/**
+ * 多时间窗对比的一行（一个号池账号）。
+ */
+export interface PoolCacheRateRow {
+  externalAccountId: number
+  name: string | null
+  boundKeyName: string | null
+  boundKeyMasked: string | null
+  cells: PoolCacheRateCell[]
+}
+
+/**
+ * 多时间窗缓存率对比矩阵。
+ */
+export interface PoolCacheRateMatrix {
+  windows: PoolCacheRateWindow[]
+  accounts: PoolCacheRateRow[]
+}
+
 /** 号池按模型聚合指标。 */
 export interface PoolModelMetrics {
   model: string
