@@ -283,6 +283,30 @@ class PoolQueryServiceTest {
     }
 
     @Test
+    void shouldFilterHeatmapByAccountPlatform() {
+        PoolAccountEntity openaiAccount = account(1L, "openai号", null);
+        openaiAccount.setPlatform("openai");
+        PoolAccountEntity anthropicAccount = account(2L, "anthropic号", null);
+        anthropicAccount.setPlatform("anthropic");
+        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(openaiAccount, anthropicAccount));
+
+        OffsetDateTime bucket = OffsetDateTime.now().minusMinutes(5).truncatedTo(ChronoUnit.HOURS);
+        when(poolSampleRepository.heatmapBuckets(ArgumentMatchers.eq(1), ArgumentMatchers.any(), ArgumentMatchers.any(),
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(List.of(
+                        heatmapBucket(1L, bucket, 10L, 100L, 300L, 0L),
+                        heatmapBucket(2L, bucket, 20L, 100L, 100L, 0L)));
+
+        PoolHeatmapResponse heatmap = service.heatmap(1, "24h", null, List.of(), List.of(), List.of("openai"));
+
+        assertEquals(1, heatmap.rows().size());
+        assertEquals(1L, heatmap.rows().get(0).externalAccountId());
+        assertEquals("openai", heatmap.rows().get(0).platform());
+        // 汇总必须只统计「通过平台筛选」的账号，否则又会出现行被过滤、卡片没变的情况
+        assertEquals(10L, heatmap.summary().requests());
+    }
+
+    @Test
     void shouldRejectUnknownPoolAccount() {
         when(poolAccountRepository.findByPlatformAndExternalId(1, 999L)).thenReturn(Optional.empty());
 

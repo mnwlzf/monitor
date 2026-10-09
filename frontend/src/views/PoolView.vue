@@ -63,7 +63,7 @@
       <el-tab-pane label="账号列表" name="accounts">
 
         <div class="pool-metrics">
-          <MetricCard label="号池账号" :value="String(accounts.length)" hint="当前平台下的号池账号数" />
+          <MetricCard label="号池账号" :value="String(filteredAccounts.length)" :hint="platformFilter.length ? `筛选后 / 共 ${accounts.length} 个` : `当前平台下的号池账号数`" />
           <MetricCard
             label="平均缓存命中率"
             :value="formatPercent(averageHitRate)"
@@ -607,33 +607,34 @@ const detailTitle = computed(() => activeAccount.value
   : '号池详情')
 
 // ---- 汇总指标 ----
-const totalRequests = computed(() => accounts.value.reduce((sum, item) => sum + item.requests, 0))
-const totalActualCost = computed(() => accounts.value.reduce((sum, item) => sum + item.totalActualCost, 0))
-const totalFirstTokenSamples = computed(() => accounts.value.reduce((sum, item) => sum + item.firstTokenSamples, 0))
+// 必须跟着「账号平台」筛选走：之前用的是未筛选的 accounts，导致筛完表变了、上面的卡片纹丝不动。
+const totalRequests = computed(() => filteredAccounts.value.reduce((sum, item) => sum + item.requests, 0))
+const totalActualCost = computed(() => filteredAccounts.value.reduce((sum, item) => sum + item.totalActualCost, 0))
+const totalFirstTokenSamples = computed(() => filteredAccounts.value.reduce((sum, item) => sum + item.firstTokenSamples, 0))
 
 const averageFirstToken = computed(() => {
-  const samples = accounts.value.filter(item => item.avgFirstTokenMs != null && item.firstTokenSamples > 0)
+  const samples = filteredAccounts.value.filter(item => item.avgFirstTokenMs != null && item.firstTokenSamples > 0)
   const sampleCount = samples.reduce((sum, item) => sum + item.firstTokenSamples, 0)
   if (!sampleCount) return null
   return samples.reduce((sum, item) => sum + (item.avgFirstTokenMs as number) * item.firstTokenSamples, 0) / sampleCount
 })
 
 const averageDuration = computed(() => {
-  const rows = accounts.value.filter(item => item.avgDurationMs != null && item.requests > 0)
+  const rows = filteredAccounts.value.filter(item => item.avgDurationMs != null && item.requests > 0)
   const weight = rows.reduce((sum, item) => sum + item.requests, 0)
   if (!weight) return null
   return rows.reduce((sum, item) => sum + (item.avgDurationMs as number) * item.requests, 0) / weight
 })
 
 const maxP95FirstToken = computed(() => {
-  const values = accounts.value.map(item => item.p95FirstTokenMs).filter((value): value is number => value != null)
+  const values = filteredAccounts.value.map(item => item.p95FirstTokenMs).filter((value): value is number => value != null)
   return values.length ? Math.max(...values) : null
 })
 
 const averageHitRate = computed(() => {
-  const input = accounts.value.reduce((sum, item) => sum + item.inputTokens, 0)
-  const read = accounts.value.reduce((sum, item) => sum + item.cacheReadTokens, 0)
-  const creation = accounts.value.reduce((sum, item) => sum + item.cacheCreationTokens, 0)
+  const input = filteredAccounts.value.reduce((sum, item) => sum + item.inputTokens, 0)
+  const read = filteredAccounts.value.reduce((sum, item) => sum + item.cacheReadTokens, 0)
+  const creation = filteredAccounts.value.reduce((sum, item) => sum + item.cacheCreationTokens, 0)
   const denominator = input + read + creation
   return denominator > 0 ? read / denominator : null
 })
