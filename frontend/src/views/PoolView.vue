@@ -456,10 +456,38 @@ const averageHitRate = computed(() => {
 // ---- 图表 ----
 const buckets = computed(() => series.value.map(point => formatBucket(point.bucket)))
 
+/**
+ * 时间类目轴。
+ *
+ * <p>桶数量多时把标签旋转并交给 ECharts 自动隐藏重叠项，避免挤成一团；
+ * 数据点很少时不旋转，保证可读。</p>
+ */
+function timeCategoryAxis() {
+  return {
+    type: 'category',
+    data: buckets.value,
+    boundaryGap: false,
+    axisLabel: {
+      hideOverlap: true,
+      rotate: buckets.value.length > 8 ? 30 : 0,
+      fontSize: 10,
+    },
+  }
+}
+
+/** tooltip 统一 confined，避免贴着容器边缘时被裁掉看不全。 */
+function axisTooltip(valueFormatter: (value: number) => string) {
+  return {
+    trigger: 'axis',
+    confine: true,
+    valueFormatter,
+  }
+}
+
 const hitRateOption = computed<EChartsCoreOption>(() => ({
-  tooltip: { trigger: 'axis', valueFormatter: (value: number) => formatPercent(value) },
-  grid: { left: 56, right: 20, top: 20, bottom: 40 },
-  xAxis: { type: 'category', data: buckets.value },
+  tooltip: axisTooltip((value: number) => formatPercent(value)),
+  grid: { left: 56, right: 24, top: 24, bottom: 56 },
+  xAxis: timeCategoryAxis(),
   yAxis: { type: 'value', min: 0, max: 1, axisLabel: { formatter: percentAxis } },
   series: [{
     name: '缓存命中率',
@@ -473,10 +501,10 @@ const hitRateOption = computed<EChartsCoreOption>(() => ({
 }))
 
 const latencyOption = computed<EChartsCoreOption>(() => ({
-  tooltip: { trigger: 'axis', valueFormatter: (value: number) => formatMs(value) },
-  legend: { data: ['平均首 Token', 'P95 首 Token', '平均耗时'] },
-  grid: { left: 64, right: 20, top: 40, bottom: 40 },
-  xAxis: { type: 'category', data: buckets.value },
+  tooltip: axisTooltip((value: number) => formatMs(value)),
+  legend: { data: ['平均首 Token', 'P95 首 Token', '平均耗时'], top: 0, left: 'center', itemGap: 12, textStyle: { fontSize: 11 } },
+  grid: { left: 72, right: 24, top: 52, bottom: 56 },
+  xAxis: timeCategoryAxis(),
   yAxis: { type: 'value', axisLabel: { formatter: (value: number) => `${Math.round(value)}ms` } },
   series: [
     { name: '平均首 Token', type: 'line', smooth: true, showSymbol: false, connectNulls: true, data: series.value.map(point => point.avgFirstTokenMs) },
@@ -486,10 +514,10 @@ const latencyOption = computed<EChartsCoreOption>(() => ({
 }))
 
 const volumeOption = computed<EChartsCoreOption>(() => ({
-  tooltip: { trigger: 'axis' },
-  legend: { data: ['请求数', '实际成本'] },
-  grid: { left: 64, right: 64, top: 40, bottom: 40 },
-  xAxis: { type: 'category', data: buckets.value },
+  tooltip: { trigger: 'axis', confine: true },
+  legend: { data: ['请求数', '实际成本'], top: 0, left: 'center', itemGap: 12, textStyle: { fontSize: 11 } },
+  grid: { left: 64, right: 72, top: 52, bottom: 56 },
+  xAxis: timeCategoryAxis(),
   yAxis: [
     { type: 'value', name: '请求数', axisLabel: { formatter: (value: number) => formatNumber(value) } },
     { type: 'value', name: '成本', axisLabel: { formatter: (value: number) => `$${Number(value).toFixed(2)}` } },
