@@ -9,10 +9,11 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Sub2API 平台用户邮箱的 Redis 缓存。
+ * Sub2API 平台用户的 Redis 缓存。
  *
  * <p>只存字符串，避免通用 JSON 序列化对 final 类型（record）丢失类型信息的问题。
- * 两个 Hash：邮箱 → 角色、QQ 号 → 邮箱（用于自动匹配）。</p>
+ * 三个 Hash：邮箱 → 角色、QQ 号 → 邮箱（用于自动匹配）、邮箱 → 用户 ID
+ * （用户端查询自己数据时，用它把邮箱解析成 Sub2API 的 user_id）。</p>
  */
 @Component
 public class Sub2ApiUserCache {
@@ -21,6 +22,8 @@ public class Sub2ApiUserCache {
     public static final String USERS_KEY = "monitor:sub2api:users";
     /** QQ 号 → 邮箱。 */
     public static final String QQ_INDEX_KEY = "monitor:sub2api:users:by-qq";
+    /** 邮箱（小写）→ Sub2API 用户 ID。 */
+    public static final String USER_IDS_KEY = "monitor:sub2api:users:ids";
     /** 最近一次同步时间。 */
     public static final String SYNCED_AT_KEY = "monitor:sub2api:users:synced-at";
 
@@ -38,11 +41,14 @@ public class Sub2ApiUserCache {
      * <p>先写临时 key 再 RENAME，避免替换过程中出现「缓存为空」的窗口：
      * 这个窗口里进来的消息会被误判成非平台用户，因此不能直接 delete + 重建。</p>
      */
-    public int replaceAll(Map<String, String> emailToRole, Map<String, String> qqToEmail) {
+    public int replaceAll(Map<String, String> emailToRole, Map<String, String> qqToEmail,
+                          Map<String, String> emailToId) {
         String tempUsers = USERS_KEY + TEMP_SUFFIX;
         String tempQq = QQ_INDEX_KEY + TEMP_SUFFIX;
+        String tempIds = USER_IDS_KEY + TEMP_SUFFIX;
         redis.delete(tempUsers);
         redis.delete(tempQq);
+        redis.delete(tempIds);
 
         if (!emailToRole.isEmpty()) {
             redis.opsForHash().putAll(tempUsers, new HashMap<>(emailToRole));
@@ -50,9 +56,13 @@ public class Sub2ApiUserCache {
         if (!qqToEmail.isEmpty()) {
             redis.opsForHash().putAll(tempQq, new HashMap<>(qqToEmail));
         }
+        if (emailToId != null && !emailToId.isEmpty()) {
+            redis.opsForHash().putAll(tempIds, new HashMap<>(emailToId));
+        }
 
         swap(tempUsers, USERS_KEY);
         swap(tempQq, QQ_INDEX_KEY);
+        swap(tempIds, USER_IDS_KEY);
         redis.opsForValue().set(SYNCED_AT_KEY, OffsetDateTime.now().toString());
         return emailToRole.size();
     }
@@ -89,6 +99,28 @@ public class Sub2ApiUserCache {
         return value == null ? Optional.empty() : Optional.of(String.valueOf(value));
     }
 
+    /**
+     * 邮箱对应的 Sub2API 用户 ID。
+     *
+     * <p>用户端查询「我自己的余额/用量/密钥」时，必须用这个 ID 去调管理端接口，
+     * 绝不接受用户自己传入的 ID。</p>
+     */
+    public Optional<Long> userId(String email) {
+        return Emails.normalize(email)
+                .map(key -> redis.opsForHash().get(USER_IDS_KEY, key))
+                .filter(value -> value != null)
+                .map(value -> String.valueOf(value))
+                .flatMap(Sub2ApiUserCache::parseLong);
+    }
+
+    private static Optional<Long> parseLong(String value) {
+        try {
+            return Optional.of(Long.parseLong(value.trim()));
+        } catch (RuntimeException ex) {
+            return Optional.empty();
+        }
+    }
+
     /** 已缓存的用户数。 */
     public long size() {
         Long size = redis.opsForHash().size(USERS_KEY);
@@ -112,6 +144,7 @@ public class Sub2ApiUserCache {
     public void clear() {
         redis.delete(USERS_KEY);
         redis.delete(QQ_INDEX_KEY);
+        redis.delete(USER_IDS_KEY);
         redis.delete(SYNCED_AT_KEY);
     }
 

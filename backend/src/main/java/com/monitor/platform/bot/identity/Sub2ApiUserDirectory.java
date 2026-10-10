@@ -53,6 +53,7 @@ public class Sub2ApiUserDirectory {
 
         Map<String, String> emailToRole = new LinkedHashMap<>();
         Map<String, String> qqToEmail = new LinkedHashMap<>();
+        Map<String, String> emailToId = new LinkedHashMap<>();
         int skipped = 0;
         for (Sub2ApiUser user : users) {
             Optional<String> email = Emails.normalize(user.email());
@@ -62,12 +63,16 @@ public class Sub2ApiUserDirectory {
             }
             String key = email.get();
             emailToRole.put(key, user.isAdmin() ? "admin" : "user");
+            if (user.id() != null) {
+                // 用户端查自己数据时要拿它去调管理端接口，缓存下来避免每条消息都查库
+                emailToId.put(key, String.valueOf(user.id()));
+            }
             if (properties.isQqLocalPartMatch()) {
                 Emails.qqLocalPart(key).ifPresent(qq -> qqToEmail.putIfAbsent(qq, key));
             }
         }
 
-        int size = cache.replaceAll(emailToRole, qqToEmail);
+        int size = cache.replaceAll(emailToRole, qqToEmail, emailToId);
         log.info("Sub2API 用户缓存已刷新: users={}, qqMatched={}, skipped={}",
                 size, qqToEmail.size(), skipped);
         return size;

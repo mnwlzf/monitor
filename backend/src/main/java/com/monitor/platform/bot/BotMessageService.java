@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
+import com.monitor.platform.bot.user.BotUserService;
+import com.monitor.platform.bot.user.BotUserTools;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
@@ -95,11 +97,13 @@ public class BotMessageService {
             你是「上游账号监控」系统的助手，通过 QQ 回答用户的问题。
             当前对话者是本平台的普通用户（不是管理员）。
             要求：
-            1. 平台级数据（账号列表、余额、号池、密钥、变更记录等）只有管理员能查询；
+            1. 对方可以查询**自己**的余额、用量、API Key，用 myBalance / myUsage / myApiKeys 工具；
+               这些工具只返回发送者本人的数据，不要试图查询别人；
+            2. 平台级数据（全部账号列表、号池、变更记录等）只有管理员能查询；
                对方问到这类内容时，直接说明「该数据仅管理员可查」，不要猜测、不要编造；
-            2. 你可以介绍平台的一般用法、解释概念，以及回答与用户本人相关的问题；
-            3. 绝不编造任何数字；
-            4. 用简体中文，直接给结论；不要输出代码块。
+            3. 你可以介绍平台的一般用法、解释概念，以及回答与用户本人相关的问题；
+            4. 绝不编造任何数字；
+            5. 用简体中文，直接给结论；不要输出代码块。
             """;
 
     private static final String CHAT_PROMPT = """
@@ -119,6 +123,9 @@ public class BotMessageService {
             - /采集            号池直连库增量采集状态
             - /账号 <关键字>   按名称查账号余额与状态
             - /变更 [条数]     最近的账号/密钥变更
+            - /我的余额        我自己的账户余额与状态
+            - /我的用量 [窗]   我自己的用量（today / week / month）
+            - /我的密钥        我自己的 API Key 列表
             - /我的信息        查看当前绑定的邮箱
             - /绑定 <邮箱>     绑定邮箱
             - /解绑            解除绑定
@@ -128,11 +135,14 @@ public class BotMessageService {
 
     private static final String USER_HELP = """
             可用命令：
+            - /我的余额        我的账户余额与状态
+            - /我的用量 [窗]   我的用量（today / week / month，默认 today）
+            - /我的密钥        我的 API Key 列表
             - /我的信息        查看当前绑定的邮箱
             - /绑定 <邮箱>     绑定邮箱
             - /解绑            解除绑定
             - /天气 <城市>     实时天气与预报（所有人都能用）
-            平台级数据（账号、余额、号池、密钥）仅管理员可查。""";
+            平台级数据（账号、号池、变更记录）仅管理员可查。""";
 
     private static final String GUEST_HELP = """
             我能做的事：
@@ -151,6 +161,7 @@ public class BotMessageService {
     private final BotSettingsService settingsService;
     private final OneBotClient client;
     private final MonitorChatTools tools;
+    private final BotUserService botUserService;
     private final WeatherTools weatherTools;
     private final BotMessageArchiveService archive;
     private final BotImageFetcher imageFetcher;
@@ -173,6 +184,7 @@ public class BotMessageService {
     public BotMessageService(BotSettingsService settingsService,
                              OneBotClient client,
                              MonitorChatTools tools,
+                             BotUserService botUserService,
                              WeatherTools weatherTools,
                              BotMessageArchiveService archive,
                              BotImageFetcher imageFetcher,
@@ -184,6 +196,7 @@ public class BotMessageService {
         this.settingsService = settingsService;
         this.client = client;
         this.tools = tools;
+        this.botUserService = botUserService;
         this.weatherTools = weatherTools;
         this.archive = archive;
         this.imageFetcher = imageFetcher;
@@ -321,6 +334,14 @@ public class BotMessageService {
             case "unbind", "解绑" -> text(unbind(event));
             case "whoami", "我的信息", "me" -> text(whoami(identity));
 
+            // 用户级平台功能：只能查「自己」的数据（需要命中指定群 + 邮箱）
+            case "我的余额", "余额", "balance" ->
+                    selfService(platformFeature, identity, () -> botUserService.balanceReport(identity.email()));
+            case "我的用量", "用量", "usage" ->
+                    selfService(platformFeature, identity, () -> botUserService.usageReport(identity.email(), arg));
+            case "我的密钥", "密钥", "keys" ->
+                    selfService(platformFeature, identity, () -> botUserService.apiKeysReport(identity.email()));
+
             // 天气与平台无关，所有人（含陌生人）都能用
             case "weather", "天气" -> weather(arg);
 
@@ -349,6 +370,19 @@ public class BotMessageService {
         }
         if (!identity.admin()) {
             return text("平台级数据仅管理员可查。");
+        }
+        return action.get();
+    }
+
+    /**
+     * 用户级平台功能的统一闸门：查「自己」的数据。
+     *
+     * <p>没有平台功能（未命中指定群 / 陌生人）时，和平台级命令一样回「未知命令」，
+     * 不暴露功能存在。邮箱在解析身份时就已确定，不接受任何用户标识参数。</p>
+     */
+    private BotReport selfService(boolean platformFeature, BotIdentity identity, Supplier<BotReport> action) {
+        if (!platformFeature || !identity.hasEmail()) {
+            return text(UNKNOWN_COMMAND);
         }
         return action.get();
     }
@@ -425,7 +459,7 @@ public class BotMessageService {
             return text(message);
         }
         String promptText = text.isBlank() ? IMAGE_ONLY_PROMPT : text;
-        String answer = chatClient.prompt()
+        ChatClient.ChatClientRequestSpec request = chatClient.prompt()
                 .user(spec -> {
                     spec.text(promptText);
                     // 图片以多模态附件交给模型；模型不支持视觉时上游会报错，由外层统一兜底
@@ -438,7 +472,12 @@ public class BotMessageService {
                             }
                         }));
                     }
-                })
+                });
+        // 用户端工具按请求绑定发送者邮箱：大模型只能查到发送者本人的数据
+        if (platformFeature && identity.hasEmail()) {
+            request = request.tools(new BotUserTools(botUserService, identity.email()));
+        }
+        String answer = request
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)))
                 .call()
                 .content();

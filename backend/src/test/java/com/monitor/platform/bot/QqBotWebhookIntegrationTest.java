@@ -5,6 +5,7 @@ import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
+import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.report.BotReportRenderer;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
@@ -74,7 +75,7 @@ class QqBotWebhookIntegrationTest {
         BotVisionProperties visionProperties = new BotVisionProperties();
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, tools, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, mock(BotUserService.class), weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

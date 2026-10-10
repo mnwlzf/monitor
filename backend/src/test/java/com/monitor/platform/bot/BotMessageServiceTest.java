@@ -5,6 +5,7 @@ import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
+import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.report.BotReportRenderer;
@@ -48,6 +49,7 @@ class BotMessageServiceTest {
 
     private OneBotClient client;
     private MonitorChatTools tools;
+    private BotUserService botUserService;
     private BotIdentityResolver identityResolver;
     private QqUserBindingService bindings;
     private BotReportRenderer reportRenderer;
@@ -67,6 +69,7 @@ class BotMessageServiceTest {
 
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);
+        botUserService = mock(BotUserService.class);
         when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台概览内容"));
 
         identityResolver = mock(BotIdentityResolver.class);
@@ -81,7 +84,7 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -401,5 +404,87 @@ class BotMessageServiceTest {
 
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
         verifyNoInteractions(reportRenderer);
+    }
+
+    // ============================================================ 用户端：只能查自己
+
+    /** 平台用户在指定群里查自己的余额：放行，且用的是发送者自己的邮箱。 */
+    @Test
+    void shouldReturnMyBalanceInDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+        when(botUserService.balanceReport(anyString())).thenReturn(BotReport.fromMarkdown("余额 12.34"));
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/我的余额")));
+
+        verify(botUserService, timeout(3000)).balanceReport("2755457558@qq.com");
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("余额 12.34"));
+    }
+
+    /** 平台用户在好友私聊查自己的数据：不给平台功能，按未知命令处理。 */
+    @Test
+    void shouldHideMyDataInFriendPrivate() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(privateCommand("/我的余额")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(botUserService);
+    }
+
+    /** 平台用户从非指定群的临时会话查自己：同样不给。 */
+    @Test
+    void shouldHideMyDataInTempSessionOfNonDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(tempSessionCommand(333L, "/我的密钥")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
+        verifyNoInteractions(botUserService);
+    }
+
+    /** 用量命令把时间窗透传下去。 */
+    @Test
+    void shouldPassUsageRangeThrough() throws Exception {
+        identityIs(normalUser());
+        when(botUserService.usageReport(anyString(), anyString())).thenReturn(BotReport.fromMarkdown("请求数 10"));
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/我的用量 7d")));
+
+        verify(botUserService, timeout(3000)).usageReport("2755457558@qq.com", "7d");
+    }
+
+    /** 密钥命令。 */
+    @Test
+    void shouldReturnMyApiKeysInDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+        when(botUserService.apiKeysReport(anyString())).thenReturn(BotReport.fromMarkdown("密钥 A"));
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/我的密钥")));
+
+        verify(botUserService, timeout(3000)).apiKeysReport("2755457558@qq.com");
+    }
+
+    /** 陌生人即使在指定群里问「我的余额」，也不能触发用户端查询。 */
+    @Test
+    void shouldHideMyDataFromGuest() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/我的余额")));
+
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), anyString());
+        verifyNoInteractions(botUserService);
+    }
+
+    /** 管理员在私聊查自己的余额：管理员私聊放行。 */
+    @Test
+    void shouldReturnMyBalanceForAdminInPrivate() throws Exception {
+        identityIs(admin());
+        when(botUserService.balanceReport(anyString())).thenReturn(BotReport.fromMarkdown("余额 1.00"));
+
+        service.onEvent(event(privateCommand("/我的余额")));
+
+        verify(botUserService, timeout(3000)).balanceReport("admin@qq.com");
     }
 }
