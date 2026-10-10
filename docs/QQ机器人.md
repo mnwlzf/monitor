@@ -118,13 +118,25 @@ MONITOR_BOT_REQUIRE_MENTION=true
 - 图片宽度可用 `MONITOR_BOT_IMAGE_WIDTH` 调整（默认 760px），高度按内容自适应
 - 内容过长（超过 120 行）时图片本身会截断，并标注「内容过长，图片已截断」
 
-渲染依赖**中文字体**：JRE 自带字体不含中文，官方镜像已装 `fonts-wqy-microhei`。
-如果用自建镜像，请自行安装中文字体，或用 `MONITOR_BOT_IMAGE_FONT` 指定字体名
-（例如 `Noto Sans CJK SC`）。
+中文字体**随 JAR 打包**，不依赖运行环境装字体：
 
-> 字体探测不到时不会报错，而是**自动退回截断文本**，并在启动日志里给出提示：
-> `未找到可显示中文的字体，长回复将退回截断文本。`
-> 也就是说「发不出图片」不会导致机器人不说话，只是内容仍会被截断。
+| 项 | 值 |
+|---|---|
+| 文件 | `backend/src/main/resources/fonts/wqy-microhei.ttc` |
+| 字体 | 文泉驿微米黑（WenQuanYi Micro Hei） |
+| 许可证 | Apache-2.0（或 GPL-3+ with Font exception，本项目按 Apache-2.0 使用） |
+| 来源与校验 | 同目录 `NOTICE.txt` / `SHA256SUMS.txt` |
+
+> 为什么内置而不是装系统字体：JRE 自带字体不含中文，靠系统字体很容易出现
+> 「本地能跑、容器里变豆腐块」。内置之后连构建期联网都不需要，
+> 本地开发、CI、容器的渲染结果也完全一致。
+
+`MONITOR_BOT_IMAGE_FONT` 可以改用系统字体（一般不用改）。万一内置字体缺失，
+渲染器会自动退回系统字体探测；都不可用时退回截断文本，并在日志里提示：
+
+```
+未找到可显示中文的字体，长回复将退回截断文本。
+```
 
 不需要这个功能时把 `MONITOR_BOT_IMAGE_ENABLED` 设为 `false` 即可。
 

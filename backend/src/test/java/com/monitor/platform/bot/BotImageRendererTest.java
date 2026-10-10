@@ -3,11 +3,12 @@ package com.monitor.platform.bot;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
+import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,11 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 长回复转图片渲染。
  *
- * <p>渲染依赖中文字体（JRE 自带字体不含中文）。CI 会先装 fonts-wqy-microhei，
- * 但为了不让「没装字体」变成红构建，这里对两种情况都做断言：
- * 有字体时校验产出的确实是一张可解码的 PNG，没字体时校验优雅降级为 null。</p>
+ * <p>中文字体随 JAR 打包，所以这里可以下强断言：不论在本地、CI 还是容器里，
+ * 渲染都必须成功。这条测试同时也是「内置字体没被打进产物」的看门狗。</p>
  */
 class BotImageRendererTest {
+
+    private static final String BUNDLED_FONT = "/fonts/wqy-microhei.ttc";
 
     private static final String SAMPLE = """
             号池监控（近 24h）：
@@ -27,18 +29,26 @@ class BotImageRendererTest {
             - 账号B [newapi]：请求 2345，缓存率 76.1%，首 Token 500ms
             合计：请求 5678，整体缓存率 79.1%""";
 
+    /** 内置字体必须真的在 classpath 上，且能显示中文。 */
+    @Test
+    void shouldShipUsableBundledFont() throws Exception {
+        try (InputStream in = BotImageRenderer.class.getResourceAsStream(BUNDLED_FONT)) {
+            assertNotNull(in, "内置中文字体未打包进产物: " + BUNDLED_FONT);
+            Font font = Font.createFont(Font.TRUETYPE_FONT, in);
+            assertEquals(-1, font.canDisplayUpTo("监控号池缓存余额渠道"),
+                    "内置字体应能显示中文，实际 family=" + font.getFamily());
+        }
+    }
+
     @Test
     void shouldRenderDecodablePng() throws Exception {
         BotImageRenderer renderer = new BotImageRenderer(new QqBotProperties());
+        assertTrue(renderer.isAvailable(), "内置字体可用时渲染器应报告可用");
+        assertTrue(renderer.isUsingBundledFont(),
+                "必须用随 JAR 打包的内置字体，不能悄悄退回系统字体；当前字体=" + renderer.fontName());
 
         byte[] png = renderer.renderPng(SAMPLE);
-        if (png == null) {
-            // 没有中文字体时必须自报家门，而不是悄悄返回一张豆腐块图片
-            assertFalse(renderer.isAvailable(), "返回 null 时应报告字体不可用");
-            return;
-        }
-
-        assertTrue(renderer.isAvailable());
+        assertNotNull(png, "内置字体可用时必须渲染出图片");
         assertTrue(png.length > 1000, "PNG 体积异常: " + png.length);
 
         // PNG magic number
@@ -58,14 +68,25 @@ class BotImageRendererTest {
     void shouldRespectConfiguredWidth() throws Exception {
         QqBotProperties properties = new QqBotProperties();
         properties.setImageWidth(520);
-        BotImageRenderer renderer = new BotImageRenderer(properties);
 
-        byte[] png = renderer.renderPng(SAMPLE);
-        if (png == null) {
-            return;
-        }
+        byte[] png = new BotImageRenderer(properties).renderPng(SAMPLE);
+        assertNotNull(png);
         BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(png));
         assertEquals(520, decoded.getWidth());
+    }
+
+    /** 内容很长时高度按行增长，但不失控。 */
+    @Test
+    void shouldGrowHeightWithContent() throws Exception {
+        StringBuilder long_ = new StringBuilder("账户余额：");
+        for (int i = 0; i < 40; i++) {
+            long_.append("\n- 账号").append(i).append("：余额 12.34，已用额度 56.78");
+        }
+
+        byte[] png = new BotImageRenderer(new QqBotProperties()).renderPng(long_.toString());
+        assertNotNull(png);
+        BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(png));
+        assertTrue(decoded.getHeight() > 600, "行数多时图片应变高，实际 " + decoded.getHeight());
     }
 
     @Test

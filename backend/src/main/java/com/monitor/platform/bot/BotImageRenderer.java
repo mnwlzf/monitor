@@ -13,6 +13,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -24,8 +25,10 @@ import java.util.List;
  * <p>渠道状态、账户余额这类内容动辄上百行，QQ 文本消息放不下，会被
  * {@code max-reply-length} 截断；转成图片可以完整呈现。</p>
  *
- * <p><strong>中文字体是硬依赖</strong>：JRE 自带字体不含中文，容器里必须装中文字体
- * （见 Dockerfile 的 fonts-wqy-microhei）。探测不到可用字体时 {@link #renderPng} 返回 null，
+ * <p><strong>中文字体随 JAR 打包</strong>（{@code /fonts/wqy-microhei.ttc}，Apache-2.0）：
+ * JRE 自带字体不含中文，靠系统字体就会「本地能跑、容器里变豆腐块」。
+ * 内置字体让本地开发、CI、容器的渲染结果完全一致，且不依赖构建期联网。
+ * 万一带内字体缺失，才退回系统字体探测；都不可用时 {@link #renderPng} 返回 null，
  * 由调用方退回截断文本 —— 宁可发截断的文本，也不能发一堆「豆腐块」。</p>
  *
  * <p>用 Java2D 直接绘制，不引第三方渲染库；Spring Boot 默认
@@ -35,6 +38,14 @@ import java.util.List;
 public class BotImageRenderer {
 
     private static final Logger log = LoggerFactory.getLogger(BotImageRenderer.class);
+
+    /**
+     * 随 JAR 打包的中文字体（文泉驿微米黑，Apache-2.0）。
+     *
+     * <p>用内置字体而不是系统字体：本地开发、CI、容器三处的渲染结果完全一致，
+     * 也不依赖构建期联网或镜像里装了字体。许可证与来源见同目录 NOTICE.txt。</p>
+     */
+    private static final String BUNDLED_FONT = "/fonts/wqy-microhei.ttc";
 
     /** 用于探测字体是否真的能显示中文。 */
     private static final String CJK_PROBE = "监控号池缓存余额渠道";
@@ -81,6 +92,23 @@ public class BotImageRenderer {
     /** 当前环境能否渲染中文图片（字体是否就绪）。 */
     public boolean isAvailable() {
         return fontSet() != null;
+    }
+
+    /**
+     * 当前是否在用随 JAR 打包的内置字体。
+     *
+     * <p>正常部署下应恒为 true；为 false 说明内置字体缺失，退回了系统字体。
+     * 暴露出来是为了让测试能断言「没有悄悄降级」。</p>
+     */
+    public boolean isUsingBundledFont() {
+        FontSet current = fontSet();
+        return current != null && current.bundled();
+    }
+
+    /** 当前生效的字体名，便于排查渲染问题。 */
+    public String fontName() {
+        FontSet current = fontSet();
+        return current == null ? null : current.body().getFontName();
     }
 
     /**
@@ -269,7 +297,19 @@ public class BotImageRenderer {
         return fonts;
     }
 
+    /**
+     * 探测可用字体。
+     *
+     * <p>优先用随 JAR 打包的内置字体；只有它缺失或损坏时才退回系统字体探测，
+     * 这样「正常情况下一定渲染得出来」，而不是依赖运行环境装没装字体。</p>
+     */
     private FontSet detectFonts() {
+        Font bundled = loadBundledFont();
+        if (bundled != null) {
+            log.info("QQ 机器人图片渲染使用内置字体: {}", bundled.getFontName());
+            return fontSetOf(bundled, true);
+        }
+
         List<String> candidates = new ArrayList<>();
         String configured = properties.getImageFont();
         if (configured != null && !configured.isBlank()) {
@@ -283,20 +323,44 @@ public class BotImageRenderer {
             if (probe.canDisplayUpTo(CJK_PROBE) >= 0) {
                 continue;
             }
-            log.info("QQ 机器人图片渲染已就绪: font={}", probe.getFamily());
-            return new FontSet(
-                    probe.deriveFont(Font.BOLD, (float) TITLE_SIZE),
-                    probe.deriveFont(Font.PLAIN, (float) BODY_SIZE),
-                    probe.deriveFont(Font.PLAIN, (float) SMALL_SIZE));
+            log.info("QQ 机器人图片渲染使用系统字体: {}", probe.getFamily());
+            return fontSetOf(probe, false);
         }
 
         log.warn("未找到可显示中文的字体，长回复将退回截断文本。"
-                + "容器部署请确认镜像已安装中文字体（Dockerfile 里的 fonts-wqy-microhei），"
-                + "或用 MONITOR_BOT_IMAGE_FONT 指定字体名。");
+                + "请确认 JAR 内含 {}，或用 MONITOR_BOT_IMAGE_FONT 指定系统字体名。",
+                BUNDLED_FONT);
         return null;
     }
 
-    private record FontSet(Font title, Font body, Font small) {
+    /** 从 classpath 加载内置中文字体；缺失或损坏时返回 null，由调用方退回系统字体。 */
+    private Font loadBundledFont() {
+        try (InputStream in = BotImageRenderer.class.getResourceAsStream(BUNDLED_FONT)) {
+            if (in == null) {
+                log.warn("未找到内置中文字体 {}，改为探测系统字体", BUNDLED_FONT);
+                return null;
+            }
+            Font font = Font.createFont(Font.TRUETYPE_FONT, in);
+            if (font.canDisplayUpTo(CJK_PROBE) >= 0) {
+                log.warn("内置字体 {} 缺少所需中文字形，改为探测系统字体", BUNDLED_FONT);
+                return null;
+            }
+            return font;
+        } catch (Exception ex) {
+            log.warn("加载内置中文字体失败，改为探测系统字体: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private FontSet fontSetOf(Font base, boolean bundled) {
+        return new FontSet(
+                base.deriveFont(Font.BOLD, (float) TITLE_SIZE),
+                base.deriveFont(Font.PLAIN, (float) BODY_SIZE),
+                base.deriveFont(Font.PLAIN, (float) SMALL_SIZE),
+                bundled);
+    }
+
+    private record FontSet(Font title, Font body, Font small, boolean bundled) {
     }
 
     private record RenderLine(String text, Font font, Color color, int x, int height) {

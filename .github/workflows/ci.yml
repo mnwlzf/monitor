@@ -41,13 +41,6 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Install CJK font
-        # 机器人长回复渲染成图片的测试需要中文字体。
-        # 装不上也不该让 CI 红：渲染器探测不到中文字体时会优雅降级，测试会自动跳过。
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fonts-wqy-microhei \
-            || echo "字体安装失败，图片渲染用例将自动跳过"
 
       - name: Run unit tests
         working-directory: backend
