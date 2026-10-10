@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.bot.archive.BotMessageArchiveMapper">
+
+    <resultMap id="BotMessageArchiveResultMap" type="com.monitor.platform.bot.archive.BotMessageArchiveEntity">
+        <id column="id" property="id"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="direction" property="direction"/>
+        <result column="message_type" property="messageType"/>
+        <result column="group_id" property="groupId"/>
+        <result column="user_id" property="userId"/>
+        <result column="sender_email" property="senderEmail"/>
+        <result column="sender_role" property="senderRole"/>
+        <result column="persona" property="persona"/>
+        <result column="content" property="content"/>
+        <result column="content_kind" property="contentKind"/>
+        <result column="correlation_id" property="correlationId"/>
+        <result column="message_id" property="messageId"/>
+    </resultMap>
+
+    <sql id="columns">
+        id, created_at, direction, message_type, group_id, user_id, sender_email,
+        sender_role, persona, content, content_kind, correlation_id, message_id
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bot_messages (
+            direction, message_type, group_id, user_id, sender_email, sender_role,
+            persona, content, content_kind, correlation_id, message_id
+        ) VALUES (
+            #{direction}, #{messageType}, #{groupId}, #{userId}, #{senderEmail}, #{senderRole},
+            #{persona}, #{content}, #{contentKind}, #{correlationId}, #{messageId}
+        )
+    </insert>
+
+    <select id="search" resultMap="BotMessageArchiveResultMap">
+        SELECT <include refid="columns"/>
+        FROM bot_messages
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND content ILIKE concat('%', #{keyword}, '%')
+            </if>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="groupId != null">
+                AND group_id = #{groupId}
+            </if>
+            <if test="from != null">
+                AND created_at &gt;= #{from}
+            </if>
+            <if test="to != null">
+                AND created_at &lt;= #{to}
+            </if>
+        </where>
+        ORDER BY id DESC
+        LIMIT #{limit}
+    </select>
+
+    <delete id="deleteBefore">
+        DELETE FROM bot_messages WHERE created_at &lt; #{before}
+    </delete>
+
+    <select id="earliestCreatedAt" resultType="java.time.OffsetDateTime">
+        SELECT MIN(created_at) FROM bot_messages
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM bot_messages
+    </select>
+</mapper>

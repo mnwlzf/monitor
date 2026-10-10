@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotAdmin, BotIdentityOverview, BotSettings, MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
+import type { BotAdmin, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -131,4 +131,31 @@ export async function addBotAdmin(email: string, remark: string): Promise<BotAdm
 /** 删除自定义管理员。 */
 export async function deleteBotAdmin(id: number): Promise<void> {
   await apiRequest<void>(`/api/v1/settings/bot/identity/admins/${id}`, { method: 'DELETE' })
+}
+/** 消息存档查询条件。 */
+export interface BotMessageQuery {
+  keyword?: string
+  userId?: number
+  groupId?: number
+  from?: string
+  to?: string
+  limit?: number
+}
+
+/** 查询机器人消息存档，时间倒序。 */
+export async function searchBotMessages(query: BotMessageQuery): Promise<BotMessage[]> {
+  const params = new URLSearchParams()
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.userId != null) params.set('userId', String(query.userId))
+  if (query.groupId != null) params.set('groupId', String(query.groupId))
+  if (query.from) params.set('from', query.from)
+  if (query.to) params.set('to', query.to)
+  if (query.limit != null) params.set('limit', String(query.limit))
+  const suffix = params.toString()
+  return apiRequest<BotMessage[]>(`/api/v1/settings/bot/archive${suffix ? `?${suffix}` : ''}`)
+}
+
+/** 读取消息存档概况。 */
+export async function getBotArchiveStats(): Promise<BotMessageArchiveStats> {
+  return apiRequest<BotMessageArchiveStats>('/api/v1/settings/bot/archive/stats')
 }

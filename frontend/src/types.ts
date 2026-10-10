@@ -394,3 +394,29 @@ export interface BotIdentityOverview {
   }
   customAdmins: BotAdmin[]
 }
+/** 一条机器人消息存档。 */
+export interface BotMessage {
+  id: number
+  createdAt: string
+  /** IN = 用户发给机器人，OUT = 机器人回复 */
+  direction: 'IN' | 'OUT'
+  messageType: string
+  groupId: number | null
+  userId: number
+  senderEmail: string | null
+  senderRole: 'ADMIN' | 'USER' | 'GUEST' | null
+  persona: string | null
+  content: string
+  contentKind: 'TEXT' | 'IMAGE' | 'COMMAND'
+  /** 同一问一答共用的关联 ID */
+  correlationId: string | null
+  messageId: string | null
+}
+
+/** 消息存档概况。 */
+export interface BotMessageArchiveStats {
+  enabled: boolean
+  total: number
+  earliest: string | null
+  retentionDays: number
+}

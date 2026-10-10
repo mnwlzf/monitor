@@ -8,6 +8,7 @@ import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.report.BotReportRenderer;
+import com.monitor.platform.bot.archive.BotMessageArchiveService;
 import com.monitor.platform.bot.weather.WeatherTools;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,7 @@ class BotMessageServiceTest {
     private QqUserBindingService bindings;
     private BotReportRenderer reportRenderer;
     private WeatherTools weatherTools;
+    private BotMessageArchiveService archive;
     private BotMessageService service;
 
     @BeforeEach
@@ -66,12 +68,13 @@ class BotMessageServiceTest {
         bindings = mock(QqUserBindingService.class);
         reportRenderer = mock(BotReportRenderer.class);
         weatherTools = mock(WeatherTools.class);
+        archive = mock(BotMessageArchiveService.class);
 
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, weatherTools, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, weatherTools, archive, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {

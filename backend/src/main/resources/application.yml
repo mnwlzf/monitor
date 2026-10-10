@@ -87,6 +87,14 @@ monitor:
     # 身份识别：把自建 Sub2API 的平台用户邮箱同步到 Redis，
     # 用于区分「平台用户 / 陌生人」以及「管理员 / 普通用户」。
     # 数据来源是 monitor.pool.ingest.* 配置的只读库（public.users 表）。
+    # 消息存档：记录「谁说了什么、机器人回了什么、当时是什么身份」，
+    # 用于事后查证。写入是 best-effort，失败不影响机器人回复。
+    archive:
+      enabled: ${MONITOR_BOT_ARCHIVE_ENABLED:true}
+      # 保留天数，超过的由定时任务清理；0 或负数表示永久保留
+      retention-days: ${MONITOR_BOT_ARCHIVE_RETENTION_DAYS:90}
+      max-content-length: 4000
+      max-page-size: 500
     identity:
       enabled: ${MONITOR_BOT_IDENTITY_ENABLED:true}
       # 允许按 <QQ号>@xx.com 的邮箱自动匹配 QQ，无需手动绑定

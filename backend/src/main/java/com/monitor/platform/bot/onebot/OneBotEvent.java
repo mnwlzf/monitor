@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
  *
  * @param postType   事件类型：message / notice / request / meta_event
  * @param messageType 消息类型：group / private
+ * @param messageId  该条消息在 OneBot 侧的 ID，用于和 QQ 客户端对账
  * @param groupId    群号（私聊为空）
  * @param userId     发送者 QQ
  * @param selfId     机器人自己的 QQ（用于判断是否被 @）
@@ -23,6 +24,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 public record OneBotEvent(
         @JsonProperty("post_type") String postType,
         @JsonProperty("message_type") String messageType,
+        @JsonProperty("message_id") String messageId,
         @JsonProperty("group_id") Long groupId,
         @JsonProperty("user_id") Long userId,
         @JsonProperty("self_id") Long selfId,

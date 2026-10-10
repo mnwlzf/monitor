@@ -6,6 +6,7 @@ import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
+import com.monitor.platform.bot.archive.BotMessageArchiveService;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.report.BotReportRenderer;
@@ -143,6 +144,7 @@ public class BotMessageService {
     private final OneBotClient client;
     private final MonitorChatTools tools;
     private final WeatherTools weatherTools;
+    private final BotMessageArchiveService archive;
     private final BotIdentityResolver identityResolver;
     private final QqUserBindingService bindings;
     private final BotReportRenderer reportRenderer;
@@ -162,6 +164,7 @@ public class BotMessageService {
                              OneBotClient client,
                              MonitorChatTools tools,
                              WeatherTools weatherTools,
+                             BotMessageArchiveService archive,
                              BotIdentityResolver identityResolver,
                              QqUserBindingService bindings,
                              BotReportRenderer reportRenderer,
@@ -170,6 +173,7 @@ public class BotMessageService {
         this.client = client;
         this.tools = tools;
         this.weatherTools = weatherTools;
+        this.archive = archive;
         this.identityResolver = identityResolver;
         this.bindings = bindings;
         this.reportRenderer = reportRenderer;
@@ -235,6 +239,9 @@ public class BotMessageService {
         }
         executor.submit(() -> {
             BotIdentity identity = identityResolver.resolve(event.userId());
+            // 先存档用户消息：即使后面回答失败，也能查证「他说了什么」
+            String correlationId = archive.recordInbound(event, text, kindOf(text, settings), identity);
+
             BotReport report;
             try {
                 report = answer(event, text, settings, identity);
@@ -246,7 +253,11 @@ public class BotMessageService {
                         ? "处理这条消息时出错了：" + ex.getMessage()
                         : "处理这条消息时出错了，请稍后再试。");
             }
-            send(event, group, report, settings.maxReplyLength());
+
+            SendOutcome outcome = send(event, group, report, settings.maxReplyLength());
+            // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
+            archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
+                    personaOf(identity).name(), correlationId);
         });
     }
 
@@ -465,7 +476,7 @@ public class BotMessageService {
      * 渠道状态、账户余额这类内容本质是表格，图片才能完整呈现。渲染或发送图片失败时
      * 再退回截断文本，保证「至少有东西发出去」。</p>
      */
-    private void send(OneBotEvent event, boolean group, BotReport report, int maxReplyLength) {
+    private SendOutcome send(OneBotEvent event, boolean group, BotReport report, int maxReplyLength) {
         String plain = report.toPlainText();
         if (plain.isBlank()) {
             plain = "（没有查到内容）";
@@ -474,16 +485,30 @@ public class BotMessageService {
         String truncated = truncate(plain, maxReplyLength);
         if (truncated.equals(plain)) {
             sendText(event, group, plain);
-            return;
+            return new SendOutcome(plain, BotMessageArchiveService.KIND_TEXT);
         }
 
         byte[] png = reportRenderer.render(report);
         if (png != null && sendImage(event, group, png)) {
             log.info("回复过长（{} 字），已转为图片发送: user={}, bytes={}",
                     plain.length(), event.userId(), png.length);
-            return;
+            // 存档存文本内容（就是图片上的字），便于日后检索；kind 标成 IMAGE
+            return new SendOutcome(plain, BotMessageArchiveService.KIND_IMAGE);
         }
         sendText(event, group, truncated);
+        return new SendOutcome(truncated, BotMessageArchiveService.KIND_TEXT);
+    }
+
+    /** 判断这条用户消息是命令还是普通消息。 */
+    private static String kindOf(String text, BotSettings settings) {
+        String prefix = settings.commandPrefix();
+        return prefix != null && !prefix.isBlank() && text.startsWith(prefix)
+                ? BotMessageArchiveService.KIND_COMMAND
+                : BotMessageArchiveService.KIND_TEXT;
+    }
+
+    /** 实际发出去的内容与形态，用于存档。 */
+    private record SendOutcome(String content, String kind) {
     }
 
     private void sendText(OneBotEvent event, boolean group, String text) {
