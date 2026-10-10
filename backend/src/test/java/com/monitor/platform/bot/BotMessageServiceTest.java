@@ -33,12 +33,9 @@ class BotMessageServiceTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        QqBotProperties properties = new QqBotProperties();
-        properties.setEnabled(true);
-        properties.setWebhookToken("secret");
-        properties.setApiBaseUrl("http://127.0.0.1:3000");
-        properties.setAllowedGroups(java.util.List.of("222"));
-        properties.setAllowedUsers(java.util.List.of("999"));
+        BotSettingsService settingsService = mock(BotSettingsService.class);
+        when(settingsService.current()).thenReturn(new BotSettings(
+                true, java.util.Set.of("222"), java.util.Set.of("999"), true, "/", 900, 10));
 
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);
@@ -47,7 +44,7 @@ class BotMessageServiceTest {
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
-        service = new BotMessageService(properties, client, tools, provider);
+        service = new BotMessageService(settingsService, client, tools, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {

@@ -20,6 +20,10 @@ import java.util.concurrent.Executors;
 /**
  * QQ 消息处理：白名单 → @/前缀判断 → 命令或大模型 → 回消息。
  *
+ * <p>白名单、命令前缀、回复长度、记忆窗口等全部读 {@link BotSettingsService} 的**内存快照**，
+ * 页面上改完立即生效，不需要重启。只有「部署级接线参数」（webhook 密钥、OneBot 地址、
+ * 总开关）仍在环境变量里。</p>
+ *
  * <p>回调本身必须尽快返回（OneBot 有超时），所以真正的处理丢到后台线程里做。</p>
  */
 @Service
@@ -36,7 +40,7 @@ public class BotMessageService {
             4. 工具查不到就直说查不到，不要猜测。
             """;
 
-    private final QqBotProperties properties;
+    private final BotSettingsService settingsService;
     private final OneBotClient client;
     private final MonitorChatTools tools;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
@@ -47,15 +51,16 @@ public class BotMessageService {
         return thread;
     });
 
-    /** 懒构建并缓存：没配大模型时保持为 null。 */
+    /** 懒构建并缓存；记忆窗口变了会重建。 */
     private volatile ChatClient chatClient;
-    private volatile boolean chatClientResolved;
+    private volatile int chatClientWindow = -1;
+    private volatile boolean chatClientUnavailable;
 
-    public BotMessageService(QqBotProperties properties,
+    public BotMessageService(BotSettingsService settingsService,
                              OneBotClient client,
                              MonitorChatTools tools,
                              ObjectProvider<ChatClient.Builder> chatClientBuilder) {
-        this.properties = properties;
+        this.settingsService = settingsService;
         this.client = client;
         this.tools = tools;
         this.chatClientBuilder = chatClientBuilder;
@@ -66,16 +71,21 @@ public class BotMessageService {
         if (event == null || !"message".equals(event.postType())) {
             return;
         }
+        BotSettings settings = settingsService.current();
+        if (!settings.enabled()) {
+            log.debug("机器人运行时开关已关闭，忽略消息");
+            return;
+        }
         boolean group = "group".equals(event.messageType());
         boolean privateChat = "private".equals(event.messageType());
         if (!group && !privateChat) {
             return;
         }
-        if (!allowed(event, group)) {
+        if (!allowed(event, group, settings)) {
             log.debug("忽略非白名单会话: group={}, user={}", event.groupId(), event.userId());
             return;
         }
-        if (group && properties.isRequireMention() && !mentioned(event)) {
+        if (group && settings.requireMention() && !mentioned(event)) {
             return;
         }
         String text = extractText(event);
@@ -85,26 +95,26 @@ public class BotMessageService {
         executor.submit(() -> {
             String reply;
             try {
-                reply = answer(event, text);
+                reply = answer(event, text, settings);
             } catch (Exception ex) {
                 log.warn("处理 QQ 消息失败: {}", ex.getMessage());
                 reply = "处理这条消息时出错了：" + ex.getMessage();
             }
-            send(event, group, truncate(reply));
+            send(event, group, truncate(reply, settings.maxReplyLength()));
         });
     }
 
-    private boolean allowed(OneBotEvent event, boolean group) {
-        return group ? properties.isGroupAllowed(event.groupId())
-                : properties.isUserAllowed(event.userId());
+    private boolean allowed(OneBotEvent event, boolean group, BotSettings settings) {
+        return group ? settings.isGroupAllowed(event.groupId())
+                : settings.isUserAllowed(event.userId());
     }
 
-    private String answer(OneBotEvent event, String text) {
-        String prefix = properties.getCommandPrefix();
+    private String answer(OneBotEvent event, String text, BotSettings settings) {
+        String prefix = settings.commandPrefix();
         if (prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
             return command(text.substring(prefix.length()).trim());
         }
-        return askModel(event, text);
+        return askModel(event, text, settings);
     }
 
     /** 确定性命令：没配大模型也能用。 */
@@ -123,8 +133,8 @@ public class BotMessageService {
         };
     }
 
-    private String askModel(OneBotEvent event, String text) {
-        ChatClient client = chatClient();
+    private String askModel(OneBotEvent event, String text, BotSettings settings) {
+        ChatClient client = chatClient(settings);
         if (client == null) {
             return "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + help();
         }
@@ -135,30 +145,36 @@ public class BotMessageService {
                 .content();
     }
 
-    private ChatClient chatClient() {
-        if (!chatClientResolved) {
-            synchronized (this) {
-                if (!chatClientResolved) {
-                    ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
-                    if (builder != null) {
-                        chatClient = builder
-                                .defaultSystem(SYSTEM_PROMPT)
-                                .defaultTools(tools)
-                                .defaultAdvisors(MessageChatMemoryAdvisor.builder(
-                                        MessageWindowChatMemory.builder()
-                                                .maxMessages(Math.max(2, properties.getMemoryWindow()))
-                                                .build())
-                                        .build())
-                                .build();
-                        log.info("QQ 机器人已接入大模型，支持自然语言问答");
-                    } else {
-                        log.info("未配置大模型，QQ 机器人只支持命令（/help 查看）");
-                    }
-                    chatClientResolved = true;
-                }
-            }
+    private ChatClient chatClient(BotSettings settings) {
+        if (chatClientUnavailable) {
+            return null;
         }
-        return chatClient;
+        int window = Math.max(2, settings.memoryWindow());
+        ChatClient cached = chatClient;
+        if (cached != null && chatClientWindow == window) {
+            return cached;
+        }
+        synchronized (this) {
+            if (chatClient != null && chatClientWindow == window) {
+                return chatClient;
+            }
+            ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
+            if (builder == null) {
+                chatClientUnavailable = true;
+                log.info("未配置大模型，QQ 机器人只支持命令（/help 查看）");
+                return null;
+            }
+            chatClient = builder
+                    .defaultSystem(SYSTEM_PROMPT)
+                    .defaultTools(tools)
+                    .defaultAdvisors(MessageChatMemoryAdvisor.builder(
+                            MessageWindowChatMemory.builder().maxMessages(window).build())
+                            .build())
+                    .build();
+            chatClientWindow = window;
+            log.info("QQ 机器人已接入大模型，支持自然语言问答（记忆窗口 {} 条）", window);
+            return chatClient;
+        }
     }
 
     private String conversationId(OneBotEvent event) {
@@ -215,11 +231,11 @@ public class BotMessageService {
         return raw != null && event.selfId() != null && raw.contains("[CQ:at,qq=" + event.selfId());
     }
 
-    private String truncate(String text) {
+    private String truncate(String text, int maxReplyLength) {
         if (text == null) {
             return "";
         }
-        int max = Math.max(50, properties.getMaxReplyLength());
+        int max = Math.max(50, maxReplyLength);
         return text.length() <= max ? text : text.substring(0, max) + "…（已截断）";
     }
 

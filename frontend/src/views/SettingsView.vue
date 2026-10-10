@@ -176,6 +176,83 @@
       <el-divider content-position="left">该事件的收件人</el-divider>
       <RecipientEditor scene="API_KEY_CHANGE" :can-write="canWrite" />
     </el-card>
+    <el-card shadow="never" class="admin-card" v-loading="botLoading">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>QQ 机器人</h3>
+            <p>白名单与行为参数保存在数据库里，改完立即生效，不需要重建容器</p>
+          </div>
+        </div>
+      </template>
+
+      <el-form label-width="150px" :disabled="!canWrite">
+        <el-form-item label="启用">
+          <el-switch v-model="botForm.enabled" />
+          <span class="admin-form-hint" style="margin-left: 10px">
+            关闭后机器人收到消息也不响应；服务端总开关仍是环境变量 MONITOR_BOT_ENABLED
+          </span>
+        </el-form-item>
+
+        <el-form-item label="允许的群号">
+          <el-select
+            v-model="botForm.allowedGroups"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入群号后回车；留空表示不限制"
+            style="width: 100%"
+          >
+            <el-option v-for="item in botForm.allowedGroups" :key="item" :label="item" :value="item" />
+          </el-select>
+          <small class="admin-form-hint">只有这些群里 @机器人 才会响应</small>
+        </el-form-item>
+
+        <el-form-item label="允许的私聊 QQ">
+          <el-select
+            v-model="botForm.allowedUsers"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入 QQ 号后回车；留空表示不限制"
+            style="width: 100%"
+          >
+            <el-option v-for="item in botForm.allowedUsers" :key="item" :label="item" :value="item" />
+          </el-select>
+          <small class="admin-form-hint">只有这些 QQ 私聊机器人才会响应</small>
+        </el-form-item>
+
+        <el-form-item label="群里需 @机器人">
+          <el-switch v-model="botForm.requireMention" />
+          <span class="admin-form-hint" style="margin-left: 10px">关掉后群里任意消息都会触发，容易刷屏</span>
+        </el-form-item>
+
+        <el-form-item label="命令前缀">
+          <el-input v-model="botForm.commandPrefix" style="width: 120px" maxlength="8" />
+          <span class="admin-form-hint" style="margin-left: 10px">例如 / 表示 /help、/号池</span>
+        </el-form-item>
+
+        <el-form-item label="回复最大长度">
+          <el-input-number v-model="botForm.maxReplyLength" :min="50" :max="4000" :step="50" />
+          <span class="admin-form-hint" style="margin-left: 10px">超长会被截断（QQ 对消息长度有限制）</span>
+        </el-form-item>
+
+        <el-form-item label="会话记忆条数">
+          <el-input-number v-model="botForm.memoryWindow" :min="2" :max="50" />
+          <span class="admin-form-hint" style="margin-left: 10px">保留最近几条对话，用于「那 30 天呢？」这类追问</span>
+        </el-form-item>
+
+        <el-form-item>
+          <el-button type="primary" :loading="botSaving" @click="saveBotSettingsForm">保存</el-button>
+          <span v-if="botUpdatedAt" class="admin-form-hint" style="margin-left: 12px">上次保存：{{ botUpdatedAt }}</span>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
   </section>
 </template>
 
@@ -184,15 +261,19 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import RecipientEditor from '../components/RecipientEditor.vue'
 import {
+  getBotSettings,
   getMailSettings,
   getNotificationSettings,
+  saveBotSettings,
   saveMailSettings,
   saveNotificationSettings,
   sendTestMail,
   testMailConnection,
+  type BotSettingsInput,
   type MailSettingsInput,
   type NotificationSettingsInput,
 } from '../api/settings'
+import type { BotSettings } from '../types'
 
 defineProps<{ canWrite?: boolean }>()
 
@@ -324,9 +405,58 @@ async function saveNotification() {
   }
 }
 
+const botLoading = ref(false)
+const botSaving = ref(false)
+const botUpdatedAt = ref('')
+const botForm = reactive<BotSettingsInput>({
+  enabled: true,
+  allowedGroups: [],
+  allowedUsers: [],
+  requireMention: true,
+  commandPrefix: '/',
+  maxReplyLength: 900,
+  memoryWindow: 10,
+})
+
+function applyBotSettings(settings: BotSettings) {
+  Object.assign(botForm, {
+    enabled: settings.enabled,
+    allowedGroups: [...(settings.allowedGroups ?? [])],
+    allowedUsers: [...(settings.allowedUsers ?? [])],
+    requireMention: settings.requireMention,
+    commandPrefix: settings.commandPrefix || '/',
+    maxReplyLength: settings.maxReplyLength || 900,
+    memoryWindow: settings.memoryWindow || 10,
+  })
+  botUpdatedAt.value = settings.updatedAt ? new Date(settings.updatedAt).toLocaleString('zh-CN') : ''
+}
+
+async function loadBot() {
+  botLoading.value = true
+  try {
+    applyBotSettings(await getBotSettings())
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载机器人设置失败')
+  } finally {
+    botLoading.value = false
+  }
+}
+
+async function saveBotSettingsForm() {
+  botSaving.value = true
+  try {
+    applyBotSettings(await saveBotSettings({ ...botForm }))
+    ElMessage.success('机器人设置已保存，立即生效')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '保存失败')
+  } finally {
+    botSaving.value = false
+  }
+}
 onMounted(() => {
   load()
   loadNotification()
+  loadBot()
 })
 </script>
 

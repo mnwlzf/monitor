@@ -105,7 +105,25 @@ MONITOR_BOT_REQUIRE_MENTION=true
 
 命令前缀可用 `MONITOR_BOT_COMMAND_PREFIX` 改。**这些命令不依赖大模型。**
 
-## 4. 开启自然语言问答（可选）
+## 4. 白名单与行为参数（页面上配置）
+
+`允许的群号`、`允许的私聊 QQ`、`命令前缀`、`回复最大长度`、`会话记忆条数`、`群里是否需 @机器人`
+都在 **「系统设置」页 → QQ 机器人** 卡片里维护，存在数据库 `bot_settings` 单行表里，
+**保存后立即生效，不需要重建容器**。
+
+> `MONITOR_BOT_ALLOWED_GROUPS` / `MONITOR_BOT_ALLOWED_USERS` 等环境变量只在**首次启动**时用来
+> 初始化这一行（老部署平滑过渡）；之后一律以页面上的为准。
+
+仍然留在环境变量里的只有「部署级接线参数」，因为它们要和 NapCat 侧保持一致：
+
+| 环境变量 | 作用 |
+|---|---|
+| `MONITOR_BOT_ENABLED` | 总开关：false 时回调接口直接 404 |
+| `MONITOR_BOT_WEBHOOK_TOKEN` | 与 NapCat 上报共用的密钥（用于校验 X-Signature） |
+| `MONITOR_BOT_API_BASE_URL` | OneBot HTTP API 地址，默认 `http://napcat:3000` |
+| `MONITOR_BOT_API_TOKEN` | OneBot HTTP API 的 access token，一般留空 |
+
+## 5. 开启自然语言问答（可选）
 
 默认 `SPRING_AI_MODEL_CHAT=none`，不配 Key 也能正常启动。要开启对话：
 
@@ -124,14 +142,14 @@ SPRING_AI_OPENAI_MODEL=gpt-4o-mini
 
 每个会话保留最近 10 条消息（`MONITOR_BOT_MEMORY_WINDOW`），支持追问「那 30 天呢？」。
 
-## 5. 安全
+## 6. 安全
 
 - 回调接口 `/api/v1/bot/onebot` 没有登录会话，**完全依赖共享密钥**：
   未配置 `MONITOR_BOT_WEBHOOK_TOKEN` 时直接返回 404，密钥不匹配返回 403。
 - 建议同时配置 `MONITOR_BOT_ALLOWED_GROUPS` / `MONITOR_BOT_ALLOWED_USERS`，避免被拉进陌生群乱问。
 - 机器人只读：暴露给模型的工具全部是查询接口，没有写操作。
 
-## 6. 排查
+## 7. 排查
 
 | 现象 | 排查方向 |
 |---|---|

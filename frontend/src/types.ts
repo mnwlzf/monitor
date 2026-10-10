@@ -354,3 +354,19 @@ export interface NotificationSettings {
   alertIntervalMinutes: number
   updatedAt: string | null
 }
+/**
+ * 页面可配置的 QQ 机器人设置。
+ *
+ * 白名单等保存在数据库里，页面上改完立即生效，不需要重建容器；
+ * 部署级接线参数（webhook 密钥、OneBot 地址、总开关）仍在环境变量里。
+ */
+export interface BotSettings {
+  enabled: boolean
+  allowedGroups: string[]
+  allowedUsers: string[]
+  requireMention: boolean
+  commandPrefix: string
+  maxReplyLength: number
+  memoryWindow: number
+  updatedAt: string | null
+}

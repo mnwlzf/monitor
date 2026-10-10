@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
+import type { BotSettings, MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -85,4 +85,28 @@ export async function addMailRecipient(input: MailRecipientInput): Promise<MailR
 /** 删除余额提醒收件人。 */
 export async function deleteMailRecipient(id: number): Promise<void> {
   await apiRequest<void>(`/api/v1/settings/notification/recipients/${id}`, { method: 'DELETE' })
+}
+
+/** 保存 QQ 机器人设置的表单载荷。 */
+export interface BotSettingsInput {
+  enabled: boolean
+  allowedGroups: string[]
+  allowedUsers: string[]
+  requireMention: boolean
+  commandPrefix: string
+  maxReplyLength: number
+  memoryWindow: number
+}
+
+/** 读取 QQ 机器人设置。 */
+export async function getBotSettings(): Promise<BotSettings> {
+  return apiRequest<BotSettings>('/api/v1/settings/bot')
+}
+
+/** 保存 QQ 机器人设置；保存后立即生效，不需要重启。 */
+export async function saveBotSettings(input: BotSettingsInput): Promise<BotSettings> {
+  return apiRequest<BotSettings>('/api/v1/settings/bot', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
 }

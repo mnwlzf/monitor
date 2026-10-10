@@ -45,10 +45,14 @@ class QqBotWebhookIntegrationTest {
         tools = mock(MonitorChatTools.class);
         when(tools.poolOverview(anyString())).thenReturn("号池监控（近 24h）：账号 A 请求 10，缓存率 80.0%");
 
+        BotSettingsService settingsService = mock(BotSettingsService.class);
+        when(settingsService.current()).thenReturn(new BotSettings(
+                true, java.util.Set.of(), java.util.Set.of(), true, "/", 900, 10));
+
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
-        BotMessageService service = new BotMessageService(properties, client, tools, provider);
+        BotMessageService service = new BotMessageService(settingsService, client, tools, provider);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();
