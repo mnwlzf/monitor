@@ -8,6 +8,8 @@ import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
 import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.bot.vision.BotImageFetcher;
+import com.monitor.platform.bot.vision.BotVisionProperties;
 import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.report.BotReportRenderer;
 import jakarta.annotation.PreDestroy;
@@ -17,7 +19,9 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.ai.content.Media;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -140,11 +144,16 @@ public class BotMessageService {
     /** 非平台用户看到「未知命令」时的统一回复，不暴露平台功能的存在。 */
     private static final String UNKNOWN_COMMAND = "这个命令我用不了，发送 /help 看看能做什么。";
 
+    /** 用户只发图片、没带文字时的提示词。 */
+    private static final String IMAGE_ONLY_PROMPT = "这是我发来的图片，请描述并回应。";
+
     private final BotSettingsService settingsService;
     private final OneBotClient client;
     private final MonitorChatTools tools;
     private final WeatherTools weatherTools;
     private final BotMessageArchiveService archive;
+    private final BotImageFetcher imageFetcher;
+    private final BotVisionProperties visionProperties;
     private final BotIdentityResolver identityResolver;
     private final QqUserBindingService bindings;
     private final BotReportRenderer reportRenderer;
@@ -165,6 +174,8 @@ public class BotMessageService {
                              MonitorChatTools tools,
                              WeatherTools weatherTools,
                              BotMessageArchiveService archive,
+                             BotImageFetcher imageFetcher,
+                             BotVisionProperties visionProperties,
                              BotIdentityResolver identityResolver,
                              QqUserBindingService bindings,
                              BotReportRenderer reportRenderer,
@@ -174,6 +185,8 @@ public class BotMessageService {
         this.tools = tools;
         this.weatherTools = weatherTools;
         this.archive = archive;
+        this.imageFetcher = imageFetcher;
+        this.visionProperties = visionProperties;
         this.identityResolver = identityResolver;
         this.bindings = bindings;
         this.reportRenderer = reportRenderer;
@@ -234,17 +247,27 @@ public class BotMessageService {
             return;
         }
         String text = extractText(event);
-        if (text.isBlank()) {
+        // 图片段单独抽出来：之前只认文本段，导致「只发图片」的消息被当成空消息直接丢掉
+        List<BotImageFetcher.ImageRef> imageRefs = visionProperties.isEnabled()
+                ? BotImageFetcher.extract(event.message())
+                : List.of();
+        if (text.isBlank() && imageRefs.isEmpty()) {
+            // 既没文字也没图片（表情、语音等），目前不支持
             return;
         }
         executor.submit(() -> {
             BotIdentity identity = identityResolver.resolve(event.userId());
-            // 先存档用户消息：即使后面回答失败，也能查证「他说了什么」
-            String correlationId = archive.recordInbound(event, text, kindOf(text, settings), identity);
+            // 下载图片放在后台线程里做，不占用回调线程
+            List<BotImageFetcher.FetchedImage> images = imageFetcher.fetch(imageRefs);
+
+            // 先存档用户消息：即使后面回答失败，也能查证「他说了什么、发了什么图」
+            String correlationId = archive.recordInbound(event,
+                    describeIncoming(text, imageRefs.size(), images.size()),
+                    kindOf(text, settings, !imageRefs.isEmpty()), identity);
 
             BotReport report;
             try {
-                report = answer(event, text, settings, identity);
+                report = answer(event, text, settings, identity, images);
             } catch (Exception ex) {
                 log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                         event.userId(), identity.platformUser(), ex.getMessage());
@@ -266,12 +289,14 @@ public class BotMessageService {
                 : settings.isUserAllowed(event.userId());
     }
 
-    private BotReport answer(OneBotEvent event, String text, BotSettings settings, BotIdentity identity) {
+    private BotReport answer(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
+                             List<BotImageFetcher.FetchedImage> images) {
         String prefix = settings.commandPrefix();
-        if (prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
+        // 只发图片时 text 为空，不能当命令处理，直接交给模型
+        if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
             return command(text.substring(prefix.length()).trim(), identity, event);
         }
-        return askModel(event, text, settings, identity);
+        return askModel(event, text, settings, identity, images);
     }
 
     /** 确定性命令：没配大模型也能用。 */
@@ -377,14 +402,31 @@ public class BotMessageService {
         return "当前绑定邮箱：" + identity.email();
     }
 
-    private BotReport askModel(OneBotEvent event, String text, BotSettings settings, BotIdentity identity) {
+    private BotReport askModel(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
+                               List<BotImageFetcher.FetchedImage> images) {
         Persona persona = personaOf(identity);
         ChatClient chatClient = chatClient(persona, settings);
         if (chatClient == null) {
-            return text("自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + help(identity));
+            String message = images.isEmpty()
+                    ? "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + help(identity)
+                    : "看图片需要开启大模型（SPRING_AI_MODEL_CHAT）。当前可用命令：\n" + help(identity);
+            return text(message);
         }
+        String promptText = text.isBlank() ? IMAGE_ONLY_PROMPT : text;
         String answer = chatClient.prompt()
-                .user(text)
+                .user(spec -> {
+                    spec.text(promptText);
+                    // 图片以多模态附件交给模型；模型不支持视觉时上游会报错，由外层统一兜底
+                    for (BotImageFetcher.FetchedImage image : images) {
+                        byte[] bytes = image.bytes();
+                        spec.media(new Media(image.mediaType(), new ByteArrayResource(bytes) {
+                            @Override
+                            public String getFilename() {
+                                return "image." + image.mediaType().getSubtype();
+                            }
+                        }));
+                    }
+                })
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona)))
                 .call()
                 .content();
@@ -499,12 +541,37 @@ public class BotMessageService {
         return new SendOutcome(truncated, BotMessageArchiveService.KIND_TEXT);
     }
 
-    /** 判断这条用户消息是命令还是普通消息。 */
-    private static String kindOf(String text, BotSettings settings) {
+    /** 判断这条用户消息的形态，用于存档分类。 */
+    private static String kindOf(String text, BotSettings settings, boolean hasImages) {
         String prefix = settings.commandPrefix();
-        return prefix != null && !prefix.isBlank() && text.startsWith(prefix)
-                ? BotMessageArchiveService.KIND_COMMAND
-                : BotMessageArchiveService.KIND_TEXT;
+        if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
+            return BotMessageArchiveService.KIND_COMMAND;
+        }
+        return hasImages ? BotMessageArchiveService.KIND_IMAGE : BotMessageArchiveService.KIND_TEXT;
+    }
+
+    /**
+     * 存档里对用户消息的可读描述。
+     *
+     * <p>图片本身不入库（体积大且会过期），只记数量与读取情况 ——
+     * 配合文字内容足够用于事后查证。</p>
+     */
+    private static String describeIncoming(String text, int total, int fetched) {
+        StringBuilder sb = new StringBuilder();
+        if (total > 0) {
+            sb.append("[图片 ×").append(total);
+            if (fetched < total) {
+                sb.append("，成功读取 ").append(fetched).append(" 张");
+            }
+            sb.append("]");
+        }
+        if (text != null && !text.isBlank()) {
+            if (!sb.isEmpty()) {
+                sb.append(" ");
+            }
+            sb.append(text);
+        }
+        return sb.toString();
     }
 
     /** 实际发出去的内容与形态，用于存档。 */

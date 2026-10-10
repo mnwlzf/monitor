@@ -87,6 +87,16 @@ monitor:
     # 身份识别：把自建 Sub2API 的平台用户邮箱同步到 Redis，
     # 用于区分「平台用户 / 陌生人」以及「管理员 / 普通用户」。
     # 数据来源是 monitor.pool.ingest.* 配置的只读库（public.users 表）。
+    # 图片理解：用户发的图片会被下载下来、作为多模态消息交给模型识别。
+    # 需要模型支持视觉（例如 gpt-4o、Qwen-VL）；不支持时上游会报错，机器人会回一句出错提示。
+    vision:
+      enabled: ${MONITOR_BOT_VISION_ENABLED:true}
+      # 单张图片大小上限（字节），超过直接跳过
+      max-image-bytes: ${MONITOR_BOT_VISION_MAX_BYTES:8388608}
+      # 单条消息最多处理几张图
+      max-images-per-message: ${MONITOR_BOT_VISION_MAX_IMAGES:3}
+      timeout: ${MONITOR_BOT_VISION_TIMEOUT:15s}
+
     # 消息存档：记录「谁说了什么、机器人回了什么、当时是什么身份」，
     # 用于事后查证。写入是 best-effort，失败不影响机器人回复。
     archive:
