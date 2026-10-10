@@ -1,9 +1,13 @@
 # ============================================================
-# Monitor 一体化部署
-# 基于项目原始 compose.yaml（postgres + redis）扩展，新增 app 服务：
-#   - 只起基础设施：docker compose up -d postgres redis
-#   - 一体化启动：  docker compose up -d --build
-# 使用外部数据库/Redis 部署时请使用 compose.external.yaml
+# Monitor 一体化部署（app + postgres + redis + 可选 napcat）
+#
+#   - 一体化启动：    docker compose up -d --build
+#   - 只起基础设施：  docker compose up -d postgres redis
+#   - 不用 QQ 机器人：docker compose up -d app postgres redis
+#
+# 应用配置全部来自 .env（唯一事实来源，模板见 .env.example），
+# 新增环境变量只需改 .env，不用再动这个文件。
+# 使用外部数据库/Redis 部署时改用 compose.external.yaml。
 # ============================================================
 name: monitor
 
@@ -20,49 +24,26 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # 应用配置统一来自 .env（唯一事实来源）。这里只保留两类：
+    #   1) 容器内必须固定的值；
+    #   2) 关键密钥的缺失校验——缺了让 compose 直接报错，而不是等应用启动才失败。
+    # 新增环境变量只需改 .env / .env.example，不用再动这个文件。
+    env_file:
+      - .env
     environment:
-      TZ: ${TZ:-Asia/Shanghai}
       SERVER_ADDRESS: 0.0.0.0
       SERVER_PORT: 8080
-      # 数据库与 Redis 全部通过环境变量外挂，指向外部服务时改这里即可
-      DB_URL: ${DB_URL:?Set DB_URL in .env}
-      DB_USERNAME: ${DB_USERNAME:?Set DB_USERNAME in .env}
-      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
-      REDIS_HOST: ${REDIS_HOST:?Set REDIS_HOST in .env}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_USERNAME: ${REDIS_USERNAME:-}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
-      UPSTREAM_CREDENTIAL_KEY: ${UPSTREAM_CREDENTIAL_KEY:?Set UPSTREAM_CREDENTIAL_KEY in .env}
-      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8}
       LOGGING_FILE_NAME: /app/logs/monitor.log
-      # 登录与权限
-      MONITOR_ADMIN_USERNAME: ${MONITOR_ADMIN_USERNAME:?Set MONITOR_ADMIN_USERNAME in .env}
-      MONITOR_ADMIN_PASSWORD: ${MONITOR_ADMIN_PASSWORD:?Set MONITOR_ADMIN_PASSWORD in .env}
-      MONITOR_SECURITY_ENABLED: ${MONITOR_SECURITY_ENABLED:-true}
-      MONITOR_SESSION_TIMEOUT: ${MONITOR_SESSION_TIMEOUT:-8h}
-      MONITOR_SESSION_COOKIE_NAME: ${MONITOR_SESSION_COOKIE_NAME:-MONITOR_SESSION}
-      MONITOR_SESSION_COOKIE_SECURE: ${MONITOR_SESSION_COOKIE_SECURE:-false}
-      # 号池直连库增量采集（可选）：指向自建 Sub2API 的 PostgreSQL，建议用只读账号
-      SUB2API_DB_ENABLED: ${SUB2API_DB_ENABLED:-false}
-      SUB2API_DB_URL: ${SUB2API_DB_URL:-}
-      SUB2API_DB_USERNAME: ${SUB2API_DB_USERNAME:-}
-      SUB2API_DB_PASSWORD: ${SUB2API_DB_PASSWORD:-}
-      SUB2API_DB_BATCH_SIZE: ${SUB2API_DB_BATCH_SIZE:-2000}
-      SUB2API_DB_MAX_BATCHES: ${SUB2API_DB_MAX_BATCHES:-20}
-      # QQ 机器人（OneBot v11）与大模型（Spring AI），默认关闭
-      MONITOR_BOT_ENABLED: ${MONITOR_BOT_ENABLED:-false}
-      MONITOR_BOT_WEBHOOK_TOKEN: ${MONITOR_BOT_WEBHOOK_TOKEN:-}
       # 默认直连同 compose 内的 napcat 容器（容器内端口固定 3000）
       MONITOR_BOT_API_BASE_URL: ${MONITOR_BOT_API_BASE_URL:-http://napcat:3000}
-      MONITOR_BOT_API_TOKEN: ${MONITOR_BOT_API_TOKEN:-}
-      MONITOR_BOT_ALLOWED_GROUPS: ${MONITOR_BOT_ALLOWED_GROUPS:-}
-      MONITOR_BOT_ALLOWED_USERS: ${MONITOR_BOT_ALLOWED_USERS:-}
-      MONITOR_BOT_REQUIRE_MENTION: ${MONITOR_BOT_REQUIRE_MENTION:-true}
-      MONITOR_BOT_COMMAND_PREFIX: ${MONITOR_BOT_COMMAND_PREFIX:-/}
-      SPRING_AI_MODEL_CHAT: ${SPRING_AI_MODEL_CHAT:-none}
-      SPRING_AI_OPENAI_API_KEY: ${SPRING_AI_OPENAI_API_KEY:-}
-      SPRING_AI_OPENAI_BASE_URL: ${SPRING_AI_OPENAI_BASE_URL:-https://api.openai.com}
-      SPRING_AI_OPENAI_MODEL: ${SPRING_AI_OPENAI_MODEL:-gpt-4o-mini}
+      DB_URL: ${DB_URL:?请在 .env 中设置 DB_URL}
+      DB_USERNAME: ${DB_USERNAME:?请在 .env 中设置 DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST:?请在 .env 中设置 REDIS_HOST}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
+      UPSTREAM_CREDENTIAL_KEY: ${UPSTREAM_CREDENTIAL_KEY:?请在 .env 中设置 UPSTREAM_CREDENTIAL_KEY}
+      MONITOR_ADMIN_USERNAME: ${MONITOR_ADMIN_USERNAME:?请在 .env 中设置 MONITOR_ADMIN_USERNAME}
+      MONITOR_ADMIN_PASSWORD: ${MONITOR_ADMIN_PASSWORD:?请在 .env 中设置 MONITOR_ADMIN_PASSWORD}
     ports:
       - "${APP_PORT:-8080}:8080"
     volumes:
