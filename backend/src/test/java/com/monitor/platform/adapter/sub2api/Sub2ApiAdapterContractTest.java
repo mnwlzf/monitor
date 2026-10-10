@@ -1,5 +1,6 @@
 package com.monitor.platform.adapter.sub2api;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -9,7 +10,11 @@ import org.springframework.boot.test.context.SpringBootTest;
  *
  * <p>该测试依赖真实 Sub2API 服务、Redis 和数据库环境，用于验证登录、个人信息、密钥列表和可用分组
  * 三个现有调用链路；普通单元测试不应依赖此用例。</p>
+ *
+ * <p>因此标记为 {@code contract} 分组，默认被 surefire 排除（见 pom.xml）；
+ * 需要联调时显式执行：{@code mvn test -Pcontract-tests}。</p>
  */
+@Tag("contract")
 @SpringBootTest
 class Sub2ApiAdapterContractTest {
 

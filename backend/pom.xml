@@ -115,6 +115,38 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!--
+                      标记为 contract 的联调用例依赖真实上游服务 / 数据库 / Redis，
+                      默认不参与构建，避免 mvn test 与 CI 因外部环境不可用而失败。
+                      需要执行时用：mvn test -Pcontract-tests
+                    -->
+                    <excludedGroups>contract</excludedGroups>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- 只跑联调用例：mvn test -Pcontract-tests -->
+        <profile>
+            <id>contract-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <!-- 覆盖默认排除规则（none 是不存在的 tag，等价于不排除） -->
+                            <excludedGroups combine.self="override">none</excludedGroups>
+                            <groups>contract</groups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
