@@ -210,6 +210,24 @@
           <small class="admin-form-hint">只有这些群里 @机器人 才会响应</small>
         </el-form-item>
 
+        <el-form-item label="指定群（平台功能）">
+          <el-select
+            v-model="botForm.platformGroups"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="只有这些群才给平台功能；留空表示都不给"
+            style="width: 100%"
+          >
+            <el-option v-for="item in botForm.platformGroups" :key="item" :label="item" :value="item" />
+          </el-select>
+          <small class="admin-form-hint">
+            必须是「允许的群号」的子集；群聊与群临时会话都按这里的群号判定。留空 = 任何群都不给平台功能
+          </small>
+        </el-form-item>
+
         <el-form-item label="允许的私聊 QQ">
           <el-select
             v-model="botForm.allowedUsers"
@@ -500,6 +518,7 @@ const botForm = reactive<BotSettingsInput>({
   enabled: true,
   allowedGroups: [],
   allowedUsers: [],
+  platformGroups: [],
   requireMention: true,
   commandPrefix: '/',
   maxReplyLength: 900,
@@ -511,6 +530,7 @@ function applyBotSettings(settings: BotSettings) {
     enabled: settings.enabled,
     allowedGroups: [...(settings.allowedGroups ?? [])],
     allowedUsers: [...(settings.allowedUsers ?? [])],
+    platformGroups: [...(settings.platformGroups ?? [])],
     requireMention: settings.requireMention,
     commandPrefix: settings.commandPrefix || '/',
     maxReplyLength: settings.maxReplyLength || 900,
@@ -530,7 +550,20 @@ async function loadBot() {
   }
 }
 
+/** 「指定群」必须是「启用群」的子集；启用群留空（不限制）时无需校验。 */
+function validateBotPlatformGroups(): boolean {
+  const allowed = botForm.allowedGroups ?? []
+  if (allowed.length === 0) return true
+  const outside = (botForm.platformGroups ?? []).filter((g) => !allowed.includes(g))
+  if (outside.length > 0) {
+    ElMessage.error(`指定群必须是启用群的子集，以下群号不在启用群里：${outside.join('、')}`)
+    return false
+  }
+  return true
+}
+
 async function saveBotSettingsForm() {
+  if (!validateBotPlatformGroups()) return
   botSaving.value = true
   try {
     applyBotSettings(await saveBotSettings({ ...botForm }))

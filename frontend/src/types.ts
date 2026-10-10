@@ -364,6 +364,8 @@ export interface BotSettings {
   enabled: boolean
   allowedGroups: string[]
   allowedUsers: string[]
+  /** 平台功能群（指定群），必须是 allowedGroups 的子集；为空表示任何群都不给平台功能。 */
+  platformGroups: string[]
   requireMention: boolean
   commandPrefix: string
   maxReplyLength: number

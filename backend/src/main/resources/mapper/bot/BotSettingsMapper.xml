@@ -7,6 +7,7 @@
         <result column="enabled" property="enabled"/>
         <result column="allowed_groups" property="allowedGroups"/>
         <result column="allowed_users" property="allowedUsers"/>
+        <result column="platform_groups" property="platformGroups"/>
         <result column="require_mention" property="requireMention"/>
         <result column="command_prefix" property="commandPrefix"/>
         <result column="max_reply_length" property="maxReplyLength"/>
@@ -15,7 +16,7 @@
     </resultMap>
 
     <select id="selectSettings" resultMap="BotSettingsResultMap">
-        SELECT id, enabled, allowed_groups, allowed_users, require_mention,
+        SELECT id, enabled, allowed_groups, allowed_users, platform_groups, require_mention,
                command_prefix, max_reply_length, memory_window, updated_at
         FROM bot_settings
         WHERE id = 1
@@ -23,16 +24,17 @@
 
     <insert id="upsertSettings">
         INSERT INTO bot_settings (
-            id, enabled, allowed_groups, allowed_users, require_mention,
+            id, enabled, allowed_groups, allowed_users, platform_groups, require_mention,
             command_prefix, max_reply_length, memory_window, updated_at
         ) VALUES (
-            1, #{enabled}, #{allowedGroups}, #{allowedUsers}, #{requireMention},
+            1, #{enabled}, #{allowedGroups}, #{allowedUsers}, #{platformGroups}, #{requireMention},
             #{commandPrefix}, #{maxReplyLength}, #{memoryWindow}, #{updatedAt}
         )
         ON CONFLICT (id) DO UPDATE SET
             enabled = EXCLUDED.enabled,
             allowed_groups = EXCLUDED.allowed_groups,
             allowed_users = EXCLUDED.allowed_users,
+            platform_groups = EXCLUDED.platform_groups,
             require_mention = EXCLUDED.require_mention,
             command_prefix = EXCLUDED.command_prefix,
             max_reply_length = EXCLUDED.max_reply_length,

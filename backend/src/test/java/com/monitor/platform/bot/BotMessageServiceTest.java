@@ -62,7 +62,8 @@ class BotMessageServiceTest {
     void setUp() {
         BotSettingsService settingsService = mock(BotSettingsService.class);
         when(settingsService.current()).thenReturn(new BotSettings(
-                true, java.util.Set.of("222"), java.util.Set.of("999"), true, "/", 900, 10));
+                true, java.util.Set.of("222", "333"), java.util.Set.of("999"), java.util.Set.of("222"),
+                true, "/", 900, 10));
 
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);
@@ -104,6 +105,23 @@ class BotMessageServiceTest {
                 {"post_type":"message","message_type":"private","user_id":999,
                  "self_id":1,"raw_message":"%s","message":[{"type":"text","data":{"text":"%s"}}]}
                 """.formatted(text, text);
+    }
+
+    /** 群里 @机器人 后发一条命令。 */
+    private static String mentionedGroupCommand(Long groupId, String text) {
+        return """
+                {"post_type":"message","message_type":"group","group_id":%d,"user_id":999,
+                 "self_id":1,"raw_message":"[CQ:at,qq=1] %s",
+                 "message":[{"type":"at","data":{"qq":"1"}},{"type":"text","data":{"text":" %s"}}]}
+                """.formatted(groupId, text, text);
+    }
+
+    /** 群临时会话：private + sub_type=group，group_id 是发起群。 */
+    private static String tempSessionCommand(Long groupId, String text) {
+        return """
+                {"post_type":"message","message_type":"private","sub_type":"group","group_id":%d,"user_id":999,
+                 "self_id":1,"raw_message":"%s","message":[{"type":"text","data":{"text":"%s"}}]}
+                """.formatted(groupId, text, text);
     }
 
     /** 造一份纯文本必然超过 maxReplyLength(900) 的报表。 */
@@ -179,17 +197,79 @@ class BotMessageServiceTest {
         verify(client, never()).sendGroupMessage(anyLong(), anyString());
     }
 
-    /** 普通用户问平台数据：明确拒绝，且绝不能真的去查。 */
+    /** 普通用户在指定群里问平台数据：明确拒绝，且绝不能真的去查。 */
     @Test
-    void shouldDenyPlatformCommandForNormalUser() throws Exception {
+    void shouldDenyPlatformCommandForNormalUserInDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/平台")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertEquals("平台级数据仅管理员可查。", reply.getValue());
+        verifyNoInteractions(tools);
+    }
+
+    /** 普通用户好友私聊：不给平台功能，按「未知命令」处理（不暴露平台）。 */
+    @Test
+    void shouldHidePlatformFromNormalUserInFriendPrivate() throws Exception {
         identityIs(normalUser());
 
         service.onEvent(event(privateCommand("/平台")));
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(tools);
+    }
+
+    /** 普通用户从「指定群」发起临时会话：命中双重匹配，平台功能可用（但仍只到用户级）。 */
+    @Test
+    void shouldDenyPlatformForNormalUserInTempSessionOfDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(tempSessionCommand(222L, "/平台")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
         assertEquals("平台级数据仅管理员可查。", reply.getValue());
         verifyNoInteractions(tools);
+    }
+
+    /** 普通用户从「非指定群」发起临时会话：不命中群匹配，按未知命令处理。 */
+    @Test
+    void shouldHidePlatformForNormalUserInTempSessionOfNonDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(tempSessionCommand(333L, "/平台")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(tools);
+    }
+
+    /** 管理员在「启用群但非指定群」里：不给平台功能。 */
+    @Test
+    void shouldDenyPlatformForAdminInNonDesignatedGroup() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event(mentionedGroupCommand(333L, "/平台")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(333L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(tools);
+    }
+
+    /** 管理员在指定群里：平台功能可用。 */
+    @Test
+    void shouldAllowPlatformForAdminInDesignatedGroup() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/平台")));
+
+        verify(tools, timeout(3000)).platformReport();
     }
 
     /** 陌生人发平台命令：必须看起来「没有这个功能」，不能暴露平台的存在。 */

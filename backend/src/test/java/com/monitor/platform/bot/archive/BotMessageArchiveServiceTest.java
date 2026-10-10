@@ -40,7 +40,7 @@ class BotMessageArchiveServiceTest {
     private BotMessageArchiveService service;
 
     private static OneBotEvent event() {
-        return new OneBotEvent("message", "private", "1024", null, 999L, 1L, "你好", null, null);
+        return new OneBotEvent("message", "private", "friend", "1024", null, 999L, 1L, "你好", null, null);
     }
 
     @BeforeEach

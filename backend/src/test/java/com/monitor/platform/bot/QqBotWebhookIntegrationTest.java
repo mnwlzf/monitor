@@ -56,7 +56,7 @@ class QqBotWebhookIntegrationTest {
 
         BotSettingsService settingsService = mock(BotSettingsService.class);
         when(settingsService.current()).thenReturn(new BotSettings(
-                true, java.util.Set.of(), java.util.Set.of(), true, "/", 900, 10));
+                true, java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), true, "/", 900, 10));
 
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);

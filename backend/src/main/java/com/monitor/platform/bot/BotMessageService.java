@@ -45,12 +45,13 @@ import java.util.regex.Pattern;
  * <p>回调本身必须尽快返回（OneBot 有超时），所以真正的处理丢到后台线程里做。</p>
  *
  * <h2>身份与人设</h2>
- * 每条消息先由 {@link BotIdentityResolver} 解析发送者身份，再决定用哪套人设：
+ * 平台功能要<strong>双重命中</strong>才触发：邮箱匹配出身份，且消息落在「指定群」上下文里
+ * （群聊取本群，群临时会话取发起群）。判定见 {@link BotAccessPolicy}：
  * <ul>
- *     <li><b>平台管理员</b>：监控助手 + 全部只读查询工具；</li>
- *     <li><b>平台普通用户</b>：监控助手，但<strong>不挂任何平台级查询工具</strong>，
- *         问到平台数据时只回「仅管理员可查」；</li>
- *     <li><b>非平台用户</b>：纯聊天机器人，<strong>绝不能出现任何平台相关信息</strong>。</li>
+ *     <li><b>管理员</b>：好友私聊 / 群临时会话 / 指定群 → 监控助手 + 全部只读查询工具；</li>
+ *     <li><b>平台普通用户</b>：仅指定群及其临时会话 → 监控助手，但<strong>不挂平台级工具</strong>，
+ *         问到平台数据只回「仅管理员可查」；好友私聊只给正常功能；</li>
+ *     <li><b>其他人</b>（陌生人 / 非指定群）：纯聊天机器人，<strong>绝不能出现任何平台相关信息</strong>。</li>
  * </ul>
  *
  * <h2>回复形态</h2>
@@ -234,11 +235,11 @@ public class BotMessageService {
             log.debug("机器人运行时开关已关闭，忽略消息");
             return;
         }
-        boolean group = "group".equals(event.messageType());
-        boolean privateChat = "private".equals(event.messageType());
-        if (!group && !privateChat) {
+        BotChannel channel = BotChannel.of(event);
+        if (channel == null) {
             return;
         }
+        boolean group = channel == BotChannel.GROUP;
         if (!allowed(event, group, settings)) {
             log.debug("忽略非白名单会话: group={}, user={}", event.groupId(), event.userId());
             return;
@@ -257,6 +258,14 @@ public class BotMessageService {
         }
         executor.submit(() -> {
             BotIdentity identity = identityResolver.resolve(event.userId());
+            Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
+            boolean platformFeature =
+                    BotAccessPolicy.platformFeatureAllowed(identity, channel, contextGroup, settings);
+            if (channel == BotChannel.TEMP_SESSION) {
+                // 临时会话探针：确认 OneBot 实现是否带了发起群号（拿不到就按「不在指定群」处理）
+                log.info("收到群临时会话: user={}, 发起群={}, 触发平台功能={}",
+                        event.userId(), event.groupId(), platformFeature);
+            }
             // 下载图片放在后台线程里做，不占用回调线程
             List<BotImageFetcher.FetchedImage> images = imageFetcher.fetch(imageRefs);
 
@@ -267,12 +276,12 @@ public class BotMessageService {
 
             BotReport report;
             try {
-                report = answer(event, text, settings, identity, images);
+                report = answer(event, text, settings, identity, platformFeature, channel, images);
             } catch (Exception ex) {
                 log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                         event.userId(), identity.platformUser(), ex.getMessage());
-                // 异常细节只回给平台用户，避免向陌生人泄露内部实现
-                report = BotReport.fromMarkdown(identity.platformUser()
+                // 异常细节只回给有平台功能的会话，避免向陌生人泄露内部实现
+                report = BotReport.fromMarkdown(platformFeature
                         ? "处理这条消息时出错了：" + ex.getMessage()
                         : "处理这条消息时出错了，请稍后再试。");
             }
@@ -280,7 +289,7 @@ public class BotMessageService {
             SendOutcome outcome = send(event, group, report, settings.maxReplyLength());
             // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
             archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
-                    personaOf(identity).name(), correlationId);
+                    personaOf(identity, platformFeature).name(), correlationId);
         });
     }
 
@@ -290,22 +299,24 @@ public class BotMessageService {
     }
 
     private BotReport answer(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
+                             boolean platformFeature, BotChannel channel,
                              List<BotImageFetcher.FetchedImage> images) {
         String prefix = settings.commandPrefix();
         // 只发图片时 text 为空，不能当命令处理，直接交给模型
         if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
-            return command(text.substring(prefix.length()).trim(), identity, event);
+            return command(text.substring(prefix.length()).trim(), identity, platformFeature, event);
         }
-        return askModel(event, text, settings, identity, images);
+        return askModel(event, text, settings, identity, platformFeature, channel, images);
     }
 
     /** 确定性命令：没配大模型也能用。 */
-    private BotReport command(String commandLine, BotIdentity identity, OneBotEvent event) {
+    private BotReport command(String commandLine, BotIdentity identity, boolean platformFeature,
+                              OneBotEvent event) {
         String[] parts = commandLine.split("\\s+", 2);
         String name = parts[0].toLowerCase(Locale.ROOT);
         String arg = parts.length > 1 ? parts[1].trim() : "";
         return switch (name) {
-            case "help", "帮助", "?" -> text(help(identity));
+            case "help", "帮助", "?" -> text(help(identity, platformFeature));
             case "bind", "绑定" -> text(bind(arg, event));
             case "unbind", "解绑" -> text(unbind(event));
             case "whoami", "我的信息", "me" -> text(whoami(identity));
@@ -313,15 +324,15 @@ public class BotMessageService {
             // 天气与平台无关，所有人（含陌生人）都能用
             case "weather", "天气" -> weather(arg);
 
-            // 平台级命令：非平台用户一律按「未知命令」处理，不暴露功能存在
-            case "platform", "平台", "overview" -> platformOnly(identity, tools::platformReport);
-            case "pool", "号池" -> platformOnly(identity, () -> tools.poolReport(arg));
-            case "ingest", "采集" -> platformOnly(identity, tools::ingestReport);
-            case "account", "账号" -> platformOnly(identity, () -> tools.accountReport(arg));
-            case "changes", "变更" -> platformOnly(identity, () -> tools.changesReport(parseInt(arg, 5)));
+            // 平台级命令：没有平台功能（未命中指定群 / 陌生人）一律按「未知命令」处理，不暴露功能存在
+            case "platform", "平台", "overview" -> platformOnly(identity, platformFeature, tools::platformReport);
+            case "pool", "号池" -> platformOnly(identity, platformFeature, () -> tools.poolReport(arg));
+            case "ingest", "采集" -> platformOnly(identity, platformFeature, tools::ingestReport);
+            case "account", "账号" -> platformOnly(identity, platformFeature, () -> tools.accountReport(arg));
+            case "changes", "变更" -> platformOnly(identity, platformFeature, () -> tools.changesReport(parseInt(arg, 5)));
 
-            default -> text(identity.platformUser()
-                    ? "未知命令：" + name + "\n" + help(identity)
+            default -> text(platformFeature
+                    ? "未知命令：" + name + "\n" + help(identity, platformFeature)
                     : UNKNOWN_COMMAND);
         };
     }
@@ -332,8 +343,8 @@ public class BotMessageService {
      * <p>非平台用户必须看起来「压根没有这个功能」：返回和未知命令完全一样的提示，
      * 而不是「权限不足」，否则等于告诉对方平台和权限体系的存在。</p>
      */
-    private BotReport platformOnly(BotIdentity identity, Supplier<BotReport> action) {
-        if (!identity.platformUser()) {
+    private BotReport platformOnly(BotIdentity identity, boolean platformFeature, Supplier<BotReport> action) {
+        if (!platformFeature) {
             return text(UNKNOWN_COMMAND);
         }
         if (!identity.admin()) {
@@ -347,8 +358,8 @@ public class BotMessageService {
         return BotReport.fromMarkdown(value);
     }
 
-    private String help(BotIdentity identity) {
-        if (!identity.platformUser()) {
+    private String help(BotIdentity identity, boolean platformFeature) {
+        if (!platformFeature) {
             return GUEST_HELP;
         }
         return identity.admin() ? ADMIN_HELP : USER_HELP;
@@ -403,13 +414,14 @@ public class BotMessageService {
     }
 
     private BotReport askModel(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
+                               boolean platformFeature, BotChannel channel,
                                List<BotImageFetcher.FetchedImage> images) {
-        Persona persona = personaOf(identity);
+        Persona persona = personaOf(identity, platformFeature);
         ChatClient chatClient = chatClient(persona, settings);
         if (chatClient == null) {
             String message = images.isEmpty()
-                    ? "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + help(identity)
-                    : "看图片需要开启大模型（SPRING_AI_MODEL_CHAT）。当前可用命令：\n" + help(identity);
+                    ? "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + help(identity, platformFeature)
+                    : "看图片需要开启大模型（SPRING_AI_MODEL_CHAT）。当前可用命令：\n" + help(identity, platformFeature);
             return text(message);
         }
         String promptText = text.isBlank() ? IMAGE_ONLY_PROMPT : text;
@@ -427,7 +439,7 @@ public class BotMessageService {
                         }));
                     }
                 })
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona)))
+                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)))
                 .call()
                 .content();
 
@@ -453,8 +465,8 @@ public class BotMessageService {
         return new BotReport(title, blocks, heatmap.notes());
     }
 
-    private Persona personaOf(BotIdentity identity) {
-        if (!identity.platformUser()) {
+    private Persona personaOf(BotIdentity identity, boolean platformFeature) {
+        if (!platformFeature) {
             return Persona.CHAT;
         }
         return identity.admin() ? Persona.MONITOR_ADMIN : Persona.MONITOR_USER;
@@ -503,11 +515,18 @@ public class BotMessageService {
         }
     }
 
-    /** 会话记忆按人设隔离：身份变化后不会串用上一段人设的上下文。 */
-    private String conversationId(OneBotEvent event, Persona persona) {
-        String scope = "group".equals(event.messageType())
-                ? "qq-group-" + event.groupId()
-                : "qq-user-" + event.userId();
+    /**
+     * 会话记忆按「人设 + 通道」隔离。
+     *
+     * <p>临时会话与好友私聊都是 private，若只按 userId 分组会串上下文：
+     * 指定群里问过的内容会漏到好友私聊里。这里给临时会话单独一个作用域。</p>
+     */
+    private String conversationId(OneBotEvent event, Persona persona, BotChannel channel) {
+        String scope = switch (channel) {
+            case GROUP -> "qq-group-" + event.groupId();
+            case TEMP_SESSION -> "qq-temp-" + event.groupId() + "-" + event.userId();
+            case PRIVATE -> "qq-user-" + event.userId();
+        };
         return persona.name().toLowerCase(Locale.ROOT) + "-" + scope;
     }
 

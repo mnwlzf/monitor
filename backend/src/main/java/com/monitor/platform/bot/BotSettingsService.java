@@ -2,6 +2,7 @@ package com.monitor.platform.bot;
 
 import com.monitor.platform.api.dto.BotSettingsRequest;
 import com.monitor.platform.api.dto.BotSettingsResponse;
+import com.monitor.platform.common.exception.BusinessException;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,9 @@ import java.util.Set;
  * 用环境变量（{@link QqBotProperties}）初始化一行，保证老部署平滑过渡。</p>
  *
  * <p>设置保存在内存快照里，页面保存后立即刷新，机器人下一条消息就用新配置，**不需要重启**。</p>
+ *
+ * <p>「指定群」（{@code platformGroups}）是「启用群」（{@code allowedGroups}）的子集，
+ * 保存时校验；启用群为空（不限制）时跳过子集校验。</p>
  */
 @Service
 public class BotSettingsService {
@@ -74,14 +78,19 @@ public class BotSettingsService {
     /** 保存设置并立即刷新内存快照。 */
     @Transactional
     public BotSettingsResponse save(BotSettingsRequest request) {
+        Set<String> allowedGroups = split(join(request.allowedGroups()));
+        Set<String> platformGroups = split(join(request.platformGroups()));
+        validateSubset(allowedGroups, platformGroups);
+
         BotSettingsEntity entity = repository.find();
         if (entity == null) {
             entity = new BotSettingsEntity();
             entity.setId(1);
         }
         entity.setEnabled(request.enabled());
-        entity.setAllowedGroups(join(request.allowedGroups()));
+        entity.setAllowedGroups(join(allowedGroups));
         entity.setAllowedUsers(join(request.allowedUsers()));
+        entity.setPlatformGroups(join(platformGroups));
         entity.setRequireMention(request.requireMention() == null || request.requireMention());
         entity.setCommandPrefix(normalizePrefix(request.commandPrefix()));
         entity.setMaxReplyLength(clamp(request.maxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900));
@@ -90,9 +99,22 @@ public class BotSettingsService {
         repository.save(entity);
 
         current = toSettings(entity);
-        log.info("机器人设置已更新: enabled={}, groups={}, users={}, requireMention={}",
-                current.enabled(), current.allowedGroups(), current.allowedUsers(), current.requireMention());
+        log.info("机器人设置已更新: enabled={}, groups={}, platformGroups={}, users={}, requireMention={}",
+                current.enabled(), current.allowedGroups(), current.platformGroups(),
+                current.allowedUsers(), current.requireMention());
         return toResponse(entity);
+    }
+
+    /** 「指定群」必须是「启用群」的子集；启用群为空（不限制）时不校验。 */
+    private static void validateSubset(Set<String> allowedGroups, Set<String> platformGroups) {
+        if (allowedGroups.isEmpty() || platformGroups.isEmpty()) {
+            return;
+        }
+        for (String group : platformGroups) {
+            if (!allowedGroups.contains(group)) {
+                throw BusinessException.of("指定群必须是启用群的子集，以下群号不在启用群里：" + group);
+            }
+        }
     }
 
     /** 从数据库重新加载；没有这一行时用环境变量初始化一行。 */
@@ -112,6 +134,8 @@ public class BotSettingsService {
         entity.setEnabled(true);
         entity.setAllowedGroups(join(properties.getAllowedGroups()));
         entity.setAllowedUsers(join(properties.getAllowedUsers()));
+        // 指定群没有环境变量来源，首次初始化为空（不给任何群开平台功能）
+        entity.setPlatformGroups(null);
         entity.setRequireMention(properties.isRequireMention());
         entity.setCommandPrefix(normalizePrefix(properties.getCommandPrefix()));
         entity.setMaxReplyLength(clamp(properties.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900));
@@ -128,6 +152,7 @@ public class BotSettingsService {
                 true,
                 split(join(properties.getAllowedGroups())),
                 split(join(properties.getAllowedUsers())),
+                Set.of(),
                 properties.isRequireMention(),
                 normalizePrefix(properties.getCommandPrefix()),
                 clamp(properties.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
@@ -139,6 +164,7 @@ public class BotSettingsService {
                 !Boolean.FALSE.equals(entity.getEnabled()),
                 split(entity.getAllowedGroups()),
                 split(entity.getAllowedUsers()),
+                split(entity.getPlatformGroups()),
                 !Boolean.FALSE.equals(entity.getRequireMention()),
                 normalizePrefix(entity.getCommandPrefix()),
                 clamp(entity.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
@@ -150,6 +176,7 @@ public class BotSettingsService {
                 !Boolean.FALSE.equals(entity.getEnabled()),
                 split(entity.getAllowedGroups()),
                 split(entity.getAllowedUsers()),
+                split(entity.getPlatformGroups()),
                 !Boolean.FALSE.equals(entity.getRequireMention()),
                 normalizePrefix(entity.getCommandPrefix()),
                 clamp(entity.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),

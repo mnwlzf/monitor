@@ -13,6 +13,8 @@ public class BotSettingsEntity {
     private Boolean enabled;
     private String allowedGroups;
     private String allowedUsers;
+    /** 指定群（平台功能群），逗号分隔；必须是 allowedGroups 的子集。 */
+    private String platformGroups;
     private Boolean requireMention;
     private String commandPrefix;
     private Integer maxReplyLength;
@@ -27,6 +29,8 @@ public class BotSettingsEntity {
     public void setAllowedGroups(String allowedGroups) { this.allowedGroups = allowedGroups; }
     public String getAllowedUsers() { return allowedUsers; }
     public void setAllowedUsers(String allowedUsers) { this.allowedUsers = allowedUsers; }
+    public String getPlatformGroups() { return platformGroups; }
+    public void setPlatformGroups(String platformGroups) { this.platformGroups = platformGroups; }
     public Boolean getRequireMention() { return requireMention; }
     public void setRequireMention(Boolean requireMention) { this.requireMention = requireMention; }
     public String getCommandPrefix() { return commandPrefix; }
