@@ -1,6 +1,9 @@
 package com.monitor.platform.bot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.monitor.platform.bot.identity.BotIdentity;
+import com.monitor.platform.bot.identity.BotIdentityResolver;
+import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,7 +55,14 @@ class QqBotWebhookIntegrationTest {
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
-        BotMessageService service = new BotMessageService(settingsService, client, tools, provider);
+        // 身份识别在单元测试里用桩：这里验证的是 HTTP → 路由 → 出站调用的链路
+        BotIdentityResolver identityResolver = mock(BotIdentityResolver.class);
+        when(identityResolver.resolve(org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(new BotIdentity(true, true, "admin@qq.com"));
+        QqUserBindingService bindings = mock(QqUserBindingService.class);
+
+        BotMessageService service = new BotMessageService(
+                settingsService, client, tools, identityResolver, bindings, provider);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

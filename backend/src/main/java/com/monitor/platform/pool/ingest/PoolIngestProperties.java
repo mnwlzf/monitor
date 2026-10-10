@@ -43,9 +43,19 @@ public class PoolIngestProperties {
     /** 连接池最大连接数（只读，给 2 个足够）。 */
     private int maximumPoolSize = 2;
 
-    /** 是否已配置好可用的数据源。 */
+    /** 是否已配置好可用的数据源（增量采集开关打开且连接信息完整）。 */
     public boolean isConfigured() {
-        return enabled && url != null && !url.isBlank() && username != null && !username.isBlank();
+        return enabled && hasConnection();
+    }
+
+    /**
+     * 是否配置了可用的只读库连接，<strong>不看 enabled 开关</strong>。
+     *
+     * <p>用于复用同一套连接信息、但独立于增量采集的功能（例如 QQ 机器人的平台用户识别），
+     * 这样关掉增量采集不会连带把用户识别也停掉。</p>
+     */
+    public boolean hasConnection() {
+        return url != null && !url.isBlank() && username != null && !username.isBlank();
     }
 
     public boolean isEnabled() {

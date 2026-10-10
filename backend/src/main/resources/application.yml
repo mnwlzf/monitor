@@ -77,6 +77,13 @@ monitor:
     command-prefix: ${MONITOR_BOT_COMMAND_PREFIX:/}
     max-reply-length: ${MONITOR_BOT_MAX_REPLY_LENGTH:900}
     memory-window: ${MONITOR_BOT_MEMORY_WINDOW:10}
+    # 身份识别：把自建 Sub2API 的平台用户邮箱同步到 Redis，
+    # 用于区分「平台用户 / 陌生人」以及「管理员 / 普通用户」。
+    # 数据来源是 monitor.pool.ingest.* 配置的只读库（public.users 表）。
+    identity:
+      enabled: ${MONITOR_BOT_IDENTITY_ENABLED:true}
+      # 允许按 <QQ号>@xx.com 的邮箱自动匹配 QQ，无需手动绑定
+      qq-local-part-match: ${MONITOR_BOT_IDENTITY_QQ_MATCH:true}
 
   # 上游请求伪装：默认使用内置的浏览器 User-Agent / Accept-Language，
   # 可用 MONITOR_UPSTREAM_USER_AGENT、MONITOR_UPSTREAM_ACCEPT_LANGUAGE 环境变量覆盖。

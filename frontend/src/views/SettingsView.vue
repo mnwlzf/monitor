@@ -253,14 +253,101 @@
       </el-form>
     </el-card>
 
+    <el-card shadow="never" class="admin-card" v-loading="identityLoading">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>身份识别与管理员</h3>
+            <p>
+              QQ 消息按邮箱识别身份：平台用户以「监控助手」回答，其他人只能是普通聊天，接触不到任何平台信息
+            </p>
+          </div>
+          <el-button :loading="identitySyncing" :disabled="!canWrite" @click="syncIdentity">
+            立即同步用户
+          </el-button>
+        </div>
+      </template>
+
+      <el-descriptions :column="2" border size="small" class="identity-summary">
+        <el-descriptions-item label="Sub2API 用户">
+          {{ identity.sub2Api.userCount }} 人
+        </el-descriptions-item>
+        <el-descriptions-item label="Sub2API 管理员">
+          {{ identity.sub2Api.adminCount }} 人
+        </el-descriptions-item>
+        <el-descriptions-item label="最近同步">
+          {{ identitySyncTime }}
+        </el-descriptions-item>
+        <el-descriptions-item label="只读库">
+          <el-tag :type="identity.sub2Api.available ? 'success' : 'info'" size="small" effect="plain">
+            {{ identity.sub2Api.available ? '已配置' : '未配置' }}
+          </el-tag>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <el-alert
+        v-if="!identity.sub2Api.available"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="identity-alert"
+        title="未配置 Sub2API 只读库"
+        description="需要在 .env 中配置 SUB2API_DB_URL / SUB2API_DB_USERNAME / SUB2API_DB_PASSWORD，并给只读账号授予 public.users 的 SELECT 权限。"
+      />
+
+      <div class="identity-section-title">
+        自定义管理员
+        <small>Sub2API 只允许一个管理员，这里可以再加人；与 Sub2API 的管理员取并集</small>
+      </div>
+
+      <div class="identity-add-row">
+        <el-input
+          v-model="newAdminEmail"
+          placeholder="管理员邮箱，例如 123456@qq.com"
+          style="width: 300px"
+          :disabled="!canWrite"
+          @keyup.enter="addAdmin"
+        />
+        <el-input
+          v-model="newAdminRemark"
+          placeholder="备注（可选）"
+          style="width: 200px"
+          :disabled="!canWrite"
+          @keyup.enter="addAdmin"
+        />
+        <el-button type="primary" :loading="adminAdding" :disabled="!canWrite" @click="addAdmin">
+          添加
+        </el-button>
+      </div>
+
+      <el-table :data="identity.customAdmins" size="small" class="identity-table">
+        <template #empty>还没有自定义管理员，Sub2API 自带的管理员仍然生效</template>
+        <el-table-column prop="email" label="邮箱" min-width="220" />
+        <el-table-column prop="remark" label="备注" min-width="140">
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="添加时间" width="180">
+          <template #default="{ row }">{{ formatIdentityTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90">
+          <template #default="{ row }">
+            <el-button link type="danger" :disabled="!canWrite" @click="removeAdmin(row as BotAdmin)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import RecipientEditor from '../components/RecipientEditor.vue'
 import {
+  addBotAdmin,
+  deleteBotAdmin,
+  getBotIdentity,
   getBotSettings,
   getMailSettings,
   getNotificationSettings,
@@ -268,14 +355,15 @@ import {
   saveMailSettings,
   saveNotificationSettings,
   sendTestMail,
+  syncBotIdentity,
   testMailConnection,
   type BotSettingsInput,
   type MailSettingsInput,
   type NotificationSettingsInput,
 } from '../api/settings'
-import type { BotSettings } from '../types'
+import type { BotAdmin, BotIdentityOverview, BotSettings } from '../types'
 
-defineProps<{ canWrite?: boolean }>()
+const props = defineProps<{ canWrite?: boolean }>()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -453,10 +541,98 @@ async function saveBotSettingsForm() {
     botSaving.value = false
   }
 }
+const identityLoading = ref(false)
+const identitySyncing = ref(false)
+const adminAdding = ref(false)
+const newAdminEmail = ref('')
+const newAdminRemark = ref('')
+const identity = reactive<BotIdentityOverview>({
+  enabled: true,
+  qqLocalPartMatch: true,
+  sub2Api: { available: false, userCount: 0, adminCount: 0, syncedAt: null },
+  customAdmins: [],
+})
+
+const identitySyncTime = computed(() =>
+  identity.sub2Api.syncedAt ? new Date(identity.sub2Api.syncedAt).toLocaleString('zh-CN') : '从未同步',
+)
+
+function formatIdentityTime(value: string | null): string {
+  return value ? new Date(value).toLocaleString('zh-CN') : '-'
+}
+
+function applyIdentity(next: BotIdentityOverview) {
+  Object.assign(identity, {
+    enabled: next.enabled,
+    qqLocalPartMatch: next.qqLocalPartMatch,
+    sub2Api: { ...next.sub2Api },
+    customAdmins: [...(next.customAdmins ?? [])],
+  })
+}
+
+async function loadIdentity() {
+  identityLoading.value = true
+  try {
+    applyIdentity(await getBotIdentity())
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载身份识别设置失败')
+  } finally {
+    identityLoading.value = false
+  }
+}
+
+async function syncIdentity() {
+  identitySyncing.value = true
+  try {
+    applyIdentity(await syncBotIdentity())
+    ElMessage.success(`同步完成，当前缓存 ${identity.sub2Api.userCount} 个平台用户`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '同步失败')
+  } finally {
+    identitySyncing.value = false
+  }
+}
+
+async function addAdmin() {
+  const email = newAdminEmail.value.trim()
+  if (!email) {
+    ElMessage.warning('请填写管理员邮箱')
+    return
+  }
+  adminAdding.value = true
+  try {
+    await addBotAdmin(email, newAdminRemark.value.trim())
+    newAdminEmail.value = ''
+    newAdminRemark.value = ''
+    await loadIdentity()
+    ElMessage.success('已添加自定义管理员')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '添加失败')
+  } finally {
+    adminAdding.value = false
+  }
+}
+
+async function removeAdmin(row: BotAdmin) {
+  try {
+    await ElMessageBox.confirm(`确定删除自定义管理员 ${row.email}？`, '删除确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await deleteBotAdmin(row.id)
+    await loadIdentity()
+    ElMessage.success('已删除')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除失败')
+  }
+}
+
 onMounted(() => {
   load()
   loadNotification()
   loadBot()
+  loadIdentity()
 })
 </script>
 
@@ -479,6 +655,39 @@ onMounted(() => {
   margin-bottom: 4px;
   color: #303133;
   font-size: 14px;
+}
+
+.identity-summary {
+  margin-bottom: 14px;
+}
+
+.identity-alert {
+  margin-bottom: 14px;
+}
+
+.identity-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 6px 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.identity-section-title small {
+  font-weight: 400;
+  color: #909399;
+}
+
+.identity-add-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.identity-table {
+  width: 100%;
 }
 
 .settings-test-email {

@@ -1,13 +1,19 @@
 package com.monitor.platform.bot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.monitor.platform.bot.identity.BotIdentity;
+import com.monitor.platform.bot.identity.BotIdentityResolver;
+import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -15,10 +21,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 机器人消息路由：白名单、@ 判断、命令分发与回复。
+ * 机器人消息路由：白名单、@ 判断、身份分流与命令权限。
  *
  * <p>这里刻意不提供 {@link ChatClient.Builder}，验证「没配大模型也能用命令」。</p>
  */
@@ -28,6 +35,8 @@ class BotMessageServiceTest {
 
     private OneBotClient client;
     private MonitorChatTools tools;
+    private BotIdentityResolver identityResolver;
+    private QqUserBindingService bindings;
     private BotMessageService service;
 
     @BeforeEach
@@ -41,18 +50,35 @@ class BotMessageServiceTest {
         tools = mock(MonitorChatTools.class);
         when(tools.platformOverview()).thenReturn("平台概览内容");
 
+        identityResolver = mock(BotIdentityResolver.class);
+        bindings = mock(QqUserBindingService.class);
+
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
-        service = new BotMessageService(settingsService, client, tools, provider);
+        service = new BotMessageService(settingsService, client, tools, identityResolver, bindings, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
         return mapper.readValue(json, OneBotEvent.class);
     }
 
+    private void identityIs(BotIdentity identity) {
+        when(identityResolver.resolve(anyLong())).thenReturn(identity);
+    }
+
+    private static BotIdentity admin() {
+        return new BotIdentity(true, true, "admin@qq.com");
+    }
+
+    private static BotIdentity normalUser() {
+        return new BotIdentity(true, false, "2755457558@qq.com");
+    }
+
     @Test
     void shouldReplyToPrivateCommand() throws Exception {
+        identityIs(admin());
+
         service.onEvent(event("""
                 {"post_type":"message","message_type":"private","user_id":999,
                  "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
@@ -63,6 +89,8 @@ class BotMessageServiceTest {
 
     @Test
     void shouldIgnoreNonWhitelistedGroup() throws Exception {
+        identityIs(admin());
+
         service.onEvent(event("""
                 {"post_type":"message","message_type":"group","group_id":111,"user_id":5,
                  "self_id":1,"raw_message":"[CQ:at,qq=1] /平台",
@@ -74,6 +102,8 @@ class BotMessageServiceTest {
 
     @Test
     void shouldIgnoreGroupMessageWithoutMention() throws Exception {
+        identityIs(admin());
+
         service.onEvent(event("""
                 {"post_type":"message","message_type":"group","group_id":222,"user_id":5,
                  "self_id":1,"raw_message":"/平台",
@@ -84,7 +114,9 @@ class BotMessageServiceTest {
     }
 
     @Test
-    void shouldReplyToMentionedGroupCommand() throws Exception {
+    void shouldReplyToMentionedGroupCommandForAdmin() throws Exception {
+        identityIs(admin());
+
         service.onEvent(event("""
                 {"post_type":"message","message_type":"group","group_id":222,"user_id":5,
                  "self_id":1,"raw_message":"[CQ:at,qq=1] /平台",
@@ -103,5 +135,90 @@ class BotMessageServiceTest {
 
         verify(client, never()).sendPrivateMessage(anyLong(), anyString());
         verify(client, never()).sendGroupMessage(anyLong(), anyString());
+    }
+
+    /** 普通用户问平台数据：明确拒绝，且绝不能真的去查。 */
+    @Test
+    void shouldDenyPlatformCommandForNormalUser() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
+                """));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("平台级数据仅管理员可查。", reply.getValue());
+        verifyNoInteractions(tools);
+    }
+
+    /** 陌生人发平台命令：必须看起来「没有这个功能」，不能暴露平台的存在。 */
+    @Test
+    void shouldHidePlatformCommandFromGuest() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
+                """));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(tools);
+    }
+
+    /** 陌生人的 /help 不能出现任何平台功能。 */
+    @Test
+    void shouldShowGuestHelpWithoutPlatformCommands() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/help","message":[{"type":"text","data":{"text":"/help"}}]}
+                """));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        String text = reply.getValue();
+        assertFalse(text.contains("号池"), "陌生人不应看到号池命令：" + text);
+        assertFalse(text.contains("平台"), "陌生人不应看到平台命令：" + text);
+        assertFalse(text.contains("账号"), "陌生人不应看到账号命令：" + text);
+        assertFalse(text.contains("变更"), "陌生人不应看到变更命令：" + text);
+    }
+
+    /** 绑定回复必须与邮箱是否命中平台用户无关，否则可被用来枚举平台用户。 */
+    @Test
+    void shouldReplyNeutrallyToBind() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(bindings.bind(anyLong(), anyString())).thenReturn(true);
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/绑定 someone@example.com",
+                 "message":[{"type":"text","data":{"text":"/绑定 someone@example.com"}}]}
+                """));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("已记录你的邮箱。", reply.getValue());
+        verify(bindings).bind(999L, "someone@example.com");
+    }
+
+    @Test
+    void shouldRejectMalformedEmailOnBind() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/绑定 not-an-email",
+                 "message":[{"type":"text","data":{"text":"/绑定 not-an-email"}}]}
+                """));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("邮箱格式不正确。用法：/绑定 <邮箱>", reply.getValue());
+        verify(bindings, never()).bind(anyLong(), anyString());
     }
 }

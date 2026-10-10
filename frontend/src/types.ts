@@ -370,3 +370,27 @@ export interface BotSettings {
   memoryWindow: number
   updatedAt: string | null
 }
+/** 监控项目侧登记的自定义管理员。 */
+export interface BotAdmin {
+  id: number
+  email: string
+  remark: string | null
+  createdAt: string
+}
+
+/**
+ * QQ 机器人身份识别总览。
+ *
+ * 管理员有两个来源，取并集：Sub2API 自带的 role=admin，以及这里自定义登记的名单。
+ */
+export interface BotIdentityOverview {
+  enabled: boolean
+  qqLocalPartMatch: boolean
+  sub2Api: {
+    available: boolean
+    userCount: number
+    adminCount: number
+    syncedAt: string | null
+  }
+  customAdmins: BotAdmin[]
+}

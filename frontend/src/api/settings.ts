@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotSettings, MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
+import type { BotAdmin, BotIdentityOverview, BotSettings, MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -109,4 +109,26 @@ export async function saveBotSettings(input: BotSettingsInput): Promise<BotSetti
     method: 'PUT',
     body: JSON.stringify(input),
   })
+}
+/** 读取身份识别总览（Sub2API 用户缓存情况 + 自定义管理员名单）。 */
+export async function getBotIdentity(): Promise<BotIdentityOverview> {
+  return apiRequest<BotIdentityOverview>('/api/v1/settings/bot/identity')
+}
+
+/** 立即从 Sub2API 只读库同步一次平台用户。 */
+export async function syncBotIdentity(): Promise<BotIdentityOverview> {
+  return apiRequest<BotIdentityOverview>('/api/v1/settings/bot/identity/sync', { method: 'POST' })
+}
+
+/** 新增自定义管理员。 */
+export async function addBotAdmin(email: string, remark: string): Promise<BotAdmin> {
+  return apiRequest<BotAdmin>('/api/v1/settings/bot/identity/admins', {
+    method: 'POST',
+    body: JSON.stringify({ email, remark }),
+  })
+}
+
+/** 删除自定义管理员。 */
+export async function deleteBotAdmin(id: number): Promise<void> {
+  await apiRequest<void>(`/api/v1/settings/bot/identity/admins/${id}`, { method: 'DELETE' })
 }
