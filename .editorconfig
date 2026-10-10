@@ -1,0 +1,43 @@
+# EditorConfig：统一各编辑器的基础排版规则
+# https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# ---------- 前端 / 配置 ----------
+[*.{ts,tsx,js,mjs,cjs,vue,json,css,html}]
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+# Markdown 中的行尾空格用于换行，不做裁剪
+trim_trailing_whitespace = false
+
+# ---------- 脚本 ----------
+[*.sh]
+indent_size = 2
+
+[*.ps1]
+indent_size = 4
+# Windows PowerShell 5.1 依赖 BOM 才能正确解析 UTF-8 脚本
+charset = utf-8-bom
+
+[*.{bat,cmd}]
+end_of_line = crlf
+
+# ---------- 部署文件 ----------
+[Dockerfile*]
+indent_size = 4
+
+[*.{env,properties}]
+indent_size = 4
+trim_trailing_whitespace = false
