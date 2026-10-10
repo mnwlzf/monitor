@@ -79,6 +79,17 @@ public class MonitorChatTools {
         return poolReport(range).toPlainText();
     }
 
+    @Tool(description = """
+            查询号池渠道的「时间桶热力图」：每个渠道一行，每个时间桶一格，
+            按缓存命中率着色（🟩 ≥90% / 🟨 75-90% / 🟧 60-75% / 🟥 <60% / ⬜ 无流量）。
+            需要展示号池趋势、热力、时间分布时用这个工具，并把它返回的 Markdown 表格
+            原样放进回答（系统会把色块渲染成真正的颜色）。
+            range 取值 90m / 1h / 6h / 12h / 24h / 7d / 30d / 90d，默认 24h。
+            """)
+    public String poolHeatmap(String range) {
+        return poolHeatmapMarkdown(range);
+    }
+
     @Tool(description = "查询号池直连库增量采集的状态：是否生效、游标位置、最新明细滞后多少秒")
     public String poolIngestStatus() {
         return ingestReport().toPlainText();
@@ -214,6 +225,77 @@ public class MonitorChatTools {
         return BotReport.of("号池监控（近 " + window + "）", blocks, notes);
     }
 
+    /**
+     * 号池时间桶热力图，转成带 emoji 色块的 Markdown 表格。
+     *
+     * <p>给大模型用：它没法画图，只能写 Markdown；这里把细粒度的时间桶数据
+     * 以 emoji 色块的形式交给它，渲染器再把 emoji 画成真正的颜色。</p>
+     */
+    public String poolHeatmapMarkdown(String range) {
+        Integer platformId = poolPlatformId();
+        if (platformId == null) {
+            return "还没有把任何平台标记为「号池监控源」，无法查询号池数据。";
+        }
+        String window = normalizeRange(range);
+        PoolHeatmapResponse heatmap = poolQueryService.heatmap(platformId, window, null, null, null, null);
+        if (heatmap.rows().isEmpty()) {
+            return "号池里还没有账号（或尚未采集过）。";
+        }
+
+        List<PoolHeatmapResponse.Row> active = heatmap.rows().stream()
+                .filter(row -> row.total() != null && row.total().requests() > 0)
+                .sorted(Comparator.comparingLong((PoolHeatmapResponse.Row row) -> row.total().requests()).reversed())
+                .limit(MAX_HEAT_ROWS)
+                .toList();
+        if (active.isEmpty()) {
+            return "近 " + window + " 号池没有任何流量。";
+        }
+
+        Buckets buckets = buckets(heatmap);
+        StringBuilder sb = new StringBuilder("| 平台 / 账号 | 请求 | 缓存率 | 首 TOKEN | 每秒 TOKEN");
+        for (String label : buckets.labels()) {
+            sb.append(" | ").append(label.isBlank() ? " " : label);
+        }
+        sb.append(" |\n|---|--:|--:|--:|--:");
+        for (int i = 0; i < buckets.labels().size(); i++) {
+            sb.append("|---");
+        }
+        sb.append("|\n");
+
+        for (PoolHeatmapResponse.Row row : active) {
+            sb.append("| ").append(label(row))
+                    .append(" | ").append(row.total().requests())
+                    .append(" | ").append(percent(row.total().cacheHitRate()))
+                    .append(" | ").append(seconds(row.total().avgFirstTokenMs()))
+                    .append(" | ").append(tps(row.total().tokensPerSecond()));
+            for (Double heat : buckets.heatOf(row)) {
+                sb.append(" | ").append(heatEmoji(heat));
+            }
+            sb.append(" |\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 缓存率 → emoji 色块。分档与页面图例一致：
+     * 🟩 ≥90% / 🟨 75-90% / 🟧 60-75% / 🟥 &lt;60% / ⬜ 无流量。
+     */
+    static String heatEmoji(Double cacheHitRate) {
+        if (cacheHitRate == null) {
+            return "⬜";
+        }
+        if (cacheHitRate >= 0.90) {
+            return "🟩";
+        }
+        if (cacheHitRate >= 0.75) {
+            return "🟨";
+        }
+        if (cacheHitRate >= 0.60) {
+            return "🟧";
+        }
+        return "🟥";
+    }
+
     /** 号池直连库增量采集状态。 */
     public BotReport ingestReport() {
         Integer platformId = poolPlatformId();
@@ -322,21 +404,37 @@ public class MonitorChatTools {
     // 内部工具
     // ============================================================
 
-    /** 热力图列：按上限合并相邻时间桶，避免图片过宽。 */
+    /**
+     * 热力图列。
+     *
+     * <p>保留全部时间桶（只在超过 {@link #MAX_HEAT_COLS} 时才合并相邻桶），
+     * 但<strong>不逐列打标签</strong> —— 前端也是每隔几列标一次，
+     * 逐列标会把列撑得很宽、热力块反而变小。</p>
+     */
     private Buckets buckets(PoolHeatmapResponse heatmap) {
         List<OffsetDateTime> source = heatmap.buckets();
         boolean day = "day".equalsIgnoreCase(heatmap.granularity());
         int step = Math.max(1, (int) Math.ceil(source.size() / (double) MAX_HEAT_COLS));
 
-        List<String> labels = new ArrayList<>();
         List<List<Integer>> groups = new ArrayList<>();
         for (int i = 0; i < source.size(); i += step) {
-            labels.add((day ? BUCKET_DAY : BUCKET_TIME).format(source.get(i)));
             List<Integer> group = new ArrayList<>();
             for (int j = i; j < Math.min(i + step, source.size()); j++) {
                 group.add(j);
             }
             groups.add(group);
+        }
+
+        // 大约每 8 列标一次时间，其余列留空表头
+        int labelStep = Math.max(1, groups.size() / 8);
+        List<String> labels = new ArrayList<>(groups.size());
+        for (int i = 0; i < groups.size(); i++) {
+            if (i % labelStep != 0) {
+                labels.add("");
+                continue;
+            }
+            int bucketIndex = groups.get(i).get(0);
+            labels.add((day ? BUCKET_DAY : BUCKET_TIME).format(source.get(bucketIndex)));
         }
         return new Buckets(labels, groups);
     }

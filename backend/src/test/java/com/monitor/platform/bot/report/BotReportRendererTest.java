@@ -9,7 +9,9 @@ import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -110,6 +112,40 @@ class BotReportRendererTest {
         assertEquals(worst.getRGB(), BotReportRenderer.heatColor(-1.0).getRGB());
     }
 
+    /**
+     * 大模型用 emoji 方块表示热度，但内置中文字体不含 emoji 字形 ——
+     * 直接当文字画会变成空白或豆腐块（线上就是这么坏掉的）。
+     * 渲染器必须把它们画成真正的色块。
+     */
+    @Test
+    void shouldRenderHeatEmojiAsColorSwatches() throws Exception {
+        BotReport report = BotReport.fromMarkdown("""
+                | 渠道 | 热度 |
+                |---|---|
+                | A | 🟩🟨🟧🟥⬜ |
+                """);
+
+        BufferedImage image = decode(renderer.render(report));
+        Set<Integer> colors = new HashSet<>();
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                colors.add(image.getRGB(x, y) & 0xFFFFFF);
+            }
+        }
+        assertTrue(colors.contains(0x4CAF50), "应画出绿色块");
+        assertTrue(colors.contains(0xFFEB3B), "应画出黄色块");
+        assertTrue(colors.contains(0xFF9800), "应画出橙色块");
+        assertTrue(colors.contains(0xF44336), "应画出红色块");
+        assertTrue(colors.contains(0xE5E9EC), "应画出灰色块");
+    }
+
+    /** 图例那种「色块 + 文字」混排也要能画。 */
+    @Test
+    void shouldRenderMixedSwatchAndText() throws Exception {
+        BotReport report = BotReport.fromMarkdown("色阶按缓存命中率着色：🟩 ≥90% | 🟨 75–90% | 🟥 <60%");
+        BufferedImage image = decode(renderer.render(report));
+        assertTrue(image.getHeight() > 60);
+    }
     @Test
     void shouldReturnNullWhenDisabled() {
         QqBotProperties off = new QqBotProperties();

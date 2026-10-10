@@ -19,6 +19,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 把 {@link BotReport} 渲染成 PNG。
@@ -64,7 +65,34 @@ public class BotReportRenderer {
     /** 与前端 PoolView 的 heatNoDataColor 保持一致。 */
     private static final Color HEAT_NO_DATA = new Color(0xE5E9EC);
 
+    /** 文本里的热力标记（emoji 方块）画成色块时的尺寸。 */
+    private static final int SWATCH_SIZE = 13;
+    private static final int SWATCH_GAP = 2;
+
     private static final DateTimeFormatter FOOTER_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
+    /**
+     * 文本里常见的「热度标记」emoji → 实际颜色。
+     *
+     * <p>大模型很爱用 🟩🟨🟧🟥⬜ 表示热度，但内置中文字体不含 emoji 字形，
+     * 直接当文字画会变成空白或豆腐块（图例那一行就是这么坏掉的）。
+     * 这里把它们识别出来，画成真正的色块。</p>
+     */
+    private static final Map<Integer, Color> HEAT_MARKERS = Map.ofEntries(
+            Map.entry(0x1F7E9, new Color(0x4CAF50)),   // 🟩 绿
+            Map.entry(0x1F7E8, new Color(0xFFEB3B)),   // 🟨 黄
+            Map.entry(0x1F7E7, new Color(0xFF9800)),   // 🟧 橙
+            Map.entry(0x1F7E5, new Color(0xF44336)),   // 🟥 红
+            Map.entry(0x1F7E6, new Color(0x2196F3)),   // 🟦 蓝
+            Map.entry(0x1F7EA, new Color(0x9C27B0)),   // 🟪 紫
+            Map.entry(0x2B1C, new Color(0xE5E9EC)),    // ⬜ 无数据
+            Map.entry(0x2B1B, new Color(0x424242)),    // ⬛ 深色
+            Map.entry(0x1F7E2, new Color(0x4CAF50)),   // 🟢
+            Map.entry(0x1F7E1, new Color(0xFFEB3B)),   // 🟡
+            Map.entry(0x1F7E0, new Color(0xFF9800)),   // 🟠
+            Map.entry(0x1F534, new Color(0xF44336)),   // 🔴
+            Map.entry(0x26AA, new Color(0xE5E9EC)),    // ⚪
+            Map.entry(0x26AB, new Color(0x424242)));   // ⚫
 
     private final QqBotProperties properties;
     private final BotFonts fonts;
@@ -273,12 +301,12 @@ public class BotReportRenderer {
                             widths[c] - HEAT_CELL_INSET * 2, HEAT_CELL_HEIGHT, cell.heat());
                 } else if (cell != null && cell.text() != null && !cell.text().isBlank()) {
                     FontMetrics fm = g.getFontMetrics();
-                    String text = ellipsize(cell.text(), fm, widths[c] - CELL_PADDING_X * 2);
-                    g.setColor(BODY_COLOR);
+                    List<Run> runs = splitRuns(ellipsize(cell.text(), fm, widths[c] - CELL_PADDING_X * 2));
+                    int runWidth = runsWidth(runs, fm);
                     int textX = layout.cols().get(c).align() == BotReport.Align.RIGHT
-                            ? cellX + widths[c] - CELL_PADDING_X - fm.stringWidth(text)
+                            ? cellX + widths[c] - CELL_PADDING_X - runWidth
                             : cellX + CELL_PADDING_X;
-                    g.drawString(text, textX, y + (ROW_HEIGHT + fm.getAscent()) / 2 - 2);
+                    drawRuns(g, runs, textX, y + (ROW_HEIGHT + fm.getAscent()) / 2 - 2, fm);
                 }
                 cellX += widths[c];
             }
@@ -291,12 +319,83 @@ public class BotReportRenderer {
 
     private int drawParagraph(Graphics2D g, List<String> lines, int x, int y, FontMetrics bodyMetrics) {
         g.setFont(fonts.body());
-        g.setColor(BODY_COLOR);
         for (String line : lines) {
-            g.drawString(line, x, y + bodyMetrics.getAscent());
+            drawRuns(g, splitRuns(line), x, y + bodyMetrics.getAscent(), bodyMetrics);
             y += PARAGRAPH_LINE_HEIGHT;
         }
         return y;
+    }
+
+    /**
+     * 按顺序画一段文本：普通字符照常画，热力标记画成色块。
+     *
+     * <p>色块在垂直方向与文字居中对齐，这样「🟩 ≥90%」这种图例读起来才自然。</p>
+     */
+    private void drawRuns(Graphics2D g, List<Run> runs, int x, int baseline, FontMetrics metrics) {
+        int cursor = x;
+        for (Run run : runs) {
+            if (run.swatch() != null) {
+                g.setColor(run.swatch());
+                int top = baseline - metrics.getAscent() + Math.max(0, (metrics.getAscent() - SWATCH_SIZE) / 2);
+                g.fillRoundRect(cursor, top, SWATCH_SIZE, SWATCH_SIZE, 3, 3);
+                cursor += SWATCH_SIZE + SWATCH_GAP;
+            } else {
+                g.setColor(BODY_COLOR);
+                g.drawString(run.text(), cursor, baseline);
+                cursor += metrics.stringWidth(run.text());
+            }
+        }
+    }
+
+    /** 把文本切成「普通文字」与「热力标记」两种片段。 */
+    private static List<Run> splitRuns(String text) {
+        List<Run> runs = new ArrayList<>();
+        StringBuilder plain = new StringBuilder();
+        for (int i = 0; i < text.length(); ) {
+            int codePoint = text.codePointAt(i);
+            Color swatch = HEAT_MARKERS.get(codePoint);
+            if (swatch == null) {
+                plain.appendCodePoint(codePoint);
+            } else {
+                if (!plain.isEmpty()) {
+                    runs.add(new Run(plain.toString(), null));
+                    plain.setLength(0);
+                }
+                runs.add(new Run(null, swatch));
+            }
+            i += Character.charCount(codePoint);
+        }
+        if (!plain.isEmpty()) {
+            runs.add(new Run(plain.toString(), null));
+        }
+        return runs;
+    }
+
+    /** 一段文本的显示宽度：热力标记按色块宽度算，其余按字体宽度算。 */
+    private static int textWidth(String text, FontMetrics metrics) {
+        int total = 0;
+        for (int i = 0; i < text.length(); ) {
+            int codePoint = text.codePointAt(i);
+            if (HEAT_MARKERS.containsKey(codePoint)) {
+                total += SWATCH_SIZE + SWATCH_GAP;
+            } else {
+                total += metrics.stringWidth(new String(Character.toChars(codePoint)));
+            }
+            i += Character.charCount(codePoint);
+        }
+        return total;
+    }
+
+    private static int runsWidth(List<Run> runs, FontMetrics metrics) {
+        int total = 0;
+        for (Run run : runs) {
+            total += run.swatch() != null ? SWATCH_SIZE + SWATCH_GAP : metrics.stringWidth(run.text());
+        }
+        return total;
+    }
+
+    /** 文本片段：要么是普通文字，要么是一个色块。 */
+    private record Run(String text, Color swatch) {
     }
 
     /** 按热力值画一个圆角色块；null 表示无数据，画灰色。 */
