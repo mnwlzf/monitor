@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -87,6 +88,28 @@ public class BotImageRenderer {
 
     public BotImageRenderer(QqBotProperties properties) {
         this.properties = properties;
+    }
+
+    /**
+     * 启动时就把字体探测跑一遍并打一行明确结论。
+     *
+     * <p>探测本身是懒加载的（首次渲染才触发），但那样启动日志里什么都看不到，
+     * 排查「图片功能到底能不能用」只能靠猜。这里提前触发，让日志直接给出答案。</p>
+     */
+    @PostConstruct
+    void logFontStatus() {
+        if (!properties.isImageEnabled()) {
+            log.info("QQ 机器人图片渲染已关闭（MONITOR_BOT_IMAGE_ENABLED=false），长回复按文本截断");
+            return;
+        }
+        FontSet current = fontSet();
+        if (current == null) {
+            log.warn("QQ 机器人图片渲染不可用：没有可用中文字体，长回复将退回截断文本");
+        } else if (current.bundled()) {
+            log.info("QQ 机器人图片渲染就绪：内置字体 {}", current.body().getFontName());
+        } else {
+            log.info("QQ 机器人图片渲染就绪：系统字体 {}", current.body().getFontName());
+        }
     }
 
     /** 当前环境能否渲染中文图片（字体是否就绪）。 */
@@ -306,7 +329,6 @@ public class BotImageRenderer {
     private FontSet detectFonts() {
         Font bundled = loadBundledFont();
         if (bundled != null) {
-            log.info("QQ 机器人图片渲染使用内置字体: {}", bundled.getFontName());
             return fontSetOf(bundled, true);
         }
 
@@ -323,7 +345,6 @@ public class BotImageRenderer {
             if (probe.canDisplayUpTo(CJK_PROBE) >= 0) {
                 continue;
             }
-            log.info("QQ 机器人图片渲染使用系统字体: {}", probe.getFamily());
             return fontSetOf(probe, false);
         }
 

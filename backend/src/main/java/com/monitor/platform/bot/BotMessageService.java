@@ -399,7 +399,9 @@ public class BotMessageService {
 
         byte[] png = imageRenderer.renderPng(content);
         if (png != null && sendImage(event, group, png)) {
-            log.debug("回复过长（{} 字），已转为图片发送: user={}", content.length(), event.userId());
+            // 用 INFO：这条只在真正发图时出现，是「图片功能有没有生效」最直接的证据
+            log.info("回复过长（{} 字），已转为图片发送: user={}, bytes={}",
+                    content.length(), event.userId(), png.length);
             return;
         }
         sendText(event, group, truncated);
