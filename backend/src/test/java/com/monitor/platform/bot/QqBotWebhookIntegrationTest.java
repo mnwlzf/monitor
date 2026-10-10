@@ -7,6 +7,7 @@ import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.report.BotReportRenderer;
+import com.monitor.platform.bot.weather.WeatherTools;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -64,9 +65,10 @@ class QqBotWebhookIntegrationTest {
         QqUserBindingService bindings = mock(QqUserBindingService.class);
         // 这里的回复很短，不会走图片渲染；仅需满足构造依赖
         BotReportRenderer reportRenderer = mock(BotReportRenderer.class);
+        WeatherTools weatherTools = mock(WeatherTools.class);
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, tools, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, weatherTools, identityResolver, bindings, reportRenderer, provider);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

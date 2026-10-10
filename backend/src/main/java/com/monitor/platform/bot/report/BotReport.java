@@ -265,24 +265,30 @@ public record BotReport(String title, List<Block> blocks, List<String> notes) {
             if (block.heading() != null && !block.heading().isBlank()) {
                 lines.add(block.heading());
             }
-            for (Row row : block.rows()) {
-                if (block.plain()) {
+            if (block.plain()) {
+                for (Row row : block.rows()) {
                     String text = row.cells().isEmpty() ? null : row.cells().get(0).text();
                     if (text != null) {
                         lines.add(text);
                     }
-                    continue;
                 }
-                List<String> parts = new ArrayList<>();
-                for (int i = 0; i < row.cells().size(); i++) {
-                    String text = row.cells().get(i).text();
-                    if (text == null || text.isBlank()) {
-                        continue;
+            } else if (block.cols().size() == 2) {
+                // 两列视为「键值表」：直接 键：值。
+                // 逐格带表头前缀会变成「- 项目 天气，值 晴」这种啰嗦格式。
+                for (Row row : block.rows()) {
+                    lines.add(cellText(row, 0) + "：" + cellText(row, 1));
+                }
+            } else {
+                // 多列表格用 Markdown：文本里紧凑可读，大模型也认得这种结构
+                lines.add(tableRow(block.cols().stream().map(Col::header).toList()));
+                lines.add("|" + "---|".repeat(block.cols().size()));
+                for (Row row : block.rows()) {
+                    List<String> cells = new ArrayList<>();
+                    for (int i = 0; i < block.cols().size(); i++) {
+                        cells.add(cellText(row, i));
                     }
-                    String header = i < block.cols().size() ? block.cols().get(i).header() : null;
-                    parts.add(header == null || header.isBlank() ? text : header + " " + text);
+                    lines.add(tableRow(cells));
                 }
-                lines.add("- " + String.join("，", parts));
             }
             if (block.note() != null && !block.note().isBlank()) {
                 lines.add(block.note());
@@ -295,5 +301,17 @@ public record BotReport(String title, List<Block> blocks, List<String> notes) {
         }
         // 用 join 而不是逐段 append：没有标题时不会多出一个前导换行
         return String.join("\n", lines);
+    }
+
+    private static String tableRow(List<String> cells) {
+        return "| " + String.join(" | ", cells) + " |";
+    }
+
+    private static String cellText(Row row, int index) {
+        if (index >= row.cells().size()) {
+            return "";
+        }
+        String text = row.cells().get(index).text();
+        return text == null ? "" : text;
     }
 }

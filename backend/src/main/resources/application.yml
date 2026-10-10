@@ -92,6 +92,17 @@ monitor:
       # 允许按 <QQ号>@xx.com 的邮箱自动匹配 QQ，无需手动绑定
       qq-local-part-match: ${MONITOR_BOT_IDENTITY_QQ_MATCH:true}
 
+  # 天气查询（uapis.cn 免费接口，无需注册与 Key）。
+  # 与平台无关，因此管理员 / 平台用户 / 陌生人都能用。
+  weather:
+    enabled: ${MONITOR_WEATHER_ENABLED:true}
+    base-url: ${MONITOR_WEATHER_BASE_URL:https://uapis.cn}
+    timeout: ${MONITOR_WEATHER_TIMEOUT:8s}
+    # 同一城市的缓存时长：免费额度按次计，群里反复问同一个城市没必要每次都打接口
+    cache-ttl: ${MONITOR_WEATHER_CACHE_TTL:10m}
+    # 默认预报天数（0 表示只查当前天气）
+    default-forecast-days: ${MONITOR_WEATHER_FORECAST_DAYS:3}
+
   # 上游请求伪装：默认使用内置的浏览器 User-Agent / Accept-Language，
   # 可用 MONITOR_UPSTREAM_USER_AGENT、MONITOR_UPSTREAM_ACCEPT_LANGUAGE 环境变量覆盖。
   upstream: {}

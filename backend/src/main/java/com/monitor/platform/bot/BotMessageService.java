@@ -7,6 +7,7 @@ import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.report.BotReportRenderer;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -115,6 +116,7 @@ public class BotMessageService {
             - /我的信息        查看当前绑定的邮箱
             - /绑定 <邮箱>     绑定邮箱
             - /解绑            解除绑定
+            - /天气 <城市>     实时天气与预报（所有人都能用）
             也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」
             内容较长时会自动渲染成表格图片。""";
 
@@ -123,6 +125,7 @@ public class BotMessageService {
             - /我的信息        查看当前绑定的邮箱
             - /绑定 <邮箱>     绑定邮箱
             - /解绑            解除绑定
+            - /天气 <城市>     实时天气与预报（所有人都能用）
             平台级数据（账号、余额、号池、密钥）仅管理员可查。""";
 
     private static final String GUEST_HELP = """
@@ -130,6 +133,7 @@ public class BotMessageService {
             - /绑定 <邮箱>     绑定你的邮箱
             - /解绑            解除绑定
             - /我的信息        查看当前绑定
+            - /天气 <城市>     实时天气与预报
             也可以直接和我聊天。""";
 
     /** 非平台用户看到「未知命令」时的统一回复，不暴露平台功能的存在。 */
@@ -138,6 +142,7 @@ public class BotMessageService {
     private final BotSettingsService settingsService;
     private final OneBotClient client;
     private final MonitorChatTools tools;
+    private final WeatherTools weatherTools;
     private final BotIdentityResolver identityResolver;
     private final QqUserBindingService bindings;
     private final BotReportRenderer reportRenderer;
@@ -156,6 +161,7 @@ public class BotMessageService {
     public BotMessageService(BotSettingsService settingsService,
                              OneBotClient client,
                              MonitorChatTools tools,
+                             WeatherTools weatherTools,
                              BotIdentityResolver identityResolver,
                              QqUserBindingService bindings,
                              BotReportRenderer reportRenderer,
@@ -163,6 +169,7 @@ public class BotMessageService {
         this.settingsService = settingsService;
         this.client = client;
         this.tools = tools;
+        this.weatherTools = weatherTools;
         this.identityResolver = identityResolver;
         this.bindings = bindings;
         this.reportRenderer = reportRenderer;
@@ -267,6 +274,9 @@ public class BotMessageService {
             case "unbind", "解绑" -> text(unbind(event));
             case "whoami", "我的信息", "me" -> text(whoami(identity));
 
+            // 天气与平台无关，所有人（含陌生人）都能用
+            case "weather", "天气" -> weather(arg);
+
             // 平台级命令：非平台用户一律按「未知命令」处理，不暴露功能存在
             case "platform", "平台", "overview" -> platformOnly(identity, tools::platformReport);
             case "pool", "号池" -> platformOnly(identity, () -> tools.poolReport(arg));
@@ -322,6 +332,21 @@ public class BotMessageService {
             return "邮箱格式不正确。用法：/绑定 <邮箱>";
         }
         return bindings.bind(event.userId(), email) ? "已记录你的邮箱。" : "绑定失败，请稍后再试。";
+    }
+
+    /**
+     * 天气查询：{@code /天气 <城市> [天数]}。
+     *
+     * <p>所有人都能用，因此不经过 {@code platformOnly} 闸门，也不会泄露平台信息。</p>
+     */
+    private BotReport weather(String arg) {
+        String[] parts = arg.split("\\s+", 2);
+        String city = parts.length > 0 ? parts[0].trim() : "";
+        int days = parts.length > 1 ? parseInt(parts[1], -1) : -1;
+        if (days < 0) {
+            days = weatherTools.defaultForecastDays();
+        }
+        return weatherTools.weatherReport(city, days);
     }
 
     private String unbind(OneBotEvent event) {
@@ -413,9 +438,10 @@ public class BotMessageService {
                     .defaultAdvisors(MessageChatMemoryAdvisor.builder(
                             MessageWindowChatMemory.builder().maxMessages(window).build())
                             .build());
-            if (persona.usesTools()) {
-                configured = configured.defaultTools(tools);
-            }
+            // 天气与平台无关，三种人设都能用（含陌生人）
+            configured = persona.usesTools()
+                    ? configured.defaultTools(tools, weatherTools)
+                    : configured.defaultTools(weatherTools);
             ChatClient built = configured.build();
             clients.put(persona, new CachedClient(built, window));
             log.info("QQ 机器人人设已就绪: persona={}, 记忆窗口={} 条, 平台工具={}",

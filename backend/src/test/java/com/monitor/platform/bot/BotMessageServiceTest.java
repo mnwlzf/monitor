@@ -8,6 +8,7 @@ import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.report.BotReportRenderer;
+import com.monitor.platform.bot.weather.WeatherTools;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -19,7 +20,9 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
@@ -45,6 +48,7 @@ class BotMessageServiceTest {
     private BotIdentityResolver identityResolver;
     private QqUserBindingService bindings;
     private BotReportRenderer reportRenderer;
+    private WeatherTools weatherTools;
     private BotMessageService service;
 
     @BeforeEach
@@ -61,12 +65,13 @@ class BotMessageServiceTest {
         identityResolver = mock(BotIdentityResolver.class);
         bindings = mock(QqUserBindingService.class);
         reportRenderer = mock(BotReportRenderer.class);
+        weatherTools = mock(WeatherTools.class);
 
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, weatherTools, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -205,6 +210,32 @@ class BotMessageServiceTest {
         assertFalse(text.contains("平台"), "陌生人不应看到平台命令：" + text);
         assertFalse(text.contains("账号"), "陌生人不应看到账号命令：" + text);
         assertFalse(text.contains("变更"), "陌生人不应看到变更命令：" + text);
+        assertTrue(text.contains("天气"), "天气对所有人开放，陌生人应能看到：" + text);
+    }
+
+    /** 天气与平台无关，陌生人也能查。 */
+    @Test
+    void shouldAllowWeatherForGuest() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(weatherTools.weatherReport(anyString(), anyInt()))
+                .thenReturn(BotReport.fromMarkdown("北京 · 实时天气：晴 26°C"));
+
+        service.onEvent(event(privateCommand("/天气 北京")));
+
+        verify(weatherTools, timeout(3000)).weatherReport(eq("北京"), anyInt());
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
+    }
+
+    /** 普通用户同样能查天气（不能因为不是管理员就被拦掉）。 */
+    @Test
+    void shouldAllowWeatherForNormalUser() throws Exception {
+        identityIs(normalUser());
+        when(weatherTools.weatherReport(anyString(), anyInt()))
+                .thenReturn(BotReport.fromMarkdown("北京 · 实时天气：晴 26°C"));
+
+        service.onEvent(event(privateCommand("/天气 北京")));
+
+        verify(weatherTools, timeout(3000)).weatherReport(eq("北京"), anyInt());
     }
 
     /** 绑定回复必须与邮箱是否命中平台用户无关，否则可被用来枚举平台用户。 */
