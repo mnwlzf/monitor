@@ -5,6 +5,7 @@ import com.monitor.platform.bot.report.BotReport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -46,6 +47,14 @@ public class WeatherTools {
     /** 同一城市的短缓存：免费额度按次计，群里反复问同一个城市没必要每次都打接口。 */
     private final Map<String, Cached> cache = new ConcurrentHashMap<>();
 
+    /**
+     * Spring 注入用的构造器。
+     *
+     * <p>类里还有一个给测试注入 {@code RestClient} 的构造器，属于「多个构造器」——
+     * 这时 Spring 必须靠 {@link Autowired} 才知道选哪个；不加就会退回去找无参构造器，
+     * 直接启动失败（No default constructor found）。</p>
+     */
+    @Autowired
     public WeatherTools(WeatherProperties properties) {
         this(properties, buildRestClient(properties));
     }
