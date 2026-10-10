@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,7 +50,7 @@ class QqBotWebhookIntegrationTest {
 
         BotMessageService service = new BotMessageService(properties, client, tools, provider);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new QqBotWebhookController(properties, service))
+                .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();
     }
 
