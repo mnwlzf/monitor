@@ -6,11 +6,16 @@ import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
+import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.bot.report.BotReportRenderer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,7 +44,7 @@ class BotMessageServiceTest {
     private MonitorChatTools tools;
     private BotIdentityResolver identityResolver;
     private QqUserBindingService bindings;
-    private BotImageRenderer imageRenderer;
+    private BotReportRenderer reportRenderer;
     private BotMessageService service;
 
     @BeforeEach
@@ -51,17 +56,17 @@ class BotMessageServiceTest {
 
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);
-        when(tools.platformOverview()).thenReturn("平台概览内容");
+        when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台概览内容"));
 
         identityResolver = mock(BotIdentityResolver.class);
         bindings = mock(QqUserBindingService.class);
-        imageRenderer = mock(BotImageRenderer.class);
+        reportRenderer = mock(BotReportRenderer.class);
 
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, identityResolver, bindings, imageRenderer, provider);
+                settingsService, client, tools, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -80,14 +85,32 @@ class BotMessageServiceTest {
         return new BotIdentity(true, false, "2755457558@qq.com");
     }
 
+    private static String privateCommand(String text) {
+        return """
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"%s","message":[{"type":"text","data":{"text":"%s"}}]}
+                """.formatted(text, text);
+    }
+
+    /** 造一份纯文本必然超过 maxReplyLength(900) 的报表。 */
+    private static BotReport longReport() {
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            rows.add(BotReport.Row.of("账号" + i, "12.34", "56.78", "正常"));
+        }
+        BotReport.Block table = new BotReport.Block(null, List.of(
+                BotReport.Col.left("账号"),
+                BotReport.Col.right("余额"),
+                BotReport.Col.right("已用额度"),
+                BotReport.Col.left("状态")), rows, null);
+        return BotReport.of("平台概览", List.of(table), List.of());
+    }
+
     @Test
     void shouldReplyToPrivateCommand() throws Exception {
         identityIs(admin());
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
-                """));
+        service.onEvent(event(privateCommand("/平台")));
 
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
     }
@@ -129,7 +152,7 @@ class BotMessageServiceTest {
                 """));
 
         verify(client, timeout(3000)).sendGroupMessage(eq(222L), anyString());
-        verify(tools, timeout(3000)).platformOverview();
+        verify(tools, timeout(3000)).platformReport();
     }
 
     @Test
@@ -147,10 +170,7 @@ class BotMessageServiceTest {
     void shouldDenyPlatformCommandForNormalUser() throws Exception {
         identityIs(normalUser());
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
-                """));
+        service.onEvent(event(privateCommand("/平台")));
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
@@ -163,10 +183,7 @@ class BotMessageServiceTest {
     void shouldHidePlatformCommandFromGuest() throws Exception {
         identityIs(BotIdentity.guest());
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
-                """));
+        service.onEvent(event(privateCommand("/平台")));
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
@@ -179,10 +196,7 @@ class BotMessageServiceTest {
     void shouldShowGuestHelpWithoutPlatformCommands() throws Exception {
         identityIs(BotIdentity.guest());
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/help","message":[{"type":"text","data":{"text":"/help"}}]}
-                """));
+        service.onEvent(event(privateCommand("/help")));
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
@@ -199,11 +213,7 @@ class BotMessageServiceTest {
         identityIs(BotIdentity.guest());
         when(bindings.bind(anyLong(), anyString())).thenReturn(true);
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/绑定 someone@example.com",
-                 "message":[{"type":"text","data":{"text":"/绑定 someone@example.com"}}]}
-                """));
+        service.onEvent(event(privateCommand("/绑定 someone@example.com")));
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
@@ -215,45 +225,36 @@ class BotMessageServiceTest {
     void shouldRejectMalformedEmailOnBind() throws Exception {
         identityIs(BotIdentity.guest());
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/绑定 not-an-email",
-                 "message":[{"type":"text","data":{"text":"/绑定 not-an-email"}}]}
-                """));
+        service.onEvent(event(privateCommand("/绑定 not-an-email")));
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
         assertEquals("邮箱格式不正确。用法：/绑定 <邮箱>", reply.getValue());
         verify(bindings, never()).bind(anyLong(), anyString());
     }
+
     /** 超过 maxReplyLength 的回复应渲染成图片发送，而不是被截断。 */
     @Test
     void shouldSendLongReplyAsImage() throws Exception {
         identityIs(admin());
-        when(tools.platformOverview()).thenReturn(longReply());
-        when(imageRenderer.renderPng(anyString())).thenReturn(new byte[]{1, 2, 3});
+        when(tools.platformReport()).thenReturn(longReport());
+        when(reportRenderer.render(any(BotReport.class))).thenReturn(new byte[]{1, 2, 3});
         when(client.sendPrivateImage(eq(999L), any(byte[].class))).thenReturn(true);
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
-                """));
+        service.onEvent(event(privateCommand("/平台")));
 
         verify(client, timeout(3000)).sendPrivateImage(eq(999L), any(byte[].class));
         verify(client, never()).sendPrivateMessage(anyLong(), anyString());
     }
 
-    /** 渲染不出图片（例如容器里没有中文字体）时，退回截断文本。 */
+    /** 渲染不出图片（例如字体不可用）时，退回截断文本。 */
     @Test
     void shouldFallBackToTruncatedTextWhenRenderUnavailable() throws Exception {
         identityIs(admin());
-        when(tools.platformOverview()).thenReturn(longReply());
-        when(imageRenderer.renderPng(anyString())).thenReturn(null);
+        when(tools.platformReport()).thenReturn(longReport());
+        when(reportRenderer.render(any(BotReport.class))).thenReturn(null);
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
-                """));
+        service.onEvent(event(privateCommand("/平台")));
 
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已截断"));
     }
@@ -262,14 +263,11 @@ class BotMessageServiceTest {
     @Test
     void shouldFallBackToTruncatedTextWhenImageSendFails() throws Exception {
         identityIs(admin());
-        when(tools.platformOverview()).thenReturn(longReply());
-        when(imageRenderer.renderPng(anyString())).thenReturn(new byte[]{1});
+        when(tools.platformReport()).thenReturn(longReport());
+        when(reportRenderer.render(any(BotReport.class))).thenReturn(new byte[]{1});
         when(client.sendPrivateImage(eq(999L), any(byte[].class))).thenReturn(false);
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
-                """));
+        service.onEvent(event(privateCommand("/平台")));
 
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已截断"));
     }
@@ -279,20 +277,9 @@ class BotMessageServiceTest {
     void shouldSendShortReplyAsTextWithoutRendering() throws Exception {
         identityIs(admin());
 
-        service.onEvent(event("""
-                {"post_type":"message","message_type":"private","user_id":999,
-                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
-                """));
+        service.onEvent(event(privateCommand("/平台")));
 
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
-        verifyNoInteractions(imageRenderer);
+        verifyNoInteractions(reportRenderer);
     }
-
-    /** 造一段必然超过 maxReplyLength(900) 的回复。 */
-    private static String longReply() {
-        StringBuilder sb = new StringBuilder("平台概览：");
-        for (int i = 0; i < 60; i++) {
-            sb.append("\n- 账号").append(i).append("：余额 12.34，已用额度 56.78，状态正常");
-        }
-        return sb.toString();
-    }}
+}

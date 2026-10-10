@@ -6,6 +6,8 @@ import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
+import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.bot.report.BotReportRenderer;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,9 +41,13 @@ import java.util.regex.Pattern;
  *     <li><b>平台管理员</b>：监控助手 + 全部只读查询工具；</li>
  *     <li><b>平台普通用户</b>：监控助手，但<strong>不挂任何平台级查询工具</strong>，
  *         问到平台数据时只回「仅管理员可查」；</li>
- *     <li><b>非平台用户</b>：纯聊天机器人，<strong>绝不能出现任何平台相关信息</strong> ——
- *         既没有工具，系统提示词也明令禁止提及平台，连平台级命令都返回「未知命令」。</li>
+ *     <li><b>非平台用户</b>：纯聊天机器人，<strong>绝不能出现任何平台相关信息</strong>。</li>
  * </ul>
+ *
+ * <h2>回复形态</h2>
+ * 命令与模型回答统一产出 {@link BotReport}：内容不长就发纯文本，
+ * 超过 {@code maxReplyLength} 就渲染成表格 / 热力图图片（见 {@link BotReportRenderer}），
+ * 避免被截断或排成难读的项目符号列表。渲染或发送失败时退回截断文本。
  */
 @Service
 public class BotMessageService {
@@ -56,9 +62,11 @@ public class BotMessageService {
             当前对话者是平台管理员，可以查看全部平台数据。
             要求：
             1. 只依据工具返回的真实数据回答，绝不编造数字；
-            2. 用简体中文，直接给结论；列表用「- 」开头，不要输出 Markdown 表格或代码块；
-            3. 涉及指标时说明时间窗（例如「近 24 小时」）；
-            4. 工具查不到就直说查不到，不要猜测。
+            2. 用简体中文，直接给结论；
+            3. 需要罗列多条数据时用 Markdown 表格（| 列名 | 列名 | 加一行 |---|），
+               系统会把表格渲染成图片，比一长串项目符号好读；不要输出代码块；
+            4. 涉及指标时说明时间窗（例如「近 24 小时」）；
+            5. 工具查不到就直说查不到，不要猜测。
             """;
 
     private static final String MONITOR_USER_PROMPT = """
@@ -69,7 +77,7 @@ public class BotMessageService {
                对方问到这类内容时，直接说明「该数据仅管理员可查」，不要猜测、不要编造；
             2. 你可以介绍平台的一般用法、解释概念，以及回答与用户本人相关的问题；
             3. 绝不编造任何数字；
-            4. 用简体中文，直接给结论；列表用「- 」开头，不要输出 Markdown 表格或代码块。
+            4. 用简体中文，直接给结论；不要输出代码块。
             """;
 
     private static final String CHAT_PROMPT = """
@@ -85,14 +93,15 @@ public class BotMessageService {
     private static final String ADMIN_HELP = """
             可用命令：
             - /平台            上游平台概览
-            - /号池 [时间窗]   号池账号的请求数、缓存率、首 Token（默认 24h）
+            - /号池 [时间窗]   号池渠道的缓存率、首 Token、每秒 Token 与趋势矩阵
             - /采集            号池直连库增量采集状态
             - /账号 <关键字>   按名称查账号余额与状态
             - /变更 [条数]     最近的账号/密钥变更
             - /我的信息        查看当前绑定的邮箱
             - /绑定 <邮箱>     绑定邮箱
             - /解绑            解除绑定
-            也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」""";
+            也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」
+            内容较长时会自动渲染成表格图片。""";
 
     private static final String USER_HELP = """
             可用命令：
@@ -116,7 +125,7 @@ public class BotMessageService {
     private final MonitorChatTools tools;
     private final BotIdentityResolver identityResolver;
     private final QqUserBindingService bindings;
-    private final BotImageRenderer imageRenderer;
+    private final BotReportRenderer reportRenderer;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
     private final ExecutorService executor = Executors.newFixedThreadPool(2, runnable -> {
@@ -134,14 +143,14 @@ public class BotMessageService {
                              MonitorChatTools tools,
                              BotIdentityResolver identityResolver,
                              QqUserBindingService bindings,
-                             BotImageRenderer imageRenderer,
+                             BotReportRenderer reportRenderer,
                              ObjectProvider<ChatClient.Builder> chatClientBuilder) {
         this.settingsService = settingsService;
         this.client = client;
         this.tools = tools;
         this.identityResolver = identityResolver;
         this.bindings = bindings;
-        this.imageRenderer = imageRenderer;
+        this.reportRenderer = reportRenderer;
         this.chatClientBuilder = chatClientBuilder;
     }
 
@@ -204,18 +213,18 @@ public class BotMessageService {
         }
         executor.submit(() -> {
             BotIdentity identity = identityResolver.resolve(event.userId());
-            String reply;
+            BotReport report;
             try {
-                reply = answer(event, text, settings, identity);
+                report = answer(event, text, settings, identity);
             } catch (Exception ex) {
                 log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                         event.userId(), identity.platformUser(), ex.getMessage());
                 // 异常细节只回给平台用户，避免向陌生人泄露内部实现
-                reply = identity.platformUser()
+                report = BotReport.fromMarkdown(identity.platformUser()
                         ? "处理这条消息时出错了：" + ex.getMessage()
-                        : "处理这条消息时出错了，请稍后再试。";
+                        : "处理这条消息时出错了，请稍后再试。");
             }
-            send(event, group, reply, settings.maxReplyLength());
+            send(event, group, report, settings.maxReplyLength());
         });
     }
 
@@ -224,7 +233,7 @@ public class BotMessageService {
                 : settings.isUserAllowed(event.userId());
     }
 
-    private String answer(OneBotEvent event, String text, BotSettings settings, BotIdentity identity) {
+    private BotReport answer(OneBotEvent event, String text, BotSettings settings, BotIdentity identity) {
         String prefix = settings.commandPrefix();
         if (prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
             return command(text.substring(prefix.length()).trim(), identity, event);
@@ -233,26 +242,26 @@ public class BotMessageService {
     }
 
     /** 确定性命令：没配大模型也能用。 */
-    private String command(String commandLine, BotIdentity identity, OneBotEvent event) {
+    private BotReport command(String commandLine, BotIdentity identity, OneBotEvent event) {
         String[] parts = commandLine.split("\\s+", 2);
         String name = parts[0].toLowerCase(Locale.ROOT);
         String arg = parts.length > 1 ? parts[1].trim() : "";
         return switch (name) {
-            case "help", "帮助", "?" -> help(identity);
-            case "bind", "绑定" -> bind(arg, event);
-            case "unbind", "解绑" -> unbind(event);
-            case "whoami", "我的信息", "me" -> whoami(identity);
+            case "help", "帮助", "?" -> text(help(identity));
+            case "bind", "绑定" -> text(bind(arg, event));
+            case "unbind", "解绑" -> text(unbind(event));
+            case "whoami", "我的信息", "me" -> text(whoami(identity));
 
             // 平台级命令：非平台用户一律按「未知命令」处理，不暴露功能存在
-            case "platform", "平台", "overview" -> platformOnly(identity, tools::platformOverview);
-            case "pool", "号池" -> platformOnly(identity, () -> tools.poolOverview(arg));
-            case "ingest", "采集" -> platformOnly(identity, tools::poolIngestStatus);
-            case "account", "账号" -> platformOnly(identity, () -> tools.accountDetail(arg));
-            case "changes", "变更" -> platformOnly(identity, () -> tools.recentChanges(parseInt(arg, 5)));
+            case "platform", "平台", "overview" -> platformOnly(identity, tools::platformReport);
+            case "pool", "号池" -> platformOnly(identity, () -> tools.poolReport(arg));
+            case "ingest", "采集" -> platformOnly(identity, tools::ingestReport);
+            case "account", "账号" -> platformOnly(identity, () -> tools.accountReport(arg));
+            case "changes", "变更" -> platformOnly(identity, () -> tools.changesReport(parseInt(arg, 5)));
 
-            default -> identity.platformUser()
+            default -> text(identity.platformUser()
                     ? "未知命令：" + name + "\n" + help(identity)
-                    : UNKNOWN_COMMAND;
+                    : UNKNOWN_COMMAND);
         };
     }
 
@@ -262,14 +271,19 @@ public class BotMessageService {
      * <p>非平台用户必须看起来「压根没有这个功能」：返回和未知命令完全一样的提示，
      * 而不是「权限不足」，否则等于告诉对方平台和权限体系的存在。</p>
      */
-    private String platformOnly(BotIdentity identity, Supplier<String> action) {
+    private BotReport platformOnly(BotIdentity identity, Supplier<BotReport> action) {
         if (!identity.platformUser()) {
-            return UNKNOWN_COMMAND;
+            return text(UNKNOWN_COMMAND);
         }
         if (!identity.admin()) {
-            return "平台级数据仅管理员可查。";
+            return text("平台级数据仅管理员可查。");
         }
         return action.get();
+    }
+
+    /** 纯文本包成报表：短内容仍按纯文本发出，长内容走段落渲染。 */
+    private static BotReport text(String value) {
+        return BotReport.fromMarkdown(value);
     }
 
     private String help(BotIdentity identity) {
@@ -312,17 +326,19 @@ public class BotMessageService {
         return "当前绑定邮箱：" + identity.email();
     }
 
-    private String askModel(OneBotEvent event, String text, BotSettings settings, BotIdentity identity) {
+    private BotReport askModel(OneBotEvent event, String text, BotSettings settings, BotIdentity identity) {
         Persona persona = personaOf(identity);
         ChatClient chatClient = chatClient(persona, settings);
         if (chatClient == null) {
-            return "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + help(identity);
+            return text("自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + help(identity));
         }
-        return chatClient.prompt()
+        String answer = chatClient.prompt()
                 .user(text)
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona)))
                 .call()
                 .content();
+        // 大模型写 Markdown 表格，这里解析成结构化报表，长回答就能渲染成表格图片
+        return BotReport.fromMarkdown(answer);
     }
 
     private Persona personaOf(BotIdentity identity) {
@@ -385,23 +401,26 @@ public class BotMessageService {
     /**
      * 发送回复。
      *
-     * <p>超过 {@code maxReplyLength} 的内容会被截断，此时改为渲染成图片发送 ——
-     * 渠道状态、账户余额这类内容动辄上百行，图片才能完整呈现。渲染或发送图片失败时
+     * <p>超过 {@code maxReplyLength} 的内容会被截断，此时改为渲染成表格 / 热力图图片 ——
+     * 渠道状态、账户余额这类内容本质是表格，图片才能完整呈现。渲染或发送图片失败时
      * 再退回截断文本，保证「至少有东西发出去」。</p>
      */
-    private void send(OneBotEvent event, boolean group, String reply, int maxReplyLength) {
-        String content = reply == null || reply.isBlank() ? "（没有查到内容）" : reply;
-        String truncated = truncate(content, maxReplyLength);
-        if (truncated.equals(content)) {
-            sendText(event, group, content);
+    private void send(OneBotEvent event, boolean group, BotReport report, int maxReplyLength) {
+        String plain = report.toPlainText();
+        if (plain.isBlank()) {
+            plain = "（没有查到内容）";
+            report = BotReport.fromMarkdown(plain);
+        }
+        String truncated = truncate(plain, maxReplyLength);
+        if (truncated.equals(plain)) {
+            sendText(event, group, plain);
             return;
         }
 
-        byte[] png = imageRenderer.renderPng(content);
+        byte[] png = reportRenderer.render(report);
         if (png != null && sendImage(event, group, png)) {
-            // 用 INFO：这条只在真正发图时出现，是「图片功能有没有生效」最直接的证据
             log.info("回复过长（{} 字），已转为图片发送: user={}, bytes={}",
-                    content.length(), event.userId(), png.length);
+                    plain.length(), event.userId(), png.length);
             return;
         }
         sendText(event, group, truncated);

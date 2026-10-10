@@ -5,6 +5,8 @@ import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
+import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.bot.report.BotReportRenderer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -46,7 +48,7 @@ class QqBotWebhookIntegrationTest {
 
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);
-        when(tools.poolOverview(anyString())).thenReturn("号池监控（近 24h）：账号 A 请求 10，缓存率 80.0%");
+        when(tools.poolReport(anyString())).thenReturn(BotReport.fromMarkdown("号池监控（近 24h）：账号 A 请求 10，缓存率 80.0%"));
 
         BotSettingsService settingsService = mock(BotSettingsService.class);
         when(settingsService.current()).thenReturn(new BotSettings(
@@ -61,10 +63,10 @@ class QqBotWebhookIntegrationTest {
                 .thenReturn(new BotIdentity(true, true, "admin@qq.com"));
         QqUserBindingService bindings = mock(QqUserBindingService.class);
         // 这里的回复很短，不会走图片渲染；仅需满足构造依赖
-        BotImageRenderer imageRenderer = mock(BotImageRenderer.class);
+        BotReportRenderer reportRenderer = mock(BotReportRenderer.class);
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, tools, identityResolver, bindings, imageRenderer, provider);
+                settingsService, client, tools, identityResolver, bindings, reportRenderer, provider);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();
@@ -86,7 +88,7 @@ class QqBotWebhookIntegrationTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(tools, timeout(3000)).poolOverview(anyString());
+        verify(tools, timeout(3000)).poolReport(anyString());
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("号池监控"));
     }
 
