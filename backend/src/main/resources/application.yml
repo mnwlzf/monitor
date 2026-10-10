@@ -77,6 +77,13 @@ monitor:
     command-prefix: ${MONITOR_BOT_COMMAND_PREFIX:/}
     max-reply-length: ${MONITOR_BOT_MAX_REPLY_LENGTH:900}
     memory-window: ${MONITOR_BOT_MEMORY_WINDOW:10}
+    # 长回复渲染成图片：渠道状态、账户余额这类内容动辄上百行，
+    # 纯文本会被 max-reply-length 截断，转图片才能完整呈现。
+    # 渲染失败（例如容器里没有中文字体）时自动退回截断文本。
+    image-enabled: ${MONITOR_BOT_IMAGE_ENABLED:true}
+    image-width: ${MONITOR_BOT_IMAGE_WIDTH:760}
+    # 指定中文字体名；留空时按常见中文字体自动探测
+    image-font: ${MONITOR_BOT_IMAGE_FONT:}
     # 身份识别：把自建 Sub2API 的平台用户邮箱同步到 Redis，
     # 用于区分「平台用户 / 陌生人」以及「管理员 / 普通用户」。
     # 数据来源是 monitor.pool.ingest.* 配置的只读库（public.users 表）。

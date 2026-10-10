@@ -120,7 +120,7 @@ docker compose up -d postgres redis
 | 凭证加密 | `UPSTREAM_CREDENTIAL_KEY` | Base64 编码的 32 字节密钥，`openssl rand -base64 32` 生成，**务必妥善保存** |
 | 登录鉴权 | `MONITOR_ADMIN_USERNAME` `MONITOR_ADMIN_PASSWORD` `MONITOR_SECURITY_ENABLED` `MONITOR_SESSION_*` | 管理员账号与会话配置 |
 | 号池增量采集 | `SUB2API_DB_*` | 可选，直连自建 Sub2API 只读库，建议用仅 `SELECT` 权限的账号 |
-| QQ 机器人 | `MONITOR_BOT_*` | 可选，默认关闭 |
+| QQ 机器人 | `MONITOR_BOT_*` | 可选，默认关闭；长回复（渠道状态、账户余额等）会自动渲染成图片 |
 | 身份识别 | `MONITOR_BOT_IDENTITY_*` | 可选；把 Sub2API 平台用户邮箱同步到 Redis，用于区分平台用户与陌生人 |
 | 大模型 | `SPRING_AI_*` | 可选，默认 `none`，不配 Key 也能正常启动 |
 

@@ -14,8 +14,10 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -37,6 +39,7 @@ class BotMessageServiceTest {
     private MonitorChatTools tools;
     private BotIdentityResolver identityResolver;
     private QqUserBindingService bindings;
+    private BotImageRenderer imageRenderer;
     private BotMessageService service;
 
     @BeforeEach
@@ -52,11 +55,13 @@ class BotMessageServiceTest {
 
         identityResolver = mock(BotIdentityResolver.class);
         bindings = mock(QqUserBindingService.class);
+        imageRenderer = mock(BotImageRenderer.class);
 
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
-        service = new BotMessageService(settingsService, client, tools, identityResolver, bindings, provider);
+        service = new BotMessageService(
+                settingsService, client, tools, identityResolver, bindings, imageRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -221,4 +226,73 @@ class BotMessageServiceTest {
         assertEquals("邮箱格式不正确。用法：/绑定 <邮箱>", reply.getValue());
         verify(bindings, never()).bind(anyLong(), anyString());
     }
-}
+    /** 超过 maxReplyLength 的回复应渲染成图片发送，而不是被截断。 */
+    @Test
+    void shouldSendLongReplyAsImage() throws Exception {
+        identityIs(admin());
+        when(tools.platformOverview()).thenReturn(longReply());
+        when(imageRenderer.renderPng(anyString())).thenReturn(new byte[]{1, 2, 3});
+        when(client.sendPrivateImage(eq(999L), any(byte[].class))).thenReturn(true);
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
+                """));
+
+        verify(client, timeout(3000)).sendPrivateImage(eq(999L), any(byte[].class));
+        verify(client, never()).sendPrivateMessage(anyLong(), anyString());
+    }
+
+    /** 渲染不出图片（例如容器里没有中文字体）时，退回截断文本。 */
+    @Test
+    void shouldFallBackToTruncatedTextWhenRenderUnavailable() throws Exception {
+        identityIs(admin());
+        when(tools.platformOverview()).thenReturn(longReply());
+        when(imageRenderer.renderPng(anyString())).thenReturn(null);
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
+                """));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已截断"));
+    }
+
+    /** 图片发送失败也必须退回截断文本 —— 不能什么都不发。 */
+    @Test
+    void shouldFallBackToTruncatedTextWhenImageSendFails() throws Exception {
+        identityIs(admin());
+        when(tools.platformOverview()).thenReturn(longReply());
+        when(imageRenderer.renderPng(anyString())).thenReturn(new byte[]{1});
+        when(client.sendPrivateImage(eq(999L), any(byte[].class))).thenReturn(false);
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
+                """));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已截断"));
+    }
+
+    /** 短回复不应触发图片渲染，避免每条消息都生成图片。 */
+    @Test
+    void shouldSendShortReplyAsTextWithoutRendering() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"/平台","message":[{"type":"text","data":{"text":"/平台"}}]}
+                """));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
+        verifyNoInteractions(imageRenderer);
+    }
+
+    /** 造一段必然超过 maxReplyLength(900) 的回复。 */
+    private static String longReply() {
+        StringBuilder sb = new StringBuilder("平台概览：");
+        for (int i = 0; i < 60; i++) {
+            sb.append("\n- 账号").append(i).append("：余额 12.34，已用额度 56.78，状态正常");
+        }
+        return sb.toString();
+    }}

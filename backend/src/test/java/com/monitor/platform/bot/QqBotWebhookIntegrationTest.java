@@ -60,9 +60,11 @@ class QqBotWebhookIntegrationTest {
         when(identityResolver.resolve(org.mockito.ArgumentMatchers.anyLong()))
                 .thenReturn(new BotIdentity(true, true, "admin@qq.com"));
         QqUserBindingService bindings = mock(QqUserBindingService.class);
+        // 这里的回复很短，不会走图片渲染；仅需满足构造依赖
+        BotImageRenderer imageRenderer = mock(BotImageRenderer.class);
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, tools, identityResolver, bindings, provider);
+                settingsService, client, tools, identityResolver, bindings, imageRenderer, provider);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

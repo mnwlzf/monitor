@@ -38,8 +38,14 @@ ENV TZ=Asia/Shanghai \
     SERVER_PORT=8080 \
     JAVA_OPTS="-XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8"
 
+# 中文字体：QQ 机器人把长回复渲染成图片时需要（Java2D 绘制中文，JRE 自带字体不含中文）。
+# 刻意做成 best-effort：万一某个包在基础镜像里取不到，也不该让整个构建失败 ——
+# 渲染器探测不到中文字体时会自动退回「截断文本」，并在启动日志里给出提示。
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl tzdata \
+    && (apt-get install -y --no-install-recommends fonts-wqy-microhei \
+        || apt-get install -y --no-install-recommends fonts-noto-cjk \
+        || echo "WARN: 未安装中文字体，QQ 机器人长回复将退回截断文本") \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r monitor \
     && useradd -r -g monitor -u 10001 monitor \

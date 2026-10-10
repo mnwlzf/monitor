@@ -116,6 +116,7 @@ public class BotMessageService {
     private final MonitorChatTools tools;
     private final BotIdentityResolver identityResolver;
     private final QqUserBindingService bindings;
+    private final BotImageRenderer imageRenderer;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
     private final ExecutorService executor = Executors.newFixedThreadPool(2, runnable -> {
@@ -133,12 +134,14 @@ public class BotMessageService {
                              MonitorChatTools tools,
                              BotIdentityResolver identityResolver,
                              QqUserBindingService bindings,
+                             BotImageRenderer imageRenderer,
                              ObjectProvider<ChatClient.Builder> chatClientBuilder) {
         this.settingsService = settingsService;
         this.client = client;
         this.tools = tools;
         this.identityResolver = identityResolver;
         this.bindings = bindings;
+        this.imageRenderer = imageRenderer;
         this.chatClientBuilder = chatClientBuilder;
     }
 
@@ -212,7 +215,7 @@ public class BotMessageService {
                         ? "处理这条消息时出错了：" + ex.getMessage()
                         : "处理这条消息时出错了，请稍后再试。";
             }
-            send(event, group, truncate(reply, settings.maxReplyLength()));
+            send(event, group, reply, settings.maxReplyLength());
         });
     }
 
@@ -379,15 +382,41 @@ public class BotMessageService {
         return persona.name().toLowerCase(Locale.ROOT) + "-" + scope;
     }
 
-    private void send(OneBotEvent event, boolean group, String reply) {
-        if (reply == null || reply.isBlank()) {
-            reply = "（没有查到内容）";
+    /**
+     * 发送回复。
+     *
+     * <p>超过 {@code maxReplyLength} 的内容会被截断，此时改为渲染成图片发送 ——
+     * 渠道状态、账户余额这类内容动辄上百行，图片才能完整呈现。渲染或发送图片失败时
+     * 再退回截断文本，保证「至少有东西发出去」。</p>
+     */
+    private void send(OneBotEvent event, boolean group, String reply, int maxReplyLength) {
+        String content = reply == null || reply.isBlank() ? "（没有查到内容）" : reply;
+        String truncated = truncate(content, maxReplyLength);
+        if (truncated.equals(content)) {
+            sendText(event, group, content);
+            return;
         }
+
+        byte[] png = imageRenderer.renderPng(content);
+        if (png != null && sendImage(event, group, png)) {
+            log.debug("回复过长（{} 字），已转为图片发送: user={}", content.length(), event.userId());
+            return;
+        }
+        sendText(event, group, truncated);
+    }
+
+    private void sendText(OneBotEvent event, boolean group, String text) {
         if (group) {
-            client.sendGroupMessage(event.groupId(), reply);
+            client.sendGroupMessage(event.groupId(), text);
         } else {
-            client.sendPrivateMessage(event.userId(), reply);
+            client.sendPrivateMessage(event.userId(), text);
         }
+    }
+
+    private boolean sendImage(OneBotEvent event, boolean group, byte[] png) {
+        return group
+                ? client.sendGroupImage(event.groupId(), png)
+                : client.sendPrivateImage(event.userId(), png);
     }
 
     /** 只取文本段，@ 机器人、图片等非文本段自然被丢掉。 */

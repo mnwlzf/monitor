@@ -48,6 +48,20 @@ public class QqBotProperties {
     /** 每个会话保留的历史消息条数，用于多轮追问。 */
     private int memoryWindow = 10;
 
+    /**
+     * 长回复是否渲染成图片发送。
+     *
+     * <p>渠道状态、账户余额这类内容动辄上百行，纯文本会被 {@code max-reply-length} 截断，
+     * 转成图片可以完整呈现。渲染失败（例如容器里没有中文字体）时自动退回截断文本。</p>
+     */
+    private boolean imageEnabled = true;
+
+    /** 渲染图片的宽度（像素），高度按内容自适应。 */
+    private int imageWidth = 760;
+
+    /** 指定中文字体名；留空时按常见中文字体依次探测。 */
+    private String imageFont;
+
     /** 群号是否在白名单内；白名单为空表示不限制。 */
     public boolean isGroupAllowed(Long groupId) {
         return matches(allowedGroups, groupId);
@@ -156,5 +170,29 @@ public class QqBotProperties {
 
     public void setMemoryWindow(int memoryWindow) {
         this.memoryWindow = memoryWindow;
+    }
+
+    public boolean isImageEnabled() {
+        return imageEnabled;
+    }
+
+    public void setImageEnabled(boolean imageEnabled) {
+        this.imageEnabled = imageEnabled;
+    }
+
+    public int getImageWidth() {
+        return imageWidth;
+    }
+
+    public void setImageWidth(int imageWidth) {
+        this.imageWidth = imageWidth;
+    }
+
+    public String getImageFont() {
+        return imageFont;
+    }
+
+    public void setImageFont(String imageFont) {
+        this.imageFont = imageFont;
     }
 }
