@@ -33,19 +33,25 @@ public record BotReport(String title, List<Block> blocks, List<String> notes) {
      * @param align    对齐方式
      * @param minWidth 最小列宽（像素）；热力列给一个很小的值即可
      */
-    public record Col(String header, Align align, int minWidth) {
+    public record Col(String header, Align align, int minWidth, boolean heat) {
 
         public static Col left(String header) {
-            return new Col(header, Align.LEFT, 0);
+            return new Col(header, Align.LEFT, 0, false);
         }
 
         public static Col right(String header) {
-            return new Col(header, Align.RIGHT, 0);
+            return new Col(header, Align.RIGHT, 0, false);
         }
 
-        /** 热力色块列：只画颜色，不写字。 */
+        /**
+         * 热力色块列：只画颜色，不写字。
+         *
+         * <p>{@code heat=true} 的列宽度由渲染器统一决定，<strong>不看表头文字</strong> ——
+         * 表头是「10-09 15:00」这种时间戳，按它算宽度会把列撑到 90px，
+         * 色块缩成中间一个小点，整张图看着又稀疏又淡。前端也是统一列宽、标签溢出。</p>
+         */
         public static Col heat(String header) {
-            return new Col(header, Align.LEFT, 24);
+            return new Col(header, Align.LEFT, 0, true);
         }
     }
 
@@ -197,7 +203,7 @@ public record BotReport(String title, List<Block> blocks, List<String> notes) {
         for (String header : headers) {
             // 表头里带数字/百分号的多半是数值列，右对齐
             boolean numeric = header.matches(".*(率|数|TOKEN|Token|token|ms|s$|耗时|请求|余额|额度).*");
-            cols.add(new Col(header, numeric ? Align.RIGHT : Align.LEFT, 0));
+            cols.add(new Col(header, numeric ? Align.RIGHT : Align.LEFT, 0, false));
         }
         return new Block(heading, cols, rows, null);
     }

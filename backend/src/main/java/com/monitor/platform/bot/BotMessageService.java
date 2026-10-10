@@ -18,12 +18,15 @@ import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -54,6 +57,14 @@ public class BotMessageService {
 
     private static final Logger log = LoggerFactory.getLogger(BotMessageService.class);
 
+    /**
+     * 热力图标记：大模型用它表示「这里要放真正的热力图」。
+     *
+     * <p>不直接把矩阵交给大模型，是因为它抄不准 20 行 × 24 列以上的 emoji 矩阵，
+     * 会把图案「重写」一遍，和页面完全对不上。改为由后端按标记确定性渲染。</p>
+     */
+    private static final Pattern HEATMAP_MARKER = Pattern.compile("\\[\\[HEATMAP:([A-Za-z0-9]+)]]");
+
     /** 邮箱格式校验：够用即可，不做 RFC 级校验。 */
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
@@ -66,9 +77,9 @@ public class BotMessageService {
             3. 需要罗列多条数据时用 Markdown 表格（| 列名 | 列名 | 加一行 |---|），
                系统会把表格渲染成图片，比一长串项目符号好读；不要输出代码块；
             4. 涉及号池趋势、热力图、时间分布时，必须调用 poolHeatmap 工具，
-               并把它返回的 Markdown 表格原样放进回答 ——
-               那张表的每个时间桶都是一格，粒度到小时；不要自己用「热度」之类的
-               单列去概括，也不要自己拼 emoji；
+               并把它返回的 [[HEATMAP:...]] 标记原样放进回答；
+               系统会在标记处渲染出真正的热力图。不要自己画表格、色块或 emoji ——
+               矩阵太大，你自己重写会和页面数据对不上；
             5. 涉及指标时说明时间窗（例如「近 24 小时」）；
             6. 工具查不到就直说查不到，不要猜测。
             """;
@@ -341,8 +352,27 @@ public class BotMessageService {
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona)))
                 .call()
                 .content();
+
         // 大模型写 Markdown 表格，这里解析成结构化报表，长回答就能渲染成表格图片
-        return BotReport.fromMarkdown(answer);
+        BotReport report = BotReport.fromMarkdown(answer);
+
+        // 出现 [[HEATMAP:24h]] 标记时，把标记换成后端确定性渲染的热力图，
+        // 避免大模型自己「重写」矩阵导致图案与页面不一致
+        Matcher matcher = HEATMAP_MARKER.matcher(answer);
+        if (matcher.find()) {
+            String range = matcher.group(1);
+            String cleaned = answer.replace(matcher.group(), "").strip();
+            report = mergeHeatmap(BotReport.fromMarkdown(cleaned), tools.poolReport(range));
+        }
+        return report;
+    }
+
+    /** 把大模型的评论与确定性渲染的热力图拼成一张报表。 */
+    static BotReport mergeHeatmap(BotReport comment, BotReport heatmap) {
+        List<BotReport.Block> blocks = new ArrayList<>(comment.blocks());
+        blocks.addAll(heatmap.blocks());
+        String title = comment.title() == null || comment.title().isBlank() ? heatmap.title() : comment.title();
+        return new BotReport(title, blocks, heatmap.notes());
     }
 
     private Persona personaOf(BotIdentity identity) {

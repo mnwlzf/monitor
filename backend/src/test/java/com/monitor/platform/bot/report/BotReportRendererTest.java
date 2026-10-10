@@ -132,11 +132,19 @@ class BotReportRendererTest {
                 colors.add(image.getRGB(x, y) & 0xFFFFFF);
             }
         }
-        assertTrue(colors.contains(0x4CAF50), "应画出绿色块");
-        assertTrue(colors.contains(0xFFEB3B), "应画出黄色块");
-        assertTrue(colors.contains(0xFF9800), "应画出橙色块");
-        assertTrue(colors.contains(0xF44336), "应画出红色块");
-        assertTrue(colors.contains(0xE5E9EC), "应画出灰色块");
+        // 每个 emoji 都必须落成对应档位的颜色（与页面同一条色阶），
+        // 且五档颜色互不相同 —— 否则说明 emoji 被当成了普通文字（豆腐块）
+        Set<Integer> expected = Set.of(
+                rgb(BotReportRenderer.heatColor(0.95)),
+                rgb(BotReportRenderer.heatColor(0.82)),
+                rgb(BotReportRenderer.heatColor(0.67)),
+                rgb(BotReportRenderer.heatColor(0.35)),
+                rgb(BotReportRenderer.heatColor(null)));
+        assertEquals(5, expected.size(), "五档颜色应互不相同");
+        for (int color : expected) {
+            assertTrue(colors.contains(color),
+                    String.format("缺少色块 #%06X —— emoji 没有被画成颜色", color));
+        }
     }
 
     /** 图例那种「色块 + 文字」混排也要能画。 */
@@ -158,6 +166,10 @@ class BotReportRendererTest {
     void shouldReturnNullForEmptyReport() {
         assertNull(renderer.render(null));
         assertNull(renderer.render(BotReport.of("", List.of(), List.of())));
+    }
+
+    private static int rgb(Color color) {
+        return color.getRGB() & 0xFFFFFF;
     }
 
     private static BufferedImage decode(byte[] png) throws Exception {

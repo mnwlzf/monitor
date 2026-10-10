@@ -46,7 +46,10 @@ public class BotReportRenderer {
     private static final int BLOCK_GAP = 16;
     private static final int TITLE_GAP = 14;
     private static final int FOOTER_HEIGHT = 30;
-    private static final int HEAT_CELL_HEIGHT = 18;
+    private static final int HEAT_CELL_HEIGHT = 20;
+
+    /** 热力列统一宽度（像素）。 */
+    private static final int HEAT_COLUMN_WIDTH = 30;
     private static final int HEAT_CELL_INSET = 3;
 
     /** 图片最大宽度；表格再宽也不会超过它，超过就按比例压缩列宽。 */
@@ -67,6 +70,8 @@ public class BotReportRenderer {
 
     /** 文本里的热力标记（emoji 方块）画成色块时的尺寸。 */
     private static final int SWATCH_SIZE = 13;
+    /** 色块最大边长：铺满列宽时也不能变成一个大色块。 */
+    private static final int SWATCH_MAX = 22;
     private static final int SWATCH_GAP = 2;
 
     private static final DateTimeFormatter FOOTER_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
@@ -78,21 +83,21 @@ public class BotReportRenderer {
      * 直接当文字画会变成空白或豆腐块（图例那一行就是这么坏掉的）。
      * 这里把它们识别出来，画成真正的色块。</p>
      */
-    private static final Map<Integer, Color> HEAT_MARKERS = Map.ofEntries(
-            Map.entry(0x1F7E9, new Color(0x4CAF50)),   // 🟩 绿
-            Map.entry(0x1F7E8, new Color(0xFFEB3B)),   // 🟨 黄
-            Map.entry(0x1F7E7, new Color(0xFF9800)),   // 🟧 橙
-            Map.entry(0x1F7E5, new Color(0xF44336)),   // 🟥 红
-            Map.entry(0x1F7E6, new Color(0x2196F3)),   // 🟦 蓝
-            Map.entry(0x1F7EA, new Color(0x9C27B0)),   // 🟪 紫
-            Map.entry(0x2B1C, new Color(0xE5E9EC)),    // ⬜ 无数据
-            Map.entry(0x2B1B, new Color(0x424242)),    // ⬛ 深色
-            Map.entry(0x1F7E2, new Color(0x4CAF50)),   // 🟢
-            Map.entry(0x1F7E1, new Color(0xFFEB3B)),   // 🟡
-            Map.entry(0x1F7E0, new Color(0xFF9800)),   // 🟠
-            Map.entry(0x1F534, new Color(0xF44336)),   // 🔴
-            Map.entry(0x26AA, new Color(0xE5E9EC)),    // ⚪
-            Map.entry(0x26AB, new Color(0x424242)));   // ⚫
+    private static final Map<Integer, Double> HEAT_MARKERS = Map.ofEntries(
+            Map.entry(0x1F7E9, 0.95),         // 🟩 ≥90%
+            Map.entry(0x1F7E8, 0.82),         // 🟨 75-90%
+            Map.entry(0x1F7E7, 0.67),         // 🟧 60-75%
+            Map.entry(0x1F7E5, 0.35),         // 🟥 <60%
+            Map.entry(0x1F7E6, 0.50),         // 🟦
+            Map.entry(0x1F7EA, 0.50),         // 🟪
+            Map.entry(0x2B1C, Double.NaN),    // ⬜ 无数据
+            Map.entry(0x2B1B, 0.20),          // ⬛
+            Map.entry(0x1F7E2, 0.95),         // 🟢
+            Map.entry(0x1F7E1, 0.82),         // 🟡
+            Map.entry(0x1F7E0, 0.67),         // 🟠
+            Map.entry(0x1F534, 0.35),         // 🔴
+            Map.entry(0x26AA, Double.NaN),    // ⚪
+            Map.entry(0x26AB, 0.20));         // ⚫
 
     private final QqBotProperties properties;
     private final BotFonts fonts;
@@ -273,7 +278,10 @@ public class BotReportRenderer {
             String header = layout.cols().get(c).header();
             if (header != null && !header.isBlank()) {
                 FontMetrics fm = g.getFontMetrics();
-                String text = ellipsize(header, fm, widths[c] - CELL_PADDING_X * 2);
+                // 热力列的表头允许溢出：列很窄，省略号会把时间戳变成 "10-…"
+                String text = layout.cols().get(c).heat()
+                        ? header
+                        : ellipsize(header, fm, widths[c] - CELL_PADDING_X * 2);
                 int textX = layout.cols().get(c).align() == BotReport.Align.RIGHT
                         ? cx + widths[c] - CELL_PADDING_X - fm.stringWidth(text)
                         : cx + CELL_PADDING_X;
@@ -301,12 +309,21 @@ public class BotReportRenderer {
                             widths[c] - HEAT_CELL_INSET * 2, HEAT_CELL_HEIGHT, cell.heat());
                 } else if (cell != null && cell.text() != null && !cell.text().isBlank()) {
                     FontMetrics fm = g.getFontMetrics();
-                    List<Run> runs = splitRuns(ellipsize(cell.text(), fm, widths[c] - CELL_PADDING_X * 2));
-                    int runWidth = runsWidth(runs, fm);
+                    List<Run> runs = splitRuns(cell.text());
+                    boolean swatchOnly = runs.stream().allMatch(run -> run.swatch() != null);
+                    if (!swatchOnly) {
+                        runs = splitRuns(ellipsize(cell.text(), fm, widths[c] - CELL_PADDING_X * 2));
+                    }
+                    // 整格都是色块时铺满列宽：固定小方块会在一列里留一大圈空白，
+                    // 整张图看着又稀疏又淡（前端和 /号池 都是铺满的）
+                    int swatchWidth = swatchOnly
+                            ? fillSwatchWidth(runs.size(), widths[c])
+                            : SWATCH_SIZE;
+                    int runWidth = runsWidth(runs, fm, swatchWidth);
                     int textX = layout.cols().get(c).align() == BotReport.Align.RIGHT
                             ? cellX + widths[c] - CELL_PADDING_X - runWidth
                             : cellX + CELL_PADDING_X;
-                    drawRuns(g, runs, textX, y + (ROW_HEIGHT + fm.getAscent()) / 2 - 2, fm);
+                    drawRuns(g, runs, textX, y + (ROW_HEIGHT + fm.getAscent()) / 2 - 2, fm, swatchWidth);
                 }
                 cellX += widths[c];
             }
@@ -320,7 +337,7 @@ public class BotReportRenderer {
     private int drawParagraph(Graphics2D g, List<String> lines, int x, int y, FontMetrics bodyMetrics) {
         g.setFont(fonts.body());
         for (String line : lines) {
-            drawRuns(g, splitRuns(line), x, y + bodyMetrics.getAscent(), bodyMetrics);
+            drawRuns(g, splitRuns(line), x, y + bodyMetrics.getAscent(), bodyMetrics, SWATCH_SIZE);
             y += PARAGRAPH_LINE_HEIGHT;
         }
         return y;
@@ -331,14 +348,16 @@ public class BotReportRenderer {
      *
      * <p>色块在垂直方向与文字居中对齐，这样「🟩 ≥90%」这种图例读起来才自然。</p>
      */
-    private void drawRuns(Graphics2D g, List<Run> runs, int x, int baseline, FontMetrics metrics) {
+    private void drawRuns(Graphics2D g, List<Run> runs, int x, int baseline, FontMetrics metrics, int swatchWidth) {
         int cursor = x;
+        int swatchHeight = Math.min(HEAT_CELL_HEIGHT, swatchWidth);
         for (Run run : runs) {
             if (run.swatch() != null) {
                 g.setColor(run.swatch());
-                int top = baseline - metrics.getAscent() + Math.max(0, (metrics.getAscent() - SWATCH_SIZE) / 2);
-                g.fillRoundRect(cursor, top, SWATCH_SIZE, SWATCH_SIZE, 3, 3);
-                cursor += SWATCH_SIZE + SWATCH_GAP;
+                int top = baseline - metrics.getAscent()
+                        + Math.max(0, (metrics.getAscent() - swatchHeight) / 2);
+                g.fillRoundRect(cursor, top, swatchWidth, swatchHeight, 3, 3);
+                cursor += swatchWidth + SWATCH_GAP;
             } else {
                 g.setColor(BODY_COLOR);
                 g.drawString(run.text(), cursor, baseline);
@@ -347,21 +366,30 @@ public class BotReportRenderer {
         }
     }
 
+    /** 色块铺满列宽时的边长；上下留一点边距，避免糊成一整块。 */
+    private static int fillSwatchWidth(int count, int columnWidth) {
+        if (count <= 0) {
+            return SWATCH_SIZE;
+        }
+        int usable = columnWidth - HEAT_CELL_INSET * 2 - (count - 1) * SWATCH_GAP;
+        return Math.max(8, Math.min(SWATCH_MAX, usable / count));
+    }
+
     /** 把文本切成「普通文字」与「热力标记」两种片段。 */
     private static List<Run> splitRuns(String text) {
         List<Run> runs = new ArrayList<>();
         StringBuilder plain = new StringBuilder();
         for (int i = 0; i < text.length(); ) {
             int codePoint = text.codePointAt(i);
-            Color swatch = HEAT_MARKERS.get(codePoint);
-            if (swatch == null) {
+            Double ratio = HEAT_MARKERS.get(codePoint);
+            if (ratio == null) {
                 plain.appendCodePoint(codePoint);
             } else {
                 if (!plain.isEmpty()) {
                     runs.add(new Run(plain.toString(), null));
                     plain.setLength(0);
                 }
-                runs.add(new Run(null, swatch));
+                runs.add(new Run(null, heatColor(ratio)));
             }
             i += Character.charCount(codePoint);
         }
@@ -386,10 +414,10 @@ public class BotReportRenderer {
         return total;
     }
 
-    private static int runsWidth(List<Run> runs, FontMetrics metrics) {
+    private static int runsWidth(List<Run> runs, FontMetrics metrics, int swatchWidth) {
         int total = 0;
         for (Run run : runs) {
-            total += run.swatch() != null ? SWATCH_SIZE + SWATCH_GAP : metrics.stringWidth(run.text());
+            total += run.swatch() != null ? swatchWidth + SWATCH_GAP : metrics.stringWidth(run.text());
         }
         return total;
     }
@@ -451,6 +479,12 @@ public class BotReportRenderer {
 
         for (int c = 0; c < columnCount; c++) {
             BotReport.Col col = block.cols().get(c);
+            if (col.heat()) {
+                // 热力列统一宽度：不看表头文字，否则带时间标签的列会被撑宽，
+                // 色块缩成小点，整张图变稀疏（前端也是统一列宽 + 标签溢出）
+                widths[c] = HEAT_COLUMN_WIDTH;
+                continue;
+            }
             int width = col.header() == null ? 0 : headerMetrics.stringWidth(col.header()) + CELL_PADDING_X * 2;
             for (BotReport.Row row : block.rows()) {
                 if (c >= row.cells().size()) {

@@ -79,15 +79,66 @@ public class MonitorChatTools {
         return poolReport(range).toPlainText();
     }
 
+    /**
+     * 号池时间桶热力图。
+     *
+     * <p><strong>刻意不返回表格数据</strong>：热力图是 20 行 × 24 列以上的矩阵，
+     * 大模型抄不准 —— 它会把矩阵「重写」一遍，图案就和页面完全对不上了。
+     * 这里只返回一个标记与关键数字，真正的热力图由后端按标记确定性渲染。</p>
+     */
     @Tool(description = """
-            查询号池渠道的「时间桶热力图」：每个渠道一行，每个时间桶一格，
-            按缓存命中率着色（🟩 ≥90% / 🟨 75-90% / 🟧 60-75% / 🟥 <60% / ⬜ 无流量）。
-            需要展示号池趋势、热力、时间分布时用这个工具，并把它返回的 Markdown 表格
-            原样放进回答（系统会把色块渲染成真正的颜色）。
+            查询号池渠道的「时间桶热力图」（每个渠道一行、每个时间桶一格，按缓存命中率着色）。
+            需要展示号池趋势、热力、时间分布时用这个工具。
+            返回内容里有一行形如 [[HEATMAP:24h]] 的标记：把它原样放在回答里，
+            系统会在那个位置渲染出真正的热力图。不要自己画表格、色块或 emoji。
             range 取值 90m / 1h / 6h / 12h / 24h / 7d / 30d / 90d，默认 24h。
             """)
     public String poolHeatmap(String range) {
-        return poolHeatmapMarkdown(range);
+        return heatmapDirective(range);
+    }
+
+    /** 生成「热力图标记 + 关键数字」，供大模型引用。 */
+    public String heatmapDirective(String range) {
+        Integer platformId = poolPlatformId();
+        if (platformId == null) {
+            return "还没有把任何平台标记为「号池监控源」，无法查询号池数据。";
+        }
+        String window = normalizeRange(range);
+        PoolHeatmapResponse heatmap = poolQueryService.heatmap(platformId, window, null, null, null, null);
+        List<PoolHeatmapResponse.Row> active = heatmap.rows().stream()
+                .filter(row -> row.total() != null && row.total().requests() > 0)
+                .sorted(Comparator.comparingLong((PoolHeatmapResponse.Row row) -> row.total().requests()).reversed())
+                .toList();
+        if (active.isEmpty()) {
+            return "近 " + window + " 号池没有任何流量。";
+        }
+
+        long totalRequests = active.stream().mapToLong(row -> row.total().requests()).sum();
+        PoolHeatmapResponse.Row best = active.stream()
+                .filter(row -> row.total().cacheHitRate() != null)
+                .max(Comparator.comparingDouble(row -> row.total().cacheHitRate()))
+                .orElse(null);
+        PoolHeatmapResponse.Row worst = active.stream()
+                .filter(row -> row.total().cacheHitRate() != null)
+                .min(Comparator.comparingDouble(row -> row.total().cacheHitRate()))
+                .orElse(null);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("[[HEATMAP:").append(window).append("]]\n");
+        sb.append("（系统会在标记处渲染出近 ").append(window)
+                .append(" 的号池热力图，请勿自己画表格或色块）\n");
+        sb.append("关键数字：有流量渠道 ").append(active.size())
+                .append(" 个，请求合计 ").append(totalRequests);
+        if (best != null) {
+            sb.append("；缓存率最高 ").append(percent(best.total().cacheHitRate()))
+                    .append("（").append(label(best)).append("）");
+        }
+        if (worst != null) {
+            sb.append("，最低 ").append(percent(worst.total().cacheHitRate()))
+                    .append("（").append(label(worst)).append("）");
+        }
+        sb.append("。");
+        return sb.toString();
     }
 
     @Tool(description = "查询号池直连库增量采集的状态：是否生效、游标位置、最新明细滞后多少秒")
@@ -223,77 +274,6 @@ public class MonitorChatTools {
         notes.add("色块为该时段缓存命中率：越绿越高、越红越低，灰色表示该时段没有流量。");
 
         return BotReport.of("号池监控（近 " + window + "）", blocks, notes);
-    }
-
-    /**
-     * 号池时间桶热力图，转成带 emoji 色块的 Markdown 表格。
-     *
-     * <p>给大模型用：它没法画图，只能写 Markdown；这里把细粒度的时间桶数据
-     * 以 emoji 色块的形式交给它，渲染器再把 emoji 画成真正的颜色。</p>
-     */
-    public String poolHeatmapMarkdown(String range) {
-        Integer platformId = poolPlatformId();
-        if (platformId == null) {
-            return "还没有把任何平台标记为「号池监控源」，无法查询号池数据。";
-        }
-        String window = normalizeRange(range);
-        PoolHeatmapResponse heatmap = poolQueryService.heatmap(platformId, window, null, null, null, null);
-        if (heatmap.rows().isEmpty()) {
-            return "号池里还没有账号（或尚未采集过）。";
-        }
-
-        List<PoolHeatmapResponse.Row> active = heatmap.rows().stream()
-                .filter(row -> row.total() != null && row.total().requests() > 0)
-                .sorted(Comparator.comparingLong((PoolHeatmapResponse.Row row) -> row.total().requests()).reversed())
-                .limit(MAX_HEAT_ROWS)
-                .toList();
-        if (active.isEmpty()) {
-            return "近 " + window + " 号池没有任何流量。";
-        }
-
-        Buckets buckets = buckets(heatmap);
-        StringBuilder sb = new StringBuilder("| 平台 / 账号 | 请求 | 缓存率 | 首 TOKEN | 每秒 TOKEN");
-        for (String label : buckets.labels()) {
-            sb.append(" | ").append(label.isBlank() ? " " : label);
-        }
-        sb.append(" |\n|---|--:|--:|--:|--:");
-        for (int i = 0; i < buckets.labels().size(); i++) {
-            sb.append("|---");
-        }
-        sb.append("|\n");
-
-        for (PoolHeatmapResponse.Row row : active) {
-            sb.append("| ").append(label(row))
-                    .append(" | ").append(row.total().requests())
-                    .append(" | ").append(percent(row.total().cacheHitRate()))
-                    .append(" | ").append(seconds(row.total().avgFirstTokenMs()))
-                    .append(" | ").append(tps(row.total().tokensPerSecond()));
-            for (Double heat : buckets.heatOf(row)) {
-                sb.append(" | ").append(heatEmoji(heat));
-            }
-            sb.append(" |\n");
-        }
-        return sb.toString();
-    }
-
-    /**
-     * 缓存率 → emoji 色块。分档与页面图例一致：
-     * 🟩 ≥90% / 🟨 75-90% / 🟧 60-75% / 🟥 &lt;60% / ⬜ 无流量。
-     */
-    static String heatEmoji(Double cacheHitRate) {
-        if (cacheHitRate == null) {
-            return "⬜";
-        }
-        if (cacheHitRate >= 0.90) {
-            return "🟩";
-        }
-        if (cacheHitRate >= 0.75) {
-            return "🟨";
-        }
-        if (cacheHitRate >= 0.60) {
-            return "🟧";
-        }
-        return "🟥";
     }
 
     /** 号池直连库增量采集状态。 */
