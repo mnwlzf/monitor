@@ -10,6 +10,7 @@ import org.springframework.web.client.RestClient;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
@@ -80,12 +81,29 @@ class WeatherToolsTest {
         BotReport report = tools.weatherReport("北京", 2);
 
         String text = report.toPlainText();
-        assertTrue(text.contains("未来 2 天预报"), text);
+        assertTrue(text.contains("未来 2 天"), text);
         assertTrue(text.contains("10-10"), text);
-        assertTrue(text.contains("多云 / 晴"), text);
-        assertTrue(text.contains("26°C / 14°C"), text);
-        assertTrue(text.contains("30%"), text);
+        // 白天夜间不同时写成「多云转晴」，温度写成 26/14°C —— 都是给人直接读的写法
+        assertTrue(text.contains("多云转晴"), text);
+        assertTrue(text.contains("26/14°C"), text);
+        assertTrue(text.contains("降水 30%"), text);
         server.verify();
+    }
+
+    /**
+     * 天气是给人直接看的，不能出现 Markdown 表格。
+     *
+     * <p>竖线和 {@code |---|} 分隔行在 QQ 里读起来很别扭 —— 这条断言把这个要求固定下来。</p>
+     */
+    @Test
+    void shouldNotUseMarkdownTables() {
+        server.expect(requestTo(containsString("/api/v1/misc/weather")))
+                .andRespond(withSuccess(WITH_FORECAST, MediaType.APPLICATION_JSON));
+
+        String text = tools.weatherReport("北京", 3).toPlainText();
+
+        assertFalse(text.contains("|"), "天气不该出现 Markdown 竖线：" + text);
+        assertFalse(text.contains("---"), "天气不该出现 Markdown 分隔行：" + text);
     }
 
     /** 城市不存在时接口返回 404（不是 JSON 错误体），要翻译成可读提示。 */

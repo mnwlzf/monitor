@@ -169,7 +169,7 @@ public class WeatherTools {
         current.add(BotReport.Row.of("紫外线", value(data, "uv")));
         current.add(BotReport.Row.of("能见度", withUnit(data, "visibility", " km")));
         current.add(BotReport.Row.of("气压", withUnit(data, "pressure", " hPa")));
-        current.add(BotReport.Row.of("更新时间", text(data, "report_time", "-")));
+        current.add(BotReport.Row.of("更新时间", reportTime(data)));
 
         List<BotReport.Block> blocks = new ArrayList<>();
         blocks.add(new BotReport.Block(district(data), List.of(
@@ -177,21 +177,18 @@ public class WeatherTools {
                 BotReport.Col.left("值")), current, null));
 
         if (forecastDays > 0 && data.path("forecast").isArray() && !data.path("forecast").isEmpty()) {
-            List<BotReport.Row> rows = new ArrayList<>();
+            // 用逐天一行的人话格式，不用表格：天气是给人直接看的，
+            // Markdown 的竖线和表头在 QQ 里读起来很别扭。
+            List<String> lines = new ArrayList<>();
             for (JsonNode day : data.path("forecast")) {
-                rows.add(BotReport.Row.of(
-                        shortDate(text(day, "date", "-")),
-                        text(day, "week", "-"),
-                        text(day, "weather_day", "-") + " / " + text(day, "weather_night", "-"),
-                        range(day),
-                        percentValue(day, "pop")));
+                StringBuilder line = new StringBuilder();
+                line.append(shortDate(text(day, "date", "-"))).append(" ");
+                line.append(text(day, "week", "")).append("  ");
+                line.append(weatherTransition(day)).append("  ");
+                line.append(temperatureRange(day)).append("  降水 ").append(percentValue(day, "pop"));
+                lines.add(line.toString());
             }
-            blocks.add(new BotReport.Block("未来 " + rows.size() + " 天预报", List.of(
-                    BotReport.Col.left("日期"),
-                    BotReport.Col.left("星期"),
-                    BotReport.Col.left("白天 / 夜间"),
-                    BotReport.Col.left("最高 / 最低"),
-                    BotReport.Col.right("降水概率")), rows, null));
+            blocks.add(BotReport.paragraph("未来 " + lines.size() + " 天", lines));
         }
 
         List<String> notes = new ArrayList<>();
@@ -242,22 +239,51 @@ public class WeatherTools {
         String primary = text(data, "aqi_primary", "");
         StringBuilder sb = new StringBuilder();
         if (!category.isBlank()) {
-            sb.append(category).append(" ");
+            sb.append(category);
         }
-        sb.append("(AQI ").append(aqi.asInt()).append(")");
+        sb.append("（AQI ").append(aqi.asInt());
         if (!primary.isBlank()) {
-            sb.append(" 首要污染物 ").append(primary);
+            sb.append("，首要污染物 ").append(primary);
         }
+        sb.append("）");
         return sb.toString();
     }
 
-    private static String range(JsonNode day) {
+    /**
+     * 更新时间：去掉年份与秒。
+     *
+     * <p>「2026-10-10 16:34:09」里的年份和秒对人读天气没有意义；
+     * 接口有时还会返回「11 分钟前发布」这种相对时间，那就原样保留。</p>
+     */
+    private static String reportTime(JsonNode data) {
+        String raw = text(data, "report_time", "-");
+        if (raw.length() >= 19 && raw.charAt(4) == '-' && raw.charAt(10) == ' ') {
+            return raw.substring(5, 16);
+        }
+        return raw;
+    }
+
+    /** 26/14°C —— 比「26°C / 14°C」紧凑，QQ 里更好读。 */
+    private static String temperatureRange(JsonNode day) {
         String max = value(day, "temp_max");
         String min = value(day, "temp_min");
         if ("-".equals(max) && "-".equals(min)) {
             return "-";
         }
-        return max + "°C / " + min + "°C";
+        return max + "/" + min + "°C";
+    }
+
+    /** 白天夜间不同时写成「多云转晴」，相同时只写一个。 */
+    private static String weatherTransition(JsonNode day) {
+        String dayWeather = text(day, "weather_day", "");
+        String nightWeather = text(day, "weather_night", "");
+        if (dayWeather.isBlank()) {
+            return nightWeather.isBlank() ? "-" : nightWeather;
+        }
+        if (nightWeather.isBlank() || nightWeather.equals(dayWeather)) {
+            return dayWeather;
+        }
+        return dayWeather + "转" + nightWeather;
     }
 
     private static String percentValue(JsonNode node, String field) {
