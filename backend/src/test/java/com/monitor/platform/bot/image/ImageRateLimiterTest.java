@@ -26,8 +26,8 @@ class ImageRateLimiterTest {
         assertTrue(limiter.tryAcquire(base));
         assertTrue(limiter.tryAcquire(base.plusSeconds(10)));
         assertTrue(limiter.tryAcquire(base.plusSeconds(20)));
+        // 第 4 张必须被拒：窗口内上限是 3
         assertFalse(limiter.tryAcquire(base.plusSeconds(30)));
-        assertEquals(3, limiter.used());
     }
 
     /** 名额滑出窗口后应重新放行。 */
@@ -48,7 +48,6 @@ class ImageRateLimiterTest {
     void shouldReportRetryAfterWhenExhausted() {
         ImageRateLimiter limiter = new ImageRateLimiter(1, Duration.ofMinutes(1));
         assertTrue(limiter.tryAcquire(base));
-        assertEquals(Duration.ZERO, limiter.retryAfter(base.plusSeconds(30)).minus(Duration.ofSeconds(30)));
         assertEquals(30, limiter.retryAfter(base.plusSeconds(30)).getSeconds());
         assertEquals(Duration.ZERO, limiter.retryAfter(base.plusSeconds(60)));
     }

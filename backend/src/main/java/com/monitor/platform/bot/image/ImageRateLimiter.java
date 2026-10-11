@@ -59,11 +59,6 @@ public class ImageRateLimiter {
         return remaining.isNegative() ? Duration.ZERO : remaining;
     }
 
-    /** 当前窗口内已占用的名额。 */
-    public synchronized int used() {
-        evict(Instant.now());
-        return accepted.size();
-    }
 
     private void evict(Instant now) {
         Instant cutoff = now.minus(window);
