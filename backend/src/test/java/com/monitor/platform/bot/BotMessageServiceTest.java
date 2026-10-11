@@ -28,6 +28,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -632,6 +633,33 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
         assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
         verifyNoInteractions(channelStatusService);
+    }    // ============================================================ 会话记忆隔离
+
+    /**
+     * 同一个群里，不同的人绝不能共用一段记忆。
+     *
+     * <p>线上踩过：群聊作用域只带 groupId，A 说过的话进了 B 的上下文，
+     * 看起来就是「把别人的聊天内容加到了另外的人身上」。</p>
+     */
+    @Test
+    void shouldIsolateMemoryPerUserInGroup() {
+        assertNotEquals(
+                BotMessageService.memoryScope(BotChannel.GROUP, 222L, 10001L),
+                BotMessageService.memoryScope(BotChannel.GROUP, 222L, 10002L));
+    }
+
+    /** 同一个人：换群、私聊、临时会话都要各自独立，避免上下文串台。 */
+    @Test
+    void shouldIsolateMemoryByChannel() {
+        String groupA = BotMessageService.memoryScope(BotChannel.GROUP, 222L, 10001L);
+        String groupB = BotMessageService.memoryScope(BotChannel.GROUP, 333L, 10001L);
+        String privateChat = BotMessageService.memoryScope(BotChannel.PRIVATE, null, 10001L);
+        String tempSession = BotMessageService.memoryScope(BotChannel.TEMP_SESSION, 222L, 10001L);
+
+        assertNotEquals(groupA, groupB);
+        assertNotEquals(groupA, privateChat);
+        assertNotEquals(privateChat, tempSession);
+        assertNotEquals(groupA, tempSession);
     }    // ============================================================ 用户端：只能查自己
 
     /** 平台用户在指定群里查自己的余额：放行，且用的是发送者自己的邮箱。 */

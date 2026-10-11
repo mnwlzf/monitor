@@ -643,18 +643,35 @@ public class BotMessageService {
     }
 
     /**
-     * 会话记忆按「人设 + 通道」隔离。
+     * 会话记忆按「人设 + 通道 + <strong>说话的人</strong>」隔离。
      *
-     * <p>临时会话与好友私聊都是 private，若只按 userId 分组会串上下文：
-     * 指定群里问过的内容会漏到好友私聊里。这里给临时会话单独一个作用域。</p>
+     * <p><strong>群聊也必须带上 userId</strong>：Spring AI 的 {@code MessageWindowChatMemory}
+     * 存的是一串没有署名的 user / assistant 消息，模型分不清哪句是谁说的。如果整个群共用一段记忆，
+     * 甲说过的话就会出现在乙的上下文里，看起来就像「把别人的聊天内容加到了另外的人身上」。</p>
+     *
+     * <p>临时会话与好友私聊都是 private 通道，只按 userId 分组还会把「指定群里问过的内容」
+     * 漏到好友私聊里，所以临时会话单独一个作用域。</p>
+     *
+     * <p>代价：群里不再有跨用户的共享上下文（「他刚才说的那个」这类指代会失效）。
+     * 要恢复共享又不串人，得让每一轮都带上说话人标签，那是另一套记忆实现。</p>
      */
     private String conversationId(OneBotEvent event, Persona persona, BotChannel channel) {
-        String scope = switch (channel) {
-            case GROUP -> "qq-group-" + event.groupId();
-            case TEMP_SESSION -> "qq-temp-" + event.groupId() + "-" + event.userId();
-            case PRIVATE -> "qq-user-" + event.userId();
+        return persona.name().toLowerCase(Locale.ROOT) + "-"
+                + memoryScope(channel, event.groupId(), event.userId());
+    }
+
+    /**
+     * 会话记忆的作用域（不含人设）。
+     *
+     * <p>抽成包级静态方法是为了能在单测里直接验证隔离性 —— 这是踩过一次的坑：
+     * 群聊漏掉 userId 会让不同的人共用一段记忆。</p>
+     */
+    static String memoryScope(BotChannel channel, Long groupId, long userId) {
+        return switch (channel) {
+            case GROUP -> "qq-group-" + groupId + "-" + userId;
+            case TEMP_SESSION -> "qq-temp-" + groupId + "-" + userId;
+            case PRIVATE -> "qq-user-" + userId;
         };
-        return persona.name().toLowerCase(Locale.ROOT) + "-" + scope;
     }
 
     /**
