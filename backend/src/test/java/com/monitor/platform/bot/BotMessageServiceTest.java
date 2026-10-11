@@ -13,6 +13,7 @@ import com.monitor.platform.bot.archive.BotMessageArchiveService;
 import com.monitor.platform.bot.vision.BotImageFetcher;
 import com.monitor.platform.bot.vision.BotVisionProperties;
 import com.monitor.platform.bot.weather.WeatherTools;
+import com.monitor.platform.bot.order.BotOrderTools;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -49,6 +50,7 @@ class BotMessageServiceTest {
 
     private OneBotClient client;
     private MonitorChatTools tools;
+    private BotOrderTools orderTools;
     private BotUserService botUserService;
     private BotIdentityResolver identityResolver;
     private QqUserBindingService bindings;
@@ -69,6 +71,7 @@ class BotMessageServiceTest {
 
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);
+        orderTools = mock(BotOrderTools.class);
         botUserService = mock(BotUserService.class);
         when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台概览内容"));
 
@@ -84,7 +87,7 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, orderTools, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -467,6 +470,83 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
         assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
         verifyNoInteractions(tools);
+    }
+
+    // ============================================================ 管理端只读：订单 / 用户余额
+
+    /** 管理员的 /订单：不写日期时走默认时间窗。 */
+    @Test
+    void shouldReturnOrdersForAdminWithDefaultRange() throws Exception {
+        identityIs(admin());
+        when(orderTools.ordersReport(eq("user@example.com"), eq(""), eq(""), anyInt()))
+                .thenReturn(BotReport.fromMarkdown("订单内容"));
+
+        service.onEvent(event(privateCommand("/订单 user@example.com")));
+
+        verify(orderTools, timeout(3000)).ordersReport("user@example.com", "", "", BotOrderTools.DEFAULT_LIMIT);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("订单内容"));
+    }
+
+    /** 日期范围必须原样透传到取数层。 */
+    @Test
+    void shouldPassDateRangeToOrders() throws Exception {
+        identityIs(admin());
+        when(orderTools.ordersReport(anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(BotReport.fromMarkdown("订单内容"));
+
+        service.onEvent(event(privateCommand("/订单 user@example.com 2026-09-01 2026-09-30")));
+
+        verify(orderTools, timeout(3000))
+                .ordersReport("user@example.com", "2026-09-01", "2026-09-30", BotOrderTools.DEFAULT_LIMIT);
+    }
+
+    /** 只给一个日期时，它作为起始日期，结束日期交给取数层按今天算。 */
+    @Test
+    void shouldTreatSingleDateAsStart() throws Exception {
+        identityIs(admin());
+        when(orderTools.ordersReport(anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(BotReport.fromMarkdown("订单内容"));
+
+        service.onEvent(event(privateCommand("/订单 user@example.com 2026-09-01")));
+
+        verify(orderTools, timeout(3000))
+                .ordersReport("user@example.com", "2026-09-01", "", BotOrderTools.DEFAULT_LIMIT);
+    }
+
+    /** /订单 不带账号时只回用法，绝不去查。 */
+    @Test
+    void shouldPrintUsageWhenOrderAccountMissing() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event(privateCommand("/订单")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("用法"));
+        verifyNoInteractions(orderTools);
+    }
+
+    /** 管理员的 /用户余额：走指定平台用户的余额查询。 */
+    @Test
+    void shouldReturnUserBalanceForAdmin() throws Exception {
+        identityIs(admin());
+        when(orderTools.userBalanceReport("user@example.com")).thenReturn(BotReport.fromMarkdown("余额内容"));
+
+        service.onEvent(event(privateCommand("/用户余额 user@example.com")));
+
+        verify(orderTools, timeout(3000)).userBalanceReport("user@example.com");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("余额内容"));
+    }
+
+    /** 陌生人问 /订单：按未知命令处理，绝不暴露平台功能，也不去查订单。 */
+    @Test
+    void shouldHideOrdersFromGuest() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event(privateCommand("/订单 user@example.com")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(orderTools);
     }
 
     // ============================================================ 用户端：只能查自己

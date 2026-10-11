@@ -6,6 +6,7 @@ import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.user.BotUserTools;
+import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
@@ -140,6 +141,8 @@ public class BotMessageService {
             - /消耗 [条数]     全平台账号消耗排行（余额 / 今日 / 累计）
             - /异常            停用、采集失败、凭证失效的账号
             - /任务            定时任务启用状态与最近一次执行结果
+            - /订单 <账号> [起] [止]  指定平台用户的订单（默认近 30 天）
+            - /用户余额 <账号>       指定平台用户的余额与累计充值
             - /我的余额        我自己的账户余额与状态
             - /我的用量 [窗]   我自己的用量（today / week / month）
             - /我的密钥        我自己的 API Key 列表
@@ -178,6 +181,7 @@ public class BotMessageService {
     private final BotSettingsService settingsService;
     private final OneBotClient client;
     private final MonitorChatTools tools;
+    private final BotOrderTools orderTools;
     private final BotUserService botUserService;
     private final WeatherTools weatherTools;
     private final BotMessageArchiveService archive;
@@ -201,6 +205,7 @@ public class BotMessageService {
     public BotMessageService(BotSettingsService settingsService,
                              OneBotClient client,
                              MonitorChatTools tools,
+                             BotOrderTools orderTools,
                              BotUserService botUserService,
                              WeatherTools weatherTools,
                              BotMessageArchiveService archive,
@@ -213,6 +218,7 @@ public class BotMessageService {
         this.settingsService = settingsService;
         this.client = client;
         this.tools = tools;
+        this.orderTools = orderTools;
         this.botUserService = botUserService;
         this.weatherTools = weatherTools;
         this.archive = archive;
@@ -372,6 +378,9 @@ public class BotMessageService {
                     platformOnly(identity, platformFeature, () -> tools.usageReport(parseInt(arg, 10)));
             case "abnormal", "异常" -> platformOnly(identity, platformFeature, tools::abnormalReport);
             case "tasks", "任务" -> platformOnly(identity, platformFeature, tools::taskReport);
+            case "订单", "orders" -> platformOnly(identity, platformFeature, () -> orderReport(arg));
+            case "用户余额", "userbalance" ->
+                    platformOnly(identity, platformFeature, () -> orderTools.userBalanceReport(arg.trim()));
 
             default -> text(platformFeature
                     ? "未知命令：" + name + "\n" + help(identity, platformFeature)
@@ -434,6 +443,23 @@ public class BotMessageService {
             return "邮箱格式不正确。用法：/绑定 <邮箱>";
         }
         return bindings.bind(event.userId(), email) ? "已记录你的邮箱。" : "绑定失败，请稍后再试。";
+    }
+
+    /**
+     * {@code /订单 <账号> [起始日期] [结束日期]}。
+     *
+     * <p>日期两段都可省；只给一段时它当起始日期，结束日期取今天。
+     * 账号本身不含空格（邮箱 / 用户名 / 数字 ID），所以按空白切词足够。</p>
+     */
+    private BotReport orderReport(String arg) {
+        String[] parts = arg == null || arg.isBlank() ? new String[0] : arg.trim().split("\\s+");
+        if (parts.length == 0) {
+            return text("用法：/订单 <邮箱或用户名> [起始日期] [结束日期]，例如 "
+                    + "/订单 user@example.com 2026-09-01 2026-09-30；日期可省略，默认近 30 天。");
+        }
+        String from = parts.length > 1 ? parts[1] : "";
+        String to = parts.length > 2 ? parts[2] : "";
+        return orderTools.ordersReport(parts[0], from, to, BotOrderTools.DEFAULT_LIMIT);
     }
 
     /**
@@ -565,7 +591,7 @@ public class BotMessageService {
                             .build());
             // 天气与平台无关，三种人设都能用（含陌生人）
             configured = persona.usesTools()
-                    ? configured.defaultTools(tools, weatherTools)
+                    ? configured.defaultTools(tools, orderTools, weatherTools)
                     : configured.defaultTools(weatherTools);
             ChatClient built = configured.build();
             clients.put(persona, new CachedClient(built, window));
