@@ -16,6 +16,7 @@ import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
 import com.monitor.platform.bot.identity.Sub2ApiUserCache;
+import com.monitor.platform.bot.image.ImageGenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -79,7 +80,7 @@ class QqBotWebhookIntegrationTest {
         BotVisionProperties visionProperties = new BotVisionProperties();
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, tools, mock(BotOrderTools.class), mock(BotUsageTools.class), mock(BotChannelStatusService.class), mock(Sub2ApiUserCache.class), mock(BotUserService.class), weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, mock(BotOrderTools.class), mock(BotUsageTools.class), mock(BotChannelStatusService.class), mock(Sub2ApiUserCache.class), mock(ImageGenService.class), mock(BotUserService.class), weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

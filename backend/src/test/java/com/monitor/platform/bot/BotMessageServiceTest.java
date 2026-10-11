@@ -17,6 +17,7 @@ import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.image.ImageGenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -57,6 +58,7 @@ class BotMessageServiceTest {
     private BotOrderTools orderTools;
     private BotUsageTools usageTools;
     private BotChannelStatusService channelStatusService;
+    private ImageGenService imageGenService;
     private Sub2ApiUserCache userCache;
     private BotUserService botUserService;
     private BotIdentityResolver identityResolver;
@@ -81,6 +83,7 @@ class BotMessageServiceTest {
         orderTools = mock(BotOrderTools.class);
         usageTools = mock(BotUsageTools.class);
         channelStatusService = mock(BotChannelStatusService.class);
+        imageGenService = mock(ImageGenService.class);
         userCache = mock(Sub2ApiUserCache.class);
         botUserService = mock(BotUserService.class);
         when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台概览内容"));
@@ -97,7 +100,7 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, orderTools, usageTools, channelStatusService, userCache, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, orderTools, usageTools, channelStatusService, userCache, imageGenService, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -660,6 +663,34 @@ class BotMessageServiceTest {
         assertNotEquals(groupA, privateChat);
         assertNotEquals(privateChat, tempSession);
         assertNotEquals(groupA, tempSession);
+    }    // ============================================================ 生图：所有人都能用
+
+    /** 路人也应该能 /画图：生成成功后把图片发出去，再跟一句文字。 */
+    @Test
+    void shouldAllowDrawForGuest() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(imageGenService.generate("一只猫")).thenReturn(
+                new ImageGenService.Result(new byte[]{1, 2, 3}, "a cat", null));
+        when(client.sendPrivateImage(eq(999L), any(byte[].class))).thenReturn(true);
+
+        service.onEvent(event(privateCommand("/画图 一只猫")));
+
+        verify(imageGenService, timeout(3000)).generate("一只猫");
+        verify(client, timeout(3000)).sendPrivateImage(eq(999L), any(byte[].class));
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("画好了"));
+    }
+
+    /** 生图失败（例如被限频或上游报错）时，把原因原样回给用户，且不发图。 */
+    @Test
+    void shouldReplyWithReasonWhenDrawFails() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(imageGenService.generate(anyString())).thenReturn(
+                new ImageGenService.Result(null, null, "生图太频繁了，一分钟最多 3 张，约 30 秒后再试。"));
+
+        service.onEvent(event(privateCommand("/画图 一只猫")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("太频繁"));
+        verify(client, never()).sendPrivateImage(anyLong(), any(byte[].class));
     }    // ============================================================ 用户端：只能查自己
 
     /** 平台用户在指定群里查自己的余额：放行，且用的是发送者自己的邮箱。 */

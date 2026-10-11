@@ -11,6 +11,9 @@ import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
 import com.monitor.platform.bot.channel.BotChannelStatusTools;
+import com.monitor.platform.bot.image.GeneratedImages;
+import com.monitor.platform.bot.image.ImageGenService;
+import com.monitor.platform.bot.image.ImageGenTools;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
@@ -156,6 +159,7 @@ public class BotMessageService {
             - /绑定 <邮箱>     绑定邮箱
             - /解绑            解除绑定
             - /天气 <城市>     实时天气与预报（所有人都能用）
+            - /画图 <提示词>   生成一张图片（所有人都能用，全局一分钟最多 3 张）
             也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」
             内容较长时会自动渲染成表格图片。""";
 
@@ -168,6 +172,7 @@ public class BotMessageService {
             - /绑定 <邮箱>     绑定邮箱
             - /解绑            解除绑定
             - /天气 <城市>     实时天气与预报（所有人都能用）
+            - /画图 <提示词>   生成一张图片（所有人都能用，全局一分钟最多 3 张）
             - /渠道状态 [时间窗]  我可用分组的渠道状态（默认近 1 小时）
             平台级数据（账号、号池、变更记录）仅管理员可查。""";
 
@@ -177,6 +182,7 @@ public class BotMessageService {
             - /解绑            解除绑定
             - /我的信息        查看当前绑定
             - /天气 <城市>     实时天气与预报
+            - /画图 <提示词>   生成一张图片
             也可以直接和我聊天。""";
 
     /** 非平台用户看到「未知命令」时的统一回复，不暴露平台功能的存在。 */
@@ -192,6 +198,7 @@ public class BotMessageService {
     private final BotUsageTools usageTools;
     private final BotChannelStatusService channelStatusService;
     private final Sub2ApiUserCache userCache;
+    private final ImageGenService imageGenService;
     private final BotUserService botUserService;
     private final WeatherTools weatherTools;
     private final BotMessageArchiveService archive;
@@ -202,7 +209,7 @@ public class BotMessageService {
     private final BotReportRenderer reportRenderer;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
-    private final ExecutorService executor = Executors.newFixedThreadPool(2, runnable -> {
+    private final ExecutorService executor = Executors.newFixedThreadPool(4, runnable -> {
         Thread thread = new Thread(runnable, "qq-bot");
         thread.setDaemon(true);
         return thread;
@@ -219,6 +226,7 @@ public class BotMessageService {
                              BotUsageTools usageTools,
                              BotChannelStatusService channelStatusService,
                              Sub2ApiUserCache userCache,
+                             ImageGenService imageGenService,
                              BotUserService botUserService,
                              WeatherTools weatherTools,
                              BotMessageArchiveService archive,
@@ -235,6 +243,7 @@ public class BotMessageService {
         this.usageTools = usageTools;
         this.channelStatusService = channelStatusService;
         this.userCache = userCache;
+        this.imageGenService = imageGenService;
         this.botUserService = botUserService;
         this.weatherTools = weatherTools;
         this.archive = archive;
@@ -326,9 +335,10 @@ public class BotMessageService {
                     describeIncoming(text, imageRefs.size(), images.size()),
                     kindOf(text, settings, !imageRefs.isEmpty()), identity);
 
+            GeneratedImages generated = new GeneratedImages();
             BotReport report;
             try {
-                report = answer(event, text, settings, identity, platformFeature, channel, images);
+                report = answer(event, text, settings, identity, platformFeature, channel, images, generated);
             } catch (Exception ex) {
                 log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                         event.userId(), identity.platformUser(), ex.getMessage());
@@ -338,7 +348,7 @@ public class BotMessageService {
                         : "处理这条消息时出错了，请稍后再试。");
             }
 
-            SendOutcome outcome = send(event, group, report, settings.maxReplyLength());
+            SendOutcome outcome = send(event, group, report, settings.maxReplyLength(), generated.snapshot());
             // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
             archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
                     personaOf(identity, platformFeature).name(), correlationId);
@@ -352,18 +362,18 @@ public class BotMessageService {
 
     private BotReport answer(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
                              boolean platformFeature, BotChannel channel,
-                             List<BotImageFetcher.FetchedImage> images) {
+                             List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         String prefix = settings.commandPrefix();
         // 只发图片时 text 为空，不能当命令处理，直接交给模型
         if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
-            return command(text.substring(prefix.length()).trim(), identity, platformFeature, event);
+            return command(text.substring(prefix.length()).trim(), identity, platformFeature, event, generated);
         }
-        return askModel(event, text, settings, identity, platformFeature, channel, images);
+        return askModel(event, text, settings, identity, platformFeature, channel, images, generated);
     }
 
     /** 确定性命令：没配大模型也能用。 */
     private BotReport command(String commandLine, BotIdentity identity, boolean platformFeature,
-                              OneBotEvent event) {
+                              OneBotEvent event, GeneratedImages generated) {
         String[] parts = commandLine.split("\\s+", 2);
         String name = parts[0].toLowerCase(Locale.ROOT);
         String arg = parts.length > 1 ? parts[1].trim() : "";
@@ -383,6 +393,9 @@ public class BotMessageService {
 
             // 天气与平台无关，所有人（含陌生人）都能用
             case "weather", "天气" -> weather(arg);
+
+            // 生图同样与平台无关，所有人都能用；限频在 ImageGenService 里做（全局一分钟 3 张）
+            case "draw", "画图", "生图" -> draw(arg, generated);
 
             // 渠道状态：对外功能，管理员与平台用户都能看；非平台用户按未知命令处理
             case "渠道状态", "channelstatus" -> platformFeature
@@ -532,7 +545,7 @@ public class BotMessageService {
 
     private BotReport askModel(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
                                boolean platformFeature, BotChannel channel,
-                               List<BotImageFetcher.FetchedImage> images) {
+                               List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         Persona persona = personaOf(identity, platformFeature);
         ChatClient chatClient = chatClient(persona, settings);
         if (chatClient == null) {
@@ -565,6 +578,8 @@ public class BotMessageService {
             request = request.tools(new BotChannelStatusTools(
                     channelStatusService, identity.admin(), viewerUserId(identity)));
         }
+        // 生图：所有人都能用，图片归属到本条消息（按请求构造，避免串到别人的回复里）
+        request = request.tools(new ImageGenTools(imageGenService, generated));
         String answer = request
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)))
                 .call()
@@ -681,7 +696,16 @@ public class BotMessageService {
      * 渠道状态、账户余额这类内容本质是表格，图片才能完整呈现。渲染或发送图片失败时
      * 再退回截断文本，保证「至少有东西发出去」。</p>
      */
-    private SendOutcome send(OneBotEvent event, boolean group, BotReport report, int maxReplyLength) {
+    private SendOutcome send(OneBotEvent event, boolean group, BotReport report, int maxReplyLength,
+                            List<byte[]> generatedImages) {
+        // 先生成的图：这是用户明确要的东西，发失败要让他知道，而不是只回一句文字
+        for (byte[] image : generatedImages) {
+            if (sendImage(event, group, image)) {
+                log.info("已发送生成的图片: user={}, bytes={}", event.userId(), image.length);
+            } else {
+                sendText(event, group, "图片发送失败了，请稍后再试。");
+            }
+        }
         String plain = report.toPlainText();
         if (plain.isBlank()) {
             plain = "（没有查到内容）";
@@ -690,7 +714,7 @@ public class BotMessageService {
         String truncated = truncate(plain, maxReplyLength);
         if (truncated.equals(plain)) {
             sendText(event, group, plain);
-            return new SendOutcome(plain, BotMessageArchiveService.KIND_TEXT);
+            return new SendOutcome(archiveContent(plain, generatedImages), archiveKind(generatedImages));
         }
 
         byte[] png = reportRenderer.render(report);
@@ -698,7 +722,7 @@ public class BotMessageService {
             log.info("回复过长（{} 字），已转为图片发送: user={}, bytes={}",
                     plain.length(), event.userId(), png.length);
             // 存档存文本内容（就是图片上的字），便于日后检索；kind 标成 IMAGE
-            return new SendOutcome(plain, BotMessageArchiveService.KIND_IMAGE);
+            return new SendOutcome(archiveContent(plain, generatedImages), BotMessageArchiveService.KIND_IMAGE);
         }
         sendText(event, group, truncated);
         return new SendOutcome(truncated, BotMessageArchiveService.KIND_TEXT);
@@ -741,7 +765,31 @@ public class BotMessageService {
     private record SendOutcome(String content, String kind) {
     }
 
-    private void sendText(OneBotEvent event, boolean group, String text) {
+    /**
+     * {@code /画图 <提示词>}：生成图片并塞进本次消息的待发图片里。
+     *
+     * <p>命令与模型工具共用同一条取数链路（{@link ImageGenService}），
+     * 限频也在那里统一做，所以「敲命令」和「说人话」走的是同一个闸门。</p>
+     */
+    private BotReport draw(String prompt, GeneratedImages generated) {
+        ImageGenService.Result result = imageGenService.generate(prompt);
+        if (!result.ok()) {
+            return text(result.error());
+        }
+        generated.add(result.image());
+        return text("画好了。");
+    }
+
+    /** 存档内容带上「本次还发了生成图」的标记，便于事后检索。 */
+    private static String archiveContent(String text, List<byte[]> generatedImages) {
+        return generatedImages.isEmpty() ? text : "[生成图 ×" + generatedImages.size() + "] " + text;
+    }
+
+    private static String archiveKind(List<byte[]> generatedImages) {
+        return generatedImages.isEmpty()
+                ? BotMessageArchiveService.KIND_TEXT
+                : BotMessageArchiveService.KIND_IMAGE;
+    }    private void sendText(OneBotEvent event, boolean group, String text) {
         if (group) {
             client.sendGroupMessage(event.groupId(), text);
         } else {
