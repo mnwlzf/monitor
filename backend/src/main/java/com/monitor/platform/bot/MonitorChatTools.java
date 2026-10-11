@@ -1,10 +1,14 @@
 package com.monitor.platform.bot;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.api.dto.AccountResponse;
+import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.PlatformResponse;
 import com.monitor.platform.api.dto.PoolHeatmapResponse;
 import com.monitor.platform.api.dto.PoolIngestStatusResponse;
+import com.monitor.platform.api.dto.ScheduledTaskResponse;
 import com.monitor.platform.api.dto.UpstreamChangeEventResponse;
+import com.monitor.platform.api.service.ScheduledTaskAdminService;
 import com.monitor.platform.api.service.UpstreamAdminService;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.collector.repository.PlatformRepository;
@@ -55,13 +59,16 @@ public class MonitorChatTools {
     private final PlatformRepository platformRepository;
     private final UpstreamAdminService upstreamAdminService;
     private final PoolQueryService poolQueryService;
+    private final ScheduledTaskAdminService scheduledTaskAdminService;
 
     public MonitorChatTools(PlatformRepository platformRepository,
                             UpstreamAdminService upstreamAdminService,
-                            PoolQueryService poolQueryService) {
+                            PoolQueryService poolQueryService,
+                            ScheduledTaskAdminService scheduledTaskAdminService) {
         this.platformRepository = platformRepository;
         this.upstreamAdminService = upstreamAdminService;
         this.poolQueryService = poolQueryService;
+        this.scheduledTaskAdminService = scheduledTaskAdminService;
     }
 
     // ============================================================
@@ -154,6 +161,22 @@ public class MonitorChatTools {
     @Tool(description = "查询最近的账号与密钥变更记录，limit 为返回条数，默认 5")
     public String recentChanges(int limit) {
         return changesReport(limit).toPlainText();
+    }
+
+    @Tool(description = "查询全平台账号的用量排行：余额、今日消耗、累计消耗与累计请求数。"
+            + "limit 为返回条数，默认 10，最多 30")
+    public String usageRanking(int limit) {
+        return usageReport(limit).toPlainText();
+    }
+
+    @Tool(description = "查询当前异常账号名单：被停用、最近采集失败或凭证失效的账号，并给出原因")
+    public String abnormalAccounts() {
+        return abnormalReport().toPlainText();
+    }
+
+    @Tool(description = "查询定时任务的启用状态与最近一次执行结果，用来确认采集任务是否在正常运行")
+    public String scheduledTasks() {
+        return taskReport().toPlainText();
     }
 
     // ============================================================
@@ -378,6 +401,213 @@ public class MonitorChatTools {
                 BotReport.Col.left("内容")), rows, null);
 
         return BotReport.of("账号 / 密钥变更", List.of(table), List.of());
+    }
+
+    // ============================================================
+    // 管理端只读查询：用量排行 / 异常名单 / 定时任务
+    // ============================================================
+
+    /**
+     * 全平台账号用量排行。
+     *
+     * <p>取每个账号的最新用量快照，按累计消耗倒序 —— 页面上是「用量看板」，
+     * 这里给群里一个「谁在花钱」的快速答案。</p>
+     */
+    public BotReport usageReport(int limit) {
+        int size = limit <= 0 ? 10 : Math.min(limit, 30);
+        record UsageRow(String platform, AccountUsageDashboardResponse usage, BigDecimal cost) {
+        }
+
+        List<UsageRow> all = new ArrayList<>();
+        OffsetDateTime latest = null;
+        for (PlatformResponse platform : upstreamAdminService.listPlatforms()) {
+            for (AccountUsageDashboardResponse usage : upstreamAdminService.listUsageDashboard(platform.id())) {
+                all.add(new UsageRow(platform.name(), usage, cost(usage)));
+                if (usage.collectedAt() != null && (latest == null || usage.collectedAt().isAfter(latest))) {
+                    latest = usage.collectedAt();
+                }
+            }
+        }
+        if (all.isEmpty()) {
+            return BotReport.fromMarkdown("还没有任何用量快照，等第一轮采集完成后再查。");
+        }
+
+        all.sort(Comparator.comparing((UsageRow row) -> row.cost()).reversed());
+        List<UsageRow> top = all.subList(0, Math.min(size, all.size()));
+
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (UsageRow row : top) {
+            AccountUsageDashboardResponse usage = row.usage();
+            String name = usage.displayName() == null || usage.displayName().isBlank()
+                    ? ("账号 " + usage.accountId())
+                    : usage.displayName();
+            rows.add(BotReport.Row.of(
+                    name,
+                    row.platform(),
+                    decimal(usage.balance()),
+                    metric(usage.metrics(), "today_actual_cost"),
+                    decimal(usage.totalActualCost() != null ? usage.totalActualCost() : usage.totalCost()),
+                    usage.totalRequests() == null ? "-" : String.valueOf(usage.totalRequests())));
+        }
+
+        BotReport.Block table = new BotReport.Block(
+                "累计消耗 TOP " + rows.size() + "（共 " + all.size() + " 个账号有快照）", List.of(
+                BotReport.Col.left("账号"),
+                BotReport.Col.left("平台"),
+                BotReport.Col.right("余额"),
+                BotReport.Col.right("今日消耗"),
+                BotReport.Col.right("累计消耗"),
+                BotReport.Col.right("累计请求")), rows, null);
+
+        List<String> notes = new ArrayList<>();
+        if (latest != null) {
+            notes.add("数据来自最近一次采集快照（最晚 " + time(latest) + "）。");
+        }
+        if (all.size() > rows.size()) {
+            notes.add("这里只列出累计消耗最高的 " + rows.size() + " 个，其余 " + (all.size() - rows.size()) + " 个略过。");
+        }
+        return BotReport.of("账号用量排行", List.of(table), notes);
+    }
+
+    /**
+     * 异常账号名单。
+     *
+     * <p>「异常」= 被停用 / 最近采集失败或部分成功 / 凭证失效，
+     * 和页面上账号列表里那几个红色标记是同一套判据。</p>
+     */
+    public BotReport abnormalReport() {
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (PlatformResponse platform : upstreamAdminService.listPlatforms()) {
+            for (AccountResponse account : upstreamAdminService.listAccounts(platform.id())) {
+                String reason = abnormalReason(account);
+                if (reason == null) {
+                    continue;
+                }
+                rows.add(BotReport.Row.of(
+                        accountLabel(account),
+                        platform.name(),
+                        reason,
+                        decimal(account.balance()),
+                        time(account.lastCollectedAt())));
+            }
+        }
+        if (rows.isEmpty()) {
+            return BotReport.fromMarkdown("所有账号状态正常，没有需要处理的异常。");
+        }
+
+        BotReport.Block table = new BotReport.Block("异常账号 " + rows.size() + " 个", List.of(
+                BotReport.Col.left("账号"),
+                BotReport.Col.left("平台"),
+                BotReport.Col.left("原因"),
+                BotReport.Col.right("余额"),
+                BotReport.Col.left("最近采集")), rows, null);
+
+        return BotReport.of("异常账号", List.of(table), List.of());
+    }
+
+    /**
+     * 定时任务状态。
+     *
+     * <p>采集出问题时第一个要看的就是这里：任务有没有被停用、最近一次跑成功没有。
+     * 启用中的排在前面，失败的任务把错误信息单独列一段。</p>
+     */
+    public BotReport taskReport() {
+        List<ScheduledTaskResponse> tasks = scheduledTaskAdminService.listTasks();
+        if (tasks.isEmpty()) {
+            return BotReport.fromMarkdown("还没有配置任何定时任务。");
+        }
+        long enabled = tasks.stream().filter(task -> Boolean.TRUE.equals(task.enabled())).count();
+
+        List<ScheduledTaskResponse> sorted = new ArrayList<>(tasks);
+        sorted.sort(Comparator
+                .comparing((ScheduledTaskResponse task) -> !Boolean.TRUE.equals(task.enabled()))
+                .thenComparing(ScheduledTaskResponse::lastRunAt, Comparator.nullsLast(Comparator.reverseOrder())));
+
+        List<BotReport.Row> rows = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
+        for (ScheduledTaskResponse task : sorted) {
+            String name = task.taskName() == null || task.taskName().isBlank() ? task.taskCode() : task.taskName();
+            rows.add(BotReport.Row.of(
+                    name,
+                    task.handlerName() == null || task.handlerName().isBlank() ? task.taskCode() : task.handlerName(),
+                    Boolean.TRUE.equals(task.enabled()) ? "启用" : "停用",
+                    time(task.lastRunAt()),
+                    runResult(task.lastRunStatus())));
+            if ("FAILED".equalsIgnoreCase(task.lastRunStatus())) {
+                failures.add(name + "：" + (task.lastRunMessage() == null || task.lastRunMessage().isBlank()
+                        ? "没有留下错误信息"
+                        : task.lastRunMessage()));
+            }
+        }
+
+        List<BotReport.Block> blocks = new ArrayList<>();
+        blocks.add(new BotReport.Block(null, List.of(
+                BotReport.Col.left("任务"),
+                BotReport.Col.left("处理器"),
+                BotReport.Col.left("状态"),
+                BotReport.Col.left("最近执行"),
+                BotReport.Col.left("结果")), rows, null));
+        if (!failures.isEmpty()) {
+            blocks.add(BotReport.paragraph("最近执行失败 " + failures.size() + " 个", failures));
+        }
+
+        return BotReport.of("定时任务（启用 " + enabled + " / 共 " + tasks.size() + "）", blocks, List.of());
+    }
+
+    /** 异常判据；正常账号返回 null。 */
+    private static String abnormalReason(AccountResponse account) {
+        List<String> reasons = new ArrayList<>();
+        if (!Boolean.TRUE.equals(account.status())) {
+            reasons.add("已停用");
+        }
+        if ("FAILED".equalsIgnoreCase(account.lastCollectStatus())) {
+            reasons.add("采集失败");
+        } else if ("PARTIAL".equalsIgnoreCase(account.lastCollectStatus())) {
+            reasons.add("部分成功");
+        }
+        if ("INVALID".equalsIgnoreCase(account.authStatus())) {
+            reasons.add("凭证失效");
+        }
+        return reasons.isEmpty() ? null : String.join(" / ", reasons);
+    }
+
+    private static String accountLabel(AccountResponse account) {
+        String name = account.displayName() == null ? "" : account.displayName();
+        return name.isBlank() ? ("账号 " + account.id()) : name;
+    }
+
+    /** 用量快照里今日消耗藏在 metrics JSON 里，平台没提供时显示 -。 */
+    private static String metric(JsonNode node, String field) {
+        if (node == null) {
+            return "-";
+        }
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return "-";
+        }
+        return value.isNumber() ? value.decimalValue().stripTrailingZeros().toPlainString() : value.asText();
+    }
+
+    /** 排序用：累计实际成本优先，缺失时退回累计标准消耗。 */
+    private static BigDecimal cost(AccountUsageDashboardResponse usage) {
+        if (usage.totalActualCost() != null) {
+            return usage.totalActualCost();
+        }
+        if (usage.totalCost() != null) {
+            return usage.totalCost();
+        }
+        return BigDecimal.ZERO;
+    }
+
+    private static String runResult(String status) {
+        if (status == null || status.isBlank()) {
+            return "未执行";
+        }
+        return switch (status.toUpperCase(Locale.ROOT)) {
+            case "SUCCESS" -> "成功";
+            case "FAILED" -> "失败";
+            default -> status;
+        };
     }
 
     // ============================================================

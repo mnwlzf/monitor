@@ -137,6 +137,9 @@ public class BotMessageService {
             - /采集            号池直连库增量采集状态
             - /账号 <关键字>   按名称查账号余额与状态
             - /变更 [条数]     最近的账号/密钥变更
+            - /消耗 [条数]     全平台账号消耗排行（余额 / 今日 / 累计）
+            - /异常            停用、采集失败、凭证失效的账号
+            - /任务            定时任务启用状态与最近一次执行结果
             - /我的余额        我自己的账户余额与状态
             - /我的用量 [窗]   我自己的用量（today / week / month）
             - /我的密钥        我自己的 API Key 列表
@@ -365,6 +368,10 @@ public class BotMessageService {
             case "ingest", "采集" -> platformOnly(identity, platformFeature, tools::ingestReport);
             case "account", "账号" -> platformOnly(identity, platformFeature, () -> tools.accountReport(arg));
             case "changes", "变更" -> platformOnly(identity, platformFeature, () -> tools.changesReport(parseInt(arg, 5)));
+            case "cost", "消耗", "用量榜" ->
+                    platformOnly(identity, platformFeature, () -> tools.usageReport(parseInt(arg, 10)));
+            case "abnormal", "异常" -> platformOnly(identity, platformFeature, tools::abnormalReport);
+            case "tasks", "任务" -> platformOnly(identity, platformFeature, tools::taskReport);
 
             default -> text(platformFeature
                     ? "未知命令：" + name + "\n" + help(identity, platformFeature)

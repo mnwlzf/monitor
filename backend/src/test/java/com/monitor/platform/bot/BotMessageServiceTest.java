@@ -406,6 +406,69 @@ class BotMessageServiceTest {
         verifyNoInteractions(reportRenderer);
     }
 
+    // ============================================================ 管理端只读：消耗 / 异常 / 任务
+
+    /** 管理员的 /消耗：走全平台用量排行，默认 10 条。 */
+    @Test
+    void shouldReturnUsageRankingForAdmin() throws Exception {
+        identityIs(admin());
+        when(tools.usageReport(10)).thenReturn(BotReport.fromMarkdown("账号用量排行内容"));
+
+        service.onEvent(event(privateCommand("/消耗")));
+
+        verify(tools, timeout(3000)).usageReport(10);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("账号用量排行内容"));
+    }
+
+    /** /消耗 带条数时必须按参数取数，而不是永远用默认值。 */
+    @Test
+    void shouldPassLimitToUsageRanking() throws Exception {
+        identityIs(admin());
+        when(tools.usageReport(3)).thenReturn(BotReport.fromMarkdown("账号用量排行内容"));
+
+        service.onEvent(event(privateCommand("/消耗 3")));
+
+        verify(tools, timeout(3000)).usageReport(3);
+        verify(tools, never()).usageReport(10);
+    }
+
+    /** 管理员的 /异常：走异常账号名单。 */
+    @Test
+    void shouldReturnAbnormalAccountsForAdmin() throws Exception {
+        identityIs(admin());
+        when(tools.abnormalReport()).thenReturn(BotReport.fromMarkdown("异常账号内容"));
+
+        service.onEvent(event(privateCommand("/异常")));
+
+        verify(tools, timeout(3000)).abnormalReport();
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("异常账号内容"));
+    }
+
+    /** 管理员的 /任务：走定时任务状态。 */
+    @Test
+    void shouldReturnScheduledTasksForAdmin() throws Exception {
+        identityIs(admin());
+        when(tools.taskReport()).thenReturn(BotReport.fromMarkdown("定时任务内容"));
+
+        service.onEvent(event(privateCommand("/任务")));
+
+        verify(tools, timeout(3000)).taskReport();
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("定时任务内容"));
+    }
+
+    /** 陌生人问 /异常：按未知命令处理，绝不暴露平台功能，也不去查。 */
+    @Test
+    void shouldHideAbnormalCommandFromGuest() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event(privateCommand("/异常")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(tools);
+    }
+
     // ============================================================ 用户端：只能查自己
 
     /** 平台用户在指定群里查自己的余额：放行，且用的是发送者自己的邮箱。 */
