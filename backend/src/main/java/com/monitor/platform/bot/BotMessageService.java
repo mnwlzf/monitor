@@ -7,6 +7,7 @@ import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.user.BotUserTools;
 import com.monitor.platform.bot.order.BotOrderTools;
+import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
@@ -143,6 +144,7 @@ public class BotMessageService {
             - /任务            定时任务启用状态与最近一次执行结果
             - /订单 <账号> [起] [止]  指定平台用户的订单（默认近 30 天）
             - /用户余额 <账号>       指定平台用户的余额与累计充值
+            - /用户消耗 [日期]       所有用户在指定日期的余额消耗（默认今天）
             - /我的余额        我自己的账户余额与状态
             - /我的用量 [窗]   我自己的用量（today / week / month）
             - /我的密钥        我自己的 API Key 列表
@@ -182,6 +184,7 @@ public class BotMessageService {
     private final OneBotClient client;
     private final MonitorChatTools tools;
     private final BotOrderTools orderTools;
+    private final BotUsageTools usageTools;
     private final BotUserService botUserService;
     private final WeatherTools weatherTools;
     private final BotMessageArchiveService archive;
@@ -206,6 +209,7 @@ public class BotMessageService {
                              OneBotClient client,
                              MonitorChatTools tools,
                              BotOrderTools orderTools,
+                             BotUsageTools usageTools,
                              BotUserService botUserService,
                              WeatherTools weatherTools,
                              BotMessageArchiveService archive,
@@ -219,6 +223,7 @@ public class BotMessageService {
         this.client = client;
         this.tools = tools;
         this.orderTools = orderTools;
+        this.usageTools = usageTools;
         this.botUserService = botUserService;
         this.weatherTools = weatherTools;
         this.archive = archive;
@@ -381,6 +386,8 @@ public class BotMessageService {
             case "订单", "orders" -> platformOnly(identity, platformFeature, () -> orderReport(arg));
             case "用户余额", "userbalance" ->
                     platformOnly(identity, platformFeature, () -> orderTools.userBalanceReport(arg.trim()));
+            case "用户消耗", "userconsumption" ->
+                    platformOnly(identity, platformFeature, () -> usageTools.userConsumptionReport(arg.trim()));
 
             default -> text(platformFeature
                     ? "未知命令：" + name + "\n" + help(identity, platformFeature)
@@ -591,7 +598,7 @@ public class BotMessageService {
                             .build());
             // 天气与平台无关，三种人设都能用（含陌生人）
             configured = persona.usesTools()
-                    ? configured.defaultTools(tools, orderTools, weatherTools)
+                    ? configured.defaultTools(tools, orderTools, usageTools, weatherTools)
                     : configured.defaultTools(weatherTools);
             ChatClient built = configured.build();
             clients.put(persona, new CachedClient(built, window));

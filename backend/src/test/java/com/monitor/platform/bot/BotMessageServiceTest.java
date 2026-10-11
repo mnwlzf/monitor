@@ -14,6 +14,7 @@ import com.monitor.platform.bot.vision.BotImageFetcher;
 import com.monitor.platform.bot.vision.BotVisionProperties;
 import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.order.BotOrderTools;
+import com.monitor.platform.bot.usage.BotUsageTools;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -51,6 +52,7 @@ class BotMessageServiceTest {
     private OneBotClient client;
     private MonitorChatTools tools;
     private BotOrderTools orderTools;
+    private BotUsageTools usageTools;
     private BotUserService botUserService;
     private BotIdentityResolver identityResolver;
     private QqUserBindingService bindings;
@@ -72,6 +74,7 @@ class BotMessageServiceTest {
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);
         orderTools = mock(BotOrderTools.class);
+        usageTools = mock(BotUsageTools.class);
         botUserService = mock(BotUserService.class);
         when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台概览内容"));
 
@@ -87,7 +90,7 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, orderTools, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, orderTools, usageTools, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -549,7 +552,43 @@ class BotMessageServiceTest {
         verifyNoInteractions(orderTools);
     }
 
-    // ============================================================ 用户端：只能查自己
+    // ============================================================ 管理端只读：所有用户的余额消耗
+
+    /** 管理员的 /用户消耗：不带日期时把空串交给取数层，由它按「今天」处理。 */
+    @Test
+    void shouldReturnUserConsumptionForAdmin() throws Exception {
+        identityIs(admin());
+        when(usageTools.userConsumptionReport("")).thenReturn(BotReport.fromMarkdown("消耗内容"));
+
+        service.onEvent(event(privateCommand("/用户消耗")));
+
+        verify(usageTools, timeout(3000)).userConsumptionReport("");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("消耗内容"));
+    }
+
+    /** 指定日期必须原样透传到取数层。 */
+    @Test
+    void shouldPassDateToUserConsumption() throws Exception {
+        identityIs(admin());
+        when(usageTools.userConsumptionReport("2026-10-10")).thenReturn(BotReport.fromMarkdown("消耗内容"));
+
+        service.onEvent(event(privateCommand("/用户消耗 2026-10-10")));
+
+        verify(usageTools, timeout(3000)).userConsumptionReport("2026-10-10");
+    }
+
+    /** 陌生人问 /用户消耗：按未知命令处理，绝不暴露平台功能，也不去查。 */
+    @Test
+    void shouldHideUserConsumptionFromGuest() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event(privateCommand("/用户消耗 2026-10-10")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(usageTools);
+    }    // ============================================================ 用户端：只能查自己
 
     /** 平台用户在指定群里查自己的余额：放行，且用的是发送者自己的邮箱。 */
     @Test
