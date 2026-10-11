@@ -95,8 +95,11 @@ fi
 
 # ------------------------------------------------------------
 # 3. 记录当前镜像，供回滚使用
+#    注意：rollback 模式必须跳过这一步 —— 否则会先用「当前镜像」覆盖
+#    .last_image_id，紧接着在下面又去读它，等于回滚到当前版本（空操作）。
+#    这是实际踩过的坑：线上容器 crash-loop 时 --rollback 救不回来。
 # ------------------------------------------------------------
-if docker inspect "$CONTAINER" >/dev/null 2>&1; then
+if [[ "$MODE" != "rollback" ]] && docker inspect "$CONTAINER" >/dev/null 2>&1; then
   docker inspect -f '{{.Image}}' "$CONTAINER" > .last_image_id
   log "已记录当前镜像 ID: $(cat .last_image_id)"
 fi
