@@ -4,10 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
+import com.monitor.platform.bot.identity.Sub2ApiUserCache;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.user.BotUserTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
+import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.channel.BotChannelStatusTools;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
@@ -145,6 +148,7 @@ public class BotMessageService {
             - /订单 <账号> [起] [止]  指定平台用户的订单（默认近 30 天）
             - /用户余额 <账号>       指定平台用户的余额与累计充值
             - /用户消耗 [日期]       所有用户在指定日期的余额消耗（默认今天）
+            - /渠道状态 [时间窗]     各分组的渠道健康（对外口径，默认近 1 小时）
             - /我的余额        我自己的账户余额与状态
             - /我的用量 [窗]   我自己的用量（today / week / month）
             - /我的密钥        我自己的 API Key 列表
@@ -164,6 +168,7 @@ public class BotMessageService {
             - /绑定 <邮箱>     绑定邮箱
             - /解绑            解除绑定
             - /天气 <城市>     实时天气与预报（所有人都能用）
+            - /渠道状态 [时间窗]  我可用分组的渠道状态（默认近 1 小时）
             平台级数据（账号、号池、变更记录）仅管理员可查。""";
 
     private static final String GUEST_HELP = """
@@ -185,6 +190,8 @@ public class BotMessageService {
     private final MonitorChatTools tools;
     private final BotOrderTools orderTools;
     private final BotUsageTools usageTools;
+    private final BotChannelStatusService channelStatusService;
+    private final Sub2ApiUserCache userCache;
     private final BotUserService botUserService;
     private final WeatherTools weatherTools;
     private final BotMessageArchiveService archive;
@@ -210,6 +217,8 @@ public class BotMessageService {
                              MonitorChatTools tools,
                              BotOrderTools orderTools,
                              BotUsageTools usageTools,
+                             BotChannelStatusService channelStatusService,
+                             Sub2ApiUserCache userCache,
                              BotUserService botUserService,
                              WeatherTools weatherTools,
                              BotMessageArchiveService archive,
@@ -224,6 +233,8 @@ public class BotMessageService {
         this.tools = tools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
+        this.channelStatusService = channelStatusService;
+        this.userCache = userCache;
         this.botUserService = botUserService;
         this.weatherTools = weatherTools;
         this.archive = archive;
@@ -373,6 +384,11 @@ public class BotMessageService {
             // 天气与平台无关，所有人（含陌生人）都能用
             case "weather", "天气" -> weather(arg);
 
+            // 渠道状态：对外功能，管理员与平台用户都能看；非平台用户按未知命令处理
+            case "渠道状态", "channelstatus" -> platformFeature
+                    ? channelStatusService.report(identity.admin(), viewerUserId(identity), arg)
+                    : text(UNKNOWN_COMMAND);
+
             // 平台级命令：没有平台功能（未命中指定群 / 陌生人）一律按「未知命令」处理，不暴露功能存在
             case "platform", "平台", "overview" -> platformOnly(identity, platformFeature, tools::platformReport);
             case "pool", "号池" -> platformOnly(identity, platformFeature, () -> tools.poolReport(arg));
@@ -453,6 +469,19 @@ public class BotMessageService {
     }
 
     /**
+     * 当前看渠道状态的人的可见范围。
+     *
+     * <p>管理员返回 {@code null}（不过滤）；普通用户返回自己的 Sub2API 用户 ID，
+     * 由 {@link Sub2ApiUserCache} 从邮箱解析（Redis 缓存，与用户端取数是同一条链路）。</p>
+     */
+    private Long viewerUserId(BotIdentity identity) {
+        if (identity.admin() || !identity.hasEmail()) {
+            return null;
+        }
+        return userCache.userId(identity.email()).orElse(null);
+    }
+
+    /**
      * {@code /订单 <账号> [起始日期] [结束日期]}。
      *
      * <p>日期两段都可省；只给一段时它当起始日期，结束日期取今天。
@@ -530,6 +559,11 @@ public class BotMessageService {
         // 用户端工具按请求绑定发送者邮箱：大模型只能查到发送者本人的数据
         if (platformFeature && identity.hasEmail()) {
             request = request.tools(new BotUserTools(botUserService, identity.email()));
+        }
+        // 渠道状态对「管理员 + 平台用户」都开放，按请求绑定可见范围，普通用户只看自己的分组
+        if (platformFeature) {
+            request = request.tools(new BotChannelStatusTools(
+                    channelStatusService, identity.admin(), viewerUserId(identity)));
         }
         String answer = request
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)))

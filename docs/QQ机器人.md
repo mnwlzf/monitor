@@ -116,6 +116,7 @@ MONITOR_BOT_REQUIRE_MENTION=true
 | `/订单 <账号> [起] [止]` | 指定平台用户的订单：余额、汇总与明细；日期可省，默认近 30 天 | 管理员 |
 | `/用户余额 <账号>` | 指定平台用户的余额、冻结余额与累计充值 | 管理员 |
 | `/用户消耗 [日期]` | **所有用户**在指定日期的余额消耗排行（默认今天，支持「昨天」「前天」） | 管理员 |
+| `/渠道状态 [时间窗]` | 按**平台 / 分组**聚合的渠道健康：请求数、成功率、首 Token、缓存率。普通用户只看自己有权限的分组 | 管理员 + 平台用户 |
 
 > **`/我的*` 只能查发送者自己**：机器人用发送者邮箱解析出的 Sub2API 用户 ID 去查询，
 > 不接受任何用户标识参数，也不存在「查别人」的入口。数据来自平台管理员只读接口。
@@ -140,6 +141,7 @@ MONITOR_BOT_REQUIRE_MENTION=true
 | `/任务` | 任务 / 处理器 / 状态 / 最近执行 / 结果 |
 | `/订单` | 创建时间 / 类型 / 支付方式 / 到账 / 实付 / 状态 / 支付时间 |
 | `/用户消耗` | 用户 / 请求数 / Token / 标准费用 / 实际消耗 |
+| `/渠道状态` | 平台 / 分组 / 状态 / 请求 / 成功率 / 首 TOKEN / 缓存率 |
 
 **号池热力图** —— 和前端「号池 → 趋势矩阵」页同一张表：左侧是账号汇总
 （缓存率 / 首 Token / 每秒 Token / 请求），右侧是等宽时间桶的色块矩阵，
@@ -302,6 +304,14 @@ GRANT SELECT ON public.payment_orders TO monitor_ro;
 > 而 `payment_orders` 上有 `(user_id)` 与 `(created_at)` 索引，直连库才做得到按日期范围过滤。
 > 读取时只取建表就存在的列，后续迁移新增的 `out_trade_no` / `provider_key` /
 > `provider_snapshot` / `bonus_amount` 一概不碰，避免部署版本没跑到那些迁移时报列不存在。
+
+> `/渠道状态` 走 Sub2API 被动渠道监控 v2 的聚合表 `channel_monitor_v2_metrics_1m`
+> （主键 `(bucket_start, platform, group_id, model)`，**按分组聚合是原生维度**）。
+> 口径对齐 Sub2API：请求数 = 成功 + 失败；缓存率 = `cache_read / (input + cache_creation + cache_read)`，
+> **分母不含 output**。可见范围对齐它的 `scopeFilter`：订阅型分组要有有效订阅，
+> 标准分组默认公开，专属分组或开了 `restrict_public_groups` 的用户要落在 `user_allowed_groups` 里。
+> 报表不展示 RPM / TPM，因此不涉及上游的 `channel_monitor_hide_throughput` 脱敏。
+> 只读账号需要额外授权：`channel_monitor_v2_metrics_1m`、`groups`、`user_subscriptions`、`user_allowed_groups`。
 
 > 未配置只读库或未授权时，任务每轮直接跳过，机器人退化为「所有人都是普通聊天」——
 > 不会报错，也不会误判成平台用户。

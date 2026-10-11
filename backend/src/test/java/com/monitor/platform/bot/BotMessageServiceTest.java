@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
+import com.monitor.platform.bot.identity.Sub2ApiUserCache;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.onebot.OneBotEvent;
@@ -15,6 +16,7 @@ import com.monitor.platform.bot.vision.BotVisionProperties;
 import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
+import com.monitor.platform.bot.channel.BotChannelStatusService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -53,6 +55,8 @@ class BotMessageServiceTest {
     private MonitorChatTools tools;
     private BotOrderTools orderTools;
     private BotUsageTools usageTools;
+    private BotChannelStatusService channelStatusService;
+    private Sub2ApiUserCache userCache;
     private BotUserService botUserService;
     private BotIdentityResolver identityResolver;
     private QqUserBindingService bindings;
@@ -75,6 +79,8 @@ class BotMessageServiceTest {
         tools = mock(MonitorChatTools.class);
         orderTools = mock(BotOrderTools.class);
         usageTools = mock(BotUsageTools.class);
+        channelStatusService = mock(BotChannelStatusService.class);
+        userCache = mock(Sub2ApiUserCache.class);
         botUserService = mock(BotUserService.class);
         when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台概览内容"));
 
@@ -90,7 +96,7 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, orderTools, usageTools, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, orderTools, usageTools, channelStatusService, userCache, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -588,6 +594,44 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
         assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
         verifyNoInteractions(usageTools);
+    }    // ============================================================ 渠道状态：管理员与平台用户都能看
+
+    /** 管理员的 /渠道状态：不过滤分组，viewerUserId 传 null。 */
+    @Test
+    void shouldReturnChannelStatusForAdmin() throws Exception {
+        identityIs(admin());
+        when(channelStatusService.report(true, null, "")).thenReturn(BotReport.fromMarkdown("渠道状态内容"));
+
+        service.onEvent(event(privateCommand("/渠道状态")));
+
+        verify(channelStatusService, timeout(3000)).report(true, null, "");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("渠道状态内容"));
+    }
+
+    /** 平台用户在指定群用 /渠道状态：按自己的 Sub2API 用户 ID 限定可见分组。 */
+    @Test
+    void shouldScopeChannelStatusToViewerGroups() throws Exception {
+        identityIs(normalUser());
+        when(userCache.userId("2755457558@qq.com")).thenReturn(java.util.Optional.of(42L));
+        when(channelStatusService.report(false, 42L, "")).thenReturn(BotReport.fromMarkdown("渠道状态内容"));
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/渠道状态")));
+
+        verify(channelStatusService, timeout(3000)).report(false, 42L, "");
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("渠道状态内容"));
+    }
+
+    /** 陌生人问 /渠道状态：按未知命令处理，既不暴露功能也不去查。 */
+    @Test
+    void shouldHideChannelStatusFromGuest() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event(privateCommand("/渠道状态")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(channelStatusService);
     }    // ============================================================ 用户端：只能查自己
 
     /** 平台用户在指定群里查自己的余额：放行，且用的是发送者自己的邮箱。 */
