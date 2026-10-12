@@ -1,13 +1,13 @@
 <template>
   <section class="admin-page">
-    <el-card shadow="never" class="admin-card" v-loading="loading">
+    <el-card shadow="never" class="admin-card">
       <template #header>
         <div class="admin-card-header">
           <div>
             <h3>消息存档</h3>
             <p>
               记录「谁在什么时候说了什么、机器人回了什么、当时是什么身份」，用于事后查证。
-              存档异步写入，不影响回复速度。
+              下面按<strong>会话</strong>把消息串成一段完整对话，时间正序，读起来是连贯的。
             </p>
           </div>
           <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
@@ -58,48 +58,57 @@
         <el-button @click="reset">重置</el-button>
       </div>
 
-      <el-table :data="messages" size="small" class="archive-table" v-loading="loading">
-        <template #empty>没有符合条件的记录</template>
-        <el-table-column label="时间" width="150">
-          <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
-        </el-table-column>
-        <el-table-column label="方向" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.direction === 'IN' ? 'info' : 'success'" size="small" effect="plain">
-              {{ row.direction === 'IN' ? '收到' : '回复' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="来源" width="170">
-          <template #default="{ row }">
-            <span v-if="row.messageType === 'group'">群 {{ row.groupId }} · QQ {{ row.userId }}</span>
-            <span v-else>私聊 · QQ {{ row.userId }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="身份" width="90">
-          <template #default="{ row }">
-            <el-tag :type="roleTag(row.senderRole)" size="small" effect="plain">
-              {{ roleLabel(row.senderRole) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="内容" min-width="420">
-          <template #default="{ row }">
-            <div class="archive-content">{{ row.content }}</div>
-            <div class="archive-meta">
-              <el-tag v-if="row.contentKind === 'IMAGE'" size="small" type="warning" effect="plain">图片</el-tag>
-              <el-tag v-else-if="row.contentKind === 'COMMAND'" size="small" effect="plain">命令</el-tag>
-              <span v-if="row.persona" class="archive-persona">人设 {{ personaLabel(row.persona) }}</span>
+      <el-skeleton v-if="loading && conversations.length === 0" :rows="6" animated />
+
+      <el-empty v-else-if="conversations.length === 0" description="没有符合条件的记录" />
+
+      <div v-else class="conversation-list" v-loading="loading">
+        <section v-for="conv in conversations" :key="conv.key" class="conversation">
+          <header class="conversation-head">
+            <div class="conversation-title">
+              <el-tag :type="conv.tagType" size="small" effect="plain">{{ conv.channelLabel }}</el-tag>
+              <span class="conversation-name">{{ conv.title }}</span>
             </div>
-          </template>
-        </el-table-column>
-      </el-table>
+            <div class="conversation-meta">
+              <span>{{ conv.messages.length }} 条</span>
+              <span>{{ formatTime(conv.messages[0].createdAt) }} ~ {{ formatTime(conv.lastAt) }}</span>
+            </div>
+          </header>
+
+          <div class="chat-stream">
+            <div
+              v-for="m in conv.messages"
+              :key="m.id"
+              class="chat-row"
+              :class="m.direction === 'IN' ? 'chat-in' : 'chat-out'"
+            >
+              <div class="chat-avatar">{{ m.direction === 'IN' ? shortId(m.userId) : '🤖' }}</div>
+              <div class="chat-main">
+                <div class="chat-head">
+                  <span class="chat-name">{{ m.direction === 'IN' ? `QQ ${m.userId}` : '机器人' }}</span>
+                  <el-tag
+                    v-if="m.direction === 'IN'"
+                    :type="roleTag(m.senderRole)"
+                    size="small"
+                    effect="plain"
+                  >{{ roleLabel(m.senderRole) }}</el-tag>
+                  <el-tag v-else size="small" effect="plain">{{ personaLabel(m.persona) }}</el-tag>
+                  <el-tag v-if="m.contentKind === 'IMAGE'" size="small" type="warning" effect="plain">图片</el-tag>
+                  <el-tag v-else-if="m.contentKind === 'COMMAND'" size="small" effect="plain">命令</el-tag>
+                  <span class="chat-time">{{ formatTime(m.createdAt) }}</span>
+                </div>
+                <div class="chat-bubble">{{ m.content }}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </el-card>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { getBotArchiveStats, searchBotMessages } from '../api/settings'
@@ -115,6 +124,73 @@ const query = reactive({
   userId: '',
   groupId: '',
 })
+
+interface Conversation {
+  key: string
+  channelLabel: string
+  tagType: 'primary' | 'warning' | 'info'
+  title: string
+  lastAt: string
+  messages: BotMessage[]
+}
+
+/**
+ * 把扁平的消息列表按会话分组，组内按时间正序。
+ *
+ * <p>接口按 id 倒序返回（最新在前），直接铺成表格看不出「一问一答」的连贯性，
+ * 所以这里翻成正序、再按会话切开。</p>
+ */
+const conversations = computed<Conversation[]>(() => {
+  const buckets = new Map<string, BotMessage[]>()
+  const ordered = [...messages.value].sort((a, b) => a.id - b.id)
+  for (const message of ordered) {
+    const key = conversationKey(message)
+    const bucket = buckets.get(key)
+    if (bucket) {
+      bucket.push(message)
+    } else {
+      buckets.set(key, [message])
+    }
+  }
+  return [...buckets.entries()]
+    .map(([key, list]) => toConversation(key, list))
+    // 会话之间：最近有消息的排前面
+    .sort((a, b) => b.messages[b.messages.length - 1].id - a.messages[a.messages.length - 1].id)
+})
+
+function conversationKey(message: BotMessage): string {
+  if (message.messageType === 'group') return `group-${message.groupId}`
+  // 有群号 = 群临时会话；没有 = 好友私聊
+  if (message.groupId != null) return `temp-${message.groupId}-${message.userId}`
+  return `user-${message.userId}`
+}
+
+function toConversation(key: string, list: BotMessage[]): Conversation {
+  const first = list[0]
+  let channelLabel = '好友私聊'
+  let tagType: Conversation['tagType'] = 'info'
+  let title = `QQ ${first.userId}`
+
+  if (first.messageType === 'group') {
+    channelLabel = '群聊'
+    tagType = 'primary'
+    const speakers = new Set(list.filter(m => m.direction === 'IN').map(m => m.userId))
+    title = `群 ${first.groupId}（${speakers.size} 人发言）`
+  } else if (first.groupId != null) {
+    channelLabel = '群临时会话'
+    tagType = 'warning'
+    title = `群 ${first.groupId} · QQ ${first.userId}`
+  }
+
+  return {
+    key,
+    channelLabel,
+    tagType,
+    title,
+    lastAt: list[list.length - 1].createdAt,
+    messages: list,
+  }
+}
 
 function toNumber(value: string): number | undefined {
   const trimmed = value.trim()
@@ -155,7 +231,13 @@ function reset() {
 }
 
 function formatTime(value: string | null): string {
-  return value ? new Date(value).toLocaleString('zh-CN') : '-'
+  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
+}
+
+/** 头像里放 QQ 后四位，太长会把气泡挤变形。 */
+function shortId(userId: number | null): string {
+  const text = String(userId ?? '?')
+  return text.length <= 4 ? text : text.slice(-4)
 }
 
 function roleLabel(role: string | null): string {
@@ -188,30 +270,123 @@ onMounted(load)
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
-.archive-table {
-  width: 100%;
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
-.archive-content {
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 160px;
-  overflow-y: auto;
-  line-height: 1.6;
+.conversation {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  overflow: hidden;
 }
 
-.archive-meta {
+.conversation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.conversation-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
 }
 
-.archive-persona {
-  color: #909399;
+.conversation-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.conversation-meta {
+  display: flex;
+  gap: 14px;
   font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.chat-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.chat-row {
+  display: flex;
+  gap: 10px;
+  max-width: 82%;
+}
+
+.chat-in {
+  align-self: flex-start;
+}
+
+.chat-out {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.chat-avatar {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+}
+
+.chat-main {
+  min-width: 0;
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.chat-out .chat-head {
+  justify-content: flex-end;
+}
+
+.chat-name {
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+
+.chat-time {
+  color: var(--el-text-color-placeholder);
+}
+
+.chat-bubble {
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--el-fill-color-light);
+}
+
+.chat-out .chat-bubble {
+  background: var(--el-color-primary-light-9);
 }
 </style>
