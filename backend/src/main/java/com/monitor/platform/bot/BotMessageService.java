@@ -369,7 +369,7 @@ public class BotMessageService {
 
             SendOutcome outcome;
             try {
-                outcome = send(event, group, report, settings.maxReplyLength(), generated.snapshot());
+                outcome = send(event, group, report, settings.maxReplyLength(), generated);
             } catch (RuntimeException sendError) {
                 // 发送失败也要把这一轮从「正在处理」里摘掉，否则会永远挂在那儿
                 runtimeStatus.finishTurn(turnId, "发送失败：" + sendError.getMessage());
@@ -744,7 +744,8 @@ public class BotMessageService {
      * 再退回截断文本，保证「至少有东西发出去」。</p>
      */
     private SendOutcome send(OneBotEvent event, boolean group, BotReport report, int maxReplyLength,
-                            List<byte[]> generatedImages) {
+                            GeneratedImages generated) {
+        List<byte[]> generatedImages = generated.snapshot();
         // 先生成的图：这是用户明确要的东西，发失败要让他知道，而不是只回一句文字
         for (byte[] image : generatedImages) {
             if (sendImage(event, group, image)) {
@@ -754,8 +755,19 @@ public class BotMessageService {
             }
         }
         String plain = report.toPlainText();
+        // 兜底：本轮没出图、工具又留了话（例如生图被限频），就必须让用户看到原因。
+        // 工具的失败原因是作为「工具返回值」回到模型手里的，模型有可能吞掉甚至答成空白。
+        String notice = generated.notice();
+        boolean noticeApplied = false;
+        if (generatedImages.isEmpty() && notice != null && !notice.isBlank() && !plain.contains(notice)) {
+            plain = plain.isBlank() ? notice : notice + "\n" + plain;
+            noticeApplied = true;
+        }
         if (plain.isBlank()) {
             plain = "（没有查到内容）";
+            noticeApplied = true;
+        }
+        if (noticeApplied) {
             report = BotReport.fromMarkdown(plain);
         }
         String truncated = truncate(plain, maxReplyLength);

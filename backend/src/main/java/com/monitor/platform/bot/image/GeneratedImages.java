@@ -16,14 +16,33 @@ public class GeneratedImages {
 
     private final List<byte[]> images = new ArrayList<>();
 
+    /**
+     * 这一轮里工具想告诉用户、但模型<strong>未必会转达</strong>的话。
+     *
+     * <p>典型场景：生图被全局限频挡下。工具的失败原因是作为「工具返回值」回到模型手里的，
+     * 模型有可能把它吞掉甚至答成空白。所以发送层会兜底，保证用户一定看到原因。</p>
+     */
+    private volatile String notice;
+
     public void add(byte[] image) {
         if (image != null && image.length > 0) {
             images.add(image);
         }
     }
 
-    public boolean isEmpty() {
-        return images.isEmpty();
+    /** 记下一条必须让用户看到的话（覆盖式，只保留最新一条）。 */
+    public void notice(String message) {
+        if (message != null && !message.isBlank()) {
+            this.notice = message;
+        }
+    }
+
+    /** 有没有必须转达给用户的话。 */
+    public String notice() {
+        return notice;
+    }
+
+    public boolean isEmpty() {        return images.isEmpty();
     }
 
     public int size() {

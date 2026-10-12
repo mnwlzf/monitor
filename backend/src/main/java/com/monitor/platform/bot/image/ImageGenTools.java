@@ -25,6 +25,9 @@ public class ImageGenTools {
     public String generateImage(String prompt) {
         ImageGenService.Result result = service.generate(prompt);
         if (!result.ok()) {
+            // 同时记进本轮上下文：模型万一把这句吞了，发送层会兜底告诉用户，
+            // 不会出现「触发了限频却一声不吭」的情况
+            generated.notice(result.error());
             return result.error();
         }
         generated.add(result.image());
