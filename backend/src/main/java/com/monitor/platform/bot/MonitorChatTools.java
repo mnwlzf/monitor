@@ -424,6 +424,7 @@ public class MonitorChatTools {
                     time(item.event().detectedAt()),
                     warning(item.event()) ? "⚠ 警告" : "信息",
                     item.platform(),
+                    channelName(item.event()),
                     inUse(item.event()) ? "使用中" : "—",
                     changeText(item.event())));
         }
@@ -433,6 +434,7 @@ public class MonitorChatTools {
                 BotReport.Col.left("时间"),
                 BotReport.Col.left("级别"),
                 BotReport.Col.left("平台"),
+                BotReport.Col.left("渠道"),
                 BotReport.Col.left("使用中"),
                 BotReport.Col.left("内容")), rows, null);
 
@@ -453,7 +455,18 @@ public class MonitorChatTools {
         return "WARNING".equalsIgnoreCase(event.severity());
     }
 
-    /** 变更是否发生在「使用中」的渠道/密钥上（由采集侧按状态判定，见 V14 迁移）。 */
+    /**
+     * 渠道名。
+     *
+     * <p>变更事件里存的是上游渠道 ID，而页面上只有渠道名 —— 只给 ID 等于让人自己去猜是哪个渠道。
+     * 名字由查询 join upstream_groups 带出来；取不到时退回 ID（至少还能查）。</p>
+     */
+    private static String channelName(UpstreamChangeEventResponse event) {
+        if (event.groupName() != null && !event.groupName().isBlank()) {
+            return event.groupName();
+        }
+        return event.entityKey() == null ? "—" : event.entityKey();
+    }    /** 变更是否发生在「使用中」的渠道/密钥上（由采集侧按状态判定，见 V14 迁移）。 */
     private static boolean inUse(UpstreamChangeEventResponse event) {
         return Boolean.TRUE.equals(event.inUse());
     }

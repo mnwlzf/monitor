@@ -398,7 +398,7 @@ public class UpstreamAdminService {
     private UpstreamChangeEventResponse toChangeEventResponse(UpstreamChangeEventEntity entity) {
         return new UpstreamChangeEventResponse(
                 entity.getId(), entity.getAccountId(), entity.getPlatformType(),
-                entity.getEntityType(), entity.getEntityKey(), entity.getChangeType(),
+                entity.getEntityType(), entity.getEntityKey(), entity.getGroupName(), entity.getChangeType(),
                 entity.getFieldName(), entity.getOldValue(), entity.getNewValue(),
                 entity.getSeverity(), entity.getMessage(), entity.getDetectedAt(),
                 Boolean.TRUE.equals(entity.getInUse())

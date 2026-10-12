@@ -10,6 +10,7 @@
         <result column="entity_type" property="entityType"/>
         <result column="entity_id" property="entityId"/>
         <result column="entity_key" property="entityKey"/>
+        <result column="group_name" property="groupName"/>
         <result column="change_type" property="changeType"/>
         <result column="field_name" property="fieldName"/>
         <result column="old_value" property="oldValue" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
@@ -22,63 +23,59 @@
     </resultMap>
 
     <sql id="UpstreamChangeEventColumns">
-        id, account_id, platform_type, collection_run_id, entity_type, entity_id,
-        entity_key, change_type, field_name, old_value, new_value, severity,
-        message, detected_at, in_use, metadata
+        e.id, e.account_id, e.platform_type, e.collection_run_id, e.entity_type, e.entity_id,
+        e.entity_key, e.change_type, e.field_name, e.old_value, e.new_value, e.severity,
+        e.message, e.detected_at, e.in_use, e.metadata,
+        g.group_name AS group_name
     </sql>
 
-    <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO upstream_change_events (
-            account_id, platform_type, collection_run_id, entity_type, entity_id,
-            entity_key, change_type, field_name, old_value, new_value, severity,
-            message, detected_at, in_use, metadata
-        ) VALUES (
-            #{accountId}, #{platformType}, #{collectionRunId}, #{entityType}, #{entityId},
-            #{entityKey}, #{changeType}, #{fieldName},
-            #{oldValue,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}, #{newValue,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
-            #{severity}, #{message}, #{detectedAt}, #{inUse}, #{metadata,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
-        )
-    </insert>
+    <!-- 变更事件要带出渠道名：页面和邮件上只有渠道名，光给 ID 运维没法对号入座 -->
+    <sql id="UpstreamChangeEventJoin">
+        FROM upstream_change_events e
+        LEFT JOIN upstream_groups g
+               ON g.account_id = e.account_id
+              AND g.external_group_id = e.entity_key
+    </sql>
 
     <select id="selectRecentEvents" resultMap="UpstreamChangeEventResultMap">
         SELECT <include refid="UpstreamChangeEventColumns"/>
-        FROM upstream_change_events
-        WHERE account_id = #{accountId}
-        ORDER BY detected_at DESC
+        <include refid="UpstreamChangeEventJoin"/>
+        WHERE e.account_id = #{accountId}
+        ORDER BY e.detected_at DESC
         LIMIT #{limit}
     </select>
 
     <select id="selectInUseKeyEventsSince" resultMap="UpstreamChangeEventResultMap">
         SELECT <include refid="UpstreamChangeEventColumns"/>
-        FROM upstream_change_events
-        WHERE in_use = TRUE
-          AND entity_type = 'API_KEY'
-          AND detected_at &gt;= #{since}
-        ORDER BY detected_at DESC
+        <include refid="UpstreamChangeEventJoin"/>
+        WHERE e.in_use = TRUE
+          AND e.entity_type = 'API_KEY'
+          AND e.detected_at &gt;= #{since}
+        ORDER BY e.detected_at DESC
         LIMIT #{limit}
     </select>
 
     <!-- 正在使用渠道的倍率变化：实时告警只关心这一类（直接关系成本） -->
     <select id="selectInUseGroupRateEventsSince" resultMap="UpstreamChangeEventResultMap">
         SELECT <include refid="UpstreamChangeEventColumns"/>
-        FROM upstream_change_events
-        WHERE in_use = TRUE
-          AND entity_type = 'GROUP'
-          AND change_type IN ('RATE_CHANGED', 'BASE_RATE_CHANGED')
-          AND detected_at &gt;= #{since}
-        ORDER BY detected_at DESC
+        <include refid="UpstreamChangeEventJoin"/>
+        WHERE e.in_use = TRUE
+          AND e.entity_type = 'GROUP'
+          AND e.change_type IN ('RATE_CHANGED', 'BASE_RATE_CHANGED')
+          AND e.detected_at &gt;= #{since}
+        ORDER BY e.detected_at DESC
         LIMIT #{limit}
     </select>
 
     <!-- 渠道变更：按「是否在用」筛，每日汇总用它取非在用的那部分 -->
     <select id="selectGroupEventsBetween" resultMap="UpstreamChangeEventResultMap">
         SELECT <include refid="UpstreamChangeEventColumns"/>
-        FROM upstream_change_events
-        WHERE entity_type = 'GROUP'
-          AND in_use = #{inUse}
-          AND detected_at &gt;= #{from}
-          AND detected_at &lt; #{to}
-        ORDER BY detected_at DESC
+        <include refid="UpstreamChangeEventJoin"/>
+        WHERE e.entity_type = 'GROUP'
+          AND e.in_use = #{inUse}
+          AND e.detected_at &gt;= #{from}
+          AND e.detected_at &lt; #{to}
+        ORDER BY e.detected_at DESC
         LIMIT #{limit}
     </select>
 </mapper>

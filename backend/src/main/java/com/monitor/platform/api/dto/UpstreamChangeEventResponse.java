@@ -10,6 +10,7 @@ import java.time.OffsetDateTime;
  * @param platformType 平台类型
  * @param entityType   变更实体类型
  * @param entityKey    上游实体标识
+ * @param groupName    渠道名（只有 GROUP 事件有；页面只显示名字，光给 ID 没法对号入座）
  * @param changeType   变更类型
  * @param fieldName    发生变化的字段
  * @param oldValue     变更前值
@@ -25,6 +26,7 @@ public record UpstreamChangeEventResponse(
         String platformType,
         String entityType,
         String entityKey,
+        String groupName,
         String changeType,
         String fieldName,
         String oldValue,

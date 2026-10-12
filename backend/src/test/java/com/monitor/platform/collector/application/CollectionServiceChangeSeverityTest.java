@@ -49,10 +49,16 @@ class CollectionServiceChangeSeverityTest {
         assertEquals("INFO", CollectionService.groupChangeSeverity("STATUS_CHANGED", "1", "0"));
     }
 
-    /** 「使用中」：渠道状态为启用（active / ACTIVE）就算使用中。 */
+    /**
+     * 「使用中」= 上游仍然存在（is_active）且状态为启用（active / ACTIVE）。
+     *
+     * <p>只按 status 判是不够的：已从上游移除的渠道 status 可能还写着 active，
+     * 但你已经用不到它了，不该进实时告警。</p>
+     */
     @Test
-    void shouldMarkGroupChangeInUseWhenChannelActive() {
+    void shouldMarkGroupChangeInUseOnlyWhenStillActive() {
         UpstreamGroupEntity group = new UpstreamGroupEntity();
+        group.setIsActive(true);
 
         group.setStatus("active");
         assertTrue(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
@@ -64,15 +70,18 @@ class CollectionServiceChangeSeverityTest {
         assertFalse(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
     }
 
-    /** 状态变更：口径与密钥一致 —— 变更前后任一时刻为启用，就算使用中。 */
+    /** 上游已移除的渠道（is_active = false）不算使用中。 */
     @Test
-    void shouldMarkStatusChangeInUseWhenEitherSideActive() {
+    void shouldNotMarkInUseWhenGroupRemovedFromUpstream() {
         UpstreamGroupEntity group = new UpstreamGroupEntity();
-        group.setStatus("disabled");
+        group.setStatus("active");
+        group.setIsActive(false);
 
-        assertTrue(CollectionService.groupInUse(group, "status", "ACTIVE", "disabled"));
-        assertTrue(CollectionService.groupInUse(group, "status", "disabled", "active"));
-        assertFalse(CollectionService.groupInUse(group, "status", "disabled", "disabled"));
+        assertFalse(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+
+        // 移除事件本身也不算 —— 此刻已经用不到了
+        group.setIsActive(true);
+        assertFalse(CollectionService.groupInUse(group, "is_active", true, false));
     }    /** 值不可比较时（缺值、非数字）保守处理：不误报警告。 */
     @Test
     void shouldNotWarnWhenValuesAreNotComparable() {

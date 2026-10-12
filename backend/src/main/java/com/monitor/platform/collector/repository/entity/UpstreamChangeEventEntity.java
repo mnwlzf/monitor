@@ -47,6 +47,14 @@ public class UpstreamChangeEventEntity {
     private OffsetDateTime detectedAt;
     /** 变更是否涉及正在使用（启用）的密钥，仅 API_KEY 事件有意义。 */
     private Boolean inUse;
+    /**
+     * 变更对应的渠道名（只有 GROUP 事件有）。
+     *
+     * <p>它不是本表的列，而是查询时 join upstream_groups 带出来的。
+     * 页面和邮件上只显示渠道名 —— 只给 ID 等于让运维自己去猜是哪个渠道。</p>
+     */
+    @TableField(exist = false)
+    private String groupName;
     /** 扩展元数据，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String metadata;
@@ -63,6 +71,8 @@ public class UpstreamChangeEventEntity {
     public void setEntityType(String entityType) { this.entityType = entityType; }
     public Long getEntityId() { return entityId; }
     public void setEntityId(Long entityId) { this.entityId = entityId; }
+    public String getGroupName() { return groupName; }
+    public void setGroupName(String groupName) { this.groupName = groupName; }
     public String getEntityKey() { return entityKey; }
     public void setEntityKey(String entityKey) { this.entityKey = entityKey; }
     public String getChangeType() { return changeType; }

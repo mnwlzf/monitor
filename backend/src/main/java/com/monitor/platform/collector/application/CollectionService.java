@@ -1436,17 +1436,22 @@ public class CollectionService {
      */
     static boolean groupInUse(UpstreamGroupEntity entity, String fieldName,
                                       Object oldValue, Object newValue) {
-        if ("status".equals(fieldName)) {
-            // 状态变更事件：前后任一时刻为启用都算
-            return isGroupActive(oldValue) || isGroupActive(newValue);
+        if (entity == null) {
+            return false;
         }
-        // 其它变更（倍率、名称、移除等）：看渠道当时的启用状态
-        return entity != null && isGroupActive(entity.getStatus());
+        if ("is_active".equals(fieldName)) {
+            // 渠道被移除：上游已经没有它了，不算「正在使用」
+            return false;
+        }
+        // 其余变更：渠道仍然在上游（is_active）且状态为启用，才算使用中
+        return Boolean.TRUE.equals(entity.getIsActive()) && isGroupActive(entity.getStatus());
     }
 
     private static boolean isGroupActive(Object status) {
         return status != null && GROUP_STATUS_ACTIVE.equalsIgnoreCase(String.valueOf(status).trim());
-    }    private void recordChange(AccountEntity account, String platformType, Long collectionRunId,
+    }
+
+    private void recordChange(AccountEntity account, String platformType, Long collectionRunId,
                               UpstreamGroupEntity entity, String changeType,
                               String fieldName, Object oldValue, Object newValue,
                               String message) {

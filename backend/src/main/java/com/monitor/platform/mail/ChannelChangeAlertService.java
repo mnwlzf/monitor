@@ -189,6 +189,7 @@ public class ChannelChangeAlertService {
         for (UpstreamChangeEventEntity event : events) {
             sb.append("- ").append(formatTime(event.getDetectedAt()))
                     .append(' ').append(accountName(event.getAccountId(), accountNames))
+                    .append(" 渠道=").append(channelName(event))
                     .append(' ').append(event.getMessage() == null ? event.getChangeType() : event.getMessage());
             String before = scalar(event.getOldValue());
             String after = scalar(event.getNewValue());
@@ -223,6 +224,7 @@ public class ChannelChangeAlertService {
                 .append("<th align=\"left\">时间</th>")
                 .append("<th align=\"left\">平台</th>")
                 .append("<th align=\"left\">账号</th>")
+                .append("<th align=\"left\">渠道</th>")
                 .append("<th align=\"left\">级别</th>")
                 .append("<th align=\"left\">类型</th>")
                 .append("<th align=\"left\">变化</th>")
@@ -232,6 +234,7 @@ public class ChannelChangeAlertService {
                     .append("<td>").append(formatTime(event.getDetectedAt())).append("</td>")
                     .append("<td>").append(escape(platformName(event.getAccountId(), platformNames))).append("</td>")
                     .append("<td>").append(escape(accountName(event.getAccountId(), accountNames))).append("</td>")
+                    .append("<td>").append(escape(channelName(event))).append("</td>")
                     .append("<td>").append(escape(severityLabel(event.getSeverity()))).append("</td>")
                     .append("<td>").append(escape(changeLabel(event.getChangeType()))).append("</td>")
                     .append("<td>").append(changeDescription(event)).append("</td>")
@@ -242,7 +245,13 @@ public class ChannelChangeAlertService {
         return html.toString();
     }
 
-    /** 变化列：标量变化展示「旧值 → 新值」，整块 JSON 只给结论。 */
+    /** 渠道名；GROUP 事件取 join 出来的名字，取不到退回上游 ID（至少还能查）。 */
+    private String channelName(UpstreamChangeEventEntity event) {
+        if (event.getGroupName() != null && !event.getGroupName().isBlank()) {
+            return event.getGroupName();
+        }
+        return event.getEntityKey() == null ? "-" : event.getEntityKey();
+    }    /** 变化列：标量变化展示「旧值 → 新值」，整块 JSON 只给结论。 */
     private String changeDescription(UpstreamChangeEventEntity event) {
         String before = scalar(event.getOldValue());
         String after = scalar(event.getNewValue());
