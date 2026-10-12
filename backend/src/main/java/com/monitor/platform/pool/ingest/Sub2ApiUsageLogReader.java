@@ -1,17 +1,11 @@
 package com.monitor.platform.pool.ingest;
 
-import com.monitor.platform.common.time.BusinessTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.util.Collection;
 import java.util.List;
 
@@ -36,10 +30,6 @@ public class Sub2ApiUsageLogReader {
             ORDER BY id
             LIMIT ?
             """;
-
-    /** 业务时区：created_at 若是无时区的 timestamp，按此时区解释。 */
-    private static final ZoneId ZONE = BusinessTime.ZONE;
-
     /**
      * 行映射。
      *
@@ -55,7 +45,7 @@ public class Sub2ApiUsageLogReader {
             rs.getString("request_id"),
             longOrNull(rs, "api_key_id"),
             rs.getString("model"),
-            offsetDateTimeOrNull(rs, "created_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "created_at"),
             intOrNull(rs, "first_token_ms"),
             intOrNull(rs, "duration_ms"),
             longOrNull(rs, "input_tokens"),
@@ -77,28 +67,6 @@ public class Sub2ApiUsageLogReader {
         return value instanceof Number number ? number.intValue() : null;
     }
 
-    /** created_at 可能是 timestamptz 也可能是 timestamp，两种都收。 */
-    private static OffsetDateTime offsetDateTimeOrNull(ResultSet rs, String column) throws SQLException {
-        try {
-            return rs.getObject(column, OffsetDateTime.class);
-        } catch (SQLException ignored) {
-            // 无时区的 timestamp 走不通上面的转换，退回按业务时区解释
-        }
-        Object value = rs.getObject(column);
-        if (value instanceof OffsetDateTime odt) {
-            return odt;
-        }
-        if (value instanceof LocalDateTime ldt) {
-            return ldt.atZone(ZONE).toOffsetDateTime();
-        }
-        if (value instanceof Timestamp ts) {
-            return ts.toLocalDateTime().atZone(ZONE).toOffsetDateTime();
-        }
-        if (value instanceof Instant instant) {
-            return instant.atZone(ZONE).toOffsetDateTime();
-        }
-        return null;
-    }
 
     private final PoolIngestProperties properties;
     private final Sub2ReadOnlyJdbc jdbc;

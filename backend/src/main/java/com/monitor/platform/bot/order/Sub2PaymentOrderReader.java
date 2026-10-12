@@ -1,18 +1,12 @@
 package com.monitor.platform.bot.order;
 
-import com.monitor.platform.common.time.BusinessTime;
+import com.monitor.platform.pool.ingest.Sub2JdbcValues;
 import com.monitor.platform.pool.ingest.Sub2ReadOnlyJdbc;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -33,9 +27,6 @@ import java.util.List;
  */
 @Component
 public class Sub2PaymentOrderReader {
-
-    /** 业务时区：无时区的 timestamp 按此时区解释。 */
-    private static final ZoneId ZONE = BusinessTime.ZONE;
 
     /**
      * 按邮箱 / 用户名 / 数字 id 解析平台用户。
@@ -109,10 +100,10 @@ public class Sub2PaymentOrderReader {
             rs.getString("payment_type"),
             rs.getString("status"),
             rs.getBigDecimal("refund_amount"),
-            offsetDateTimeOrNull(rs, "created_at"),
-            offsetDateTimeOrNull(rs, "paid_at"),
-            offsetDateTimeOrNull(rs, "completed_at"),
-            offsetDateTimeOrNull(rs, "failed_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "created_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "paid_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "completed_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "failed_at"),
             rs.getString("failed_reason")
     );
 
@@ -167,34 +158,6 @@ public class Sub2PaymentOrderReader {
         return rows.isEmpty()
                 ? new OrderSummary(0L, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO)
                 : rows.get(0);
-    }
-
-    /**
-     * {@code created_at} 可能是 timestamptz 也可能是 timestamp，两种都收。
-     *
-     * <p>与 {@code Sub2ApiUsageLogReader} 同样的取舍：先试 {@code getObject(.., OffsetDateTime.class)}，
-     * 无时区的列走不通再按业务时区解释。</p>
-     */
-    private static OffsetDateTime offsetDateTimeOrNull(ResultSet rs, String column) throws SQLException {
-        try {
-            return rs.getObject(column, OffsetDateTime.class);
-        } catch (SQLException ignored) {
-            // 无时区的 timestamp 走不通上面的转换，退回按业务时区解释
-        }
-        Object value = rs.getObject(column);
-        if (value instanceof OffsetDateTime odt) {
-            return odt;
-        }
-        if (value instanceof LocalDateTime ldt) {
-            return ldt.atZone(ZONE).toOffsetDateTime();
-        }
-        if (value instanceof Timestamp ts) {
-            return ts.toLocalDateTime().atZone(ZONE).toOffsetDateTime();
-        }
-        if (value instanceof Instant instant) {
-            return instant.atZone(ZONE).toOffsetDateTime();
-        }
-        return null;
     }
 
     /**
