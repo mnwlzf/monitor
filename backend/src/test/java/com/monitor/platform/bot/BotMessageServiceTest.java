@@ -136,7 +136,13 @@ class BotMessageServiceTest {
     }
 
     /** 群临时会话：private + sub_type=group，group_id 是发起群。 */
-    private static String tempSessionCommand(Long groupId, String text) {
+    /** 群临时会话，可指定发送者 QQ —— 用来验证「来源群 + QQ」双重判定。 */
+    private static String tempSessionCommandFrom(Long groupId, long userId, String text) {
+        return """
+                {"post_type":"message","message_type":"private","sub_type":"group","group_id":%d,"user_id":%d,
+                 "self_id":1,"raw_message":"%s","message":[{"type":"text","data":{"text":"%s"}}]}
+                """.formatted(groupId, userId, text, text);
+    }    private static String tempSessionCommand(Long groupId, String text) {
         return """
                 {"post_type":"message","message_type":"private","sub_type":"group","group_id":%d,"user_id":999,
                  "self_id":1,"raw_message":"%s","message":[{"type":"text","data":{"text":"%s"}}]}
@@ -691,6 +697,40 @@ class BotMessageServiceTest {
 
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("太频繁"));
         verify(client, never()).sendPrivateImage(anyLong(), any(byte[].class));
+    }    // ============================================================ 群临时会话：来源群 + QQ 双重判定
+
+    /**
+     * 线上问题：来源群是启用群，但发送者不在私聊白名单 —— 必须不回复。
+     *
+     * <p>临时会话既不是群聊（不能只看群），也不等于好友私聊（不能只看 QQ）。</p>
+     */
+    @Test
+    void shouldRejectTempSessionWhenUserNotWhitelisted() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event(tempSessionCommandFrom(222L, 888L, "/help")));
+
+        verify(client, never()).sendPrivateMessage(anyLong(), anyString());
+    }
+
+    /** 来源群与发送者都命中白名单时才回复。 */
+    @Test
+    void shouldAllowTempSessionWhenGroupAndUserBothAllowed() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event(tempSessionCommandFrom(222L, 999L, "/help")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("我能做的事"));
+    }
+
+    /** 发送者在私聊白名单，但来源群没启用 —— 同样不回复，避免任意群都能借临时会话找上来。 */
+    @Test
+    void shouldRejectTempSessionWhenSourceGroupNotAllowed() throws Exception {
+        identityIs(BotIdentity.guest());
+
+        service.onEvent(event(tempSessionCommandFrom(777L, 999L, "/help")));
+
+        verify(client, never()).sendPrivateMessage(anyLong(), anyString());
     }    // ============================================================ 用户端：只能查自己
 
     /** 平台用户在指定群里查自己的余额：放行，且用的是发送者自己的邮箱。 */

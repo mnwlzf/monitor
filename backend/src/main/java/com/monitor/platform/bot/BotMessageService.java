@@ -301,8 +301,10 @@ public class BotMessageService {
             return;
         }
         boolean group = channel == BotChannel.GROUP;
-        if (!allowed(event, group, settings)) {
-            log.debug("忽略非白名单会话: group={}, user={}", event.groupId(), event.userId());
+        if (!allowed(event, channel, settings)) {
+            // 刻意用 info：这条以前是 debug，导致「机器人为什么不回我」在默认日志级别下完全无痕
+            log.info("忽略非白名单会话: channel={}, 来源群={}, user={}",
+                    channel, event.groupId(), event.userId());
             return;
         }
         if (group && settings.requireMention() && !mentioned(event)) {
@@ -355,9 +357,23 @@ public class BotMessageService {
         });
     }
 
-    private boolean allowed(OneBotEvent event, boolean group, BotSettings settings) {
-        return group ? settings.isGroupAllowed(event.groupId())
-                : settings.isUserAllowed(event.userId());
+    /**
+     * 是否允许这条消息触发机器人。
+     *
+     * <p><strong>群临时会话既不是群聊、也不等于好友私聊</strong>，所以判定和另外两种都不同：
+     * 它必须<strong>同时</strong>满足「来源群在启用列表里」和「发送者在私聊白名单里」。
+     * 只看 QQ 会让任意群的临时会话都能找上来；只看群等于把私聊白名单架空了。</p>
+     *
+     * <p>注意白名单为空表示<strong>不限制</strong>（见 {@link BotSettings#matches}），
+     * 所以空列表时该条件自动成立。</p>
+     */
+    private boolean allowed(OneBotEvent event, BotChannel channel, BotSettings settings) {
+        return switch (channel) {
+            case GROUP -> settings.isGroupAllowed(event.groupId());
+            case TEMP_SESSION -> settings.isGroupAllowed(event.groupId())
+                    && settings.isUserAllowed(event.userId());
+            case PRIVATE -> settings.isUserAllowed(event.userId());
+        };
     }
 
     private BotReport answer(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
