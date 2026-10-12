@@ -686,6 +686,24 @@ class BotMessageServiceTest {
         assertNotEquals(groupA, tempSession);
     }
 
+    // ============================================================ 兜底：任何异常都要有回复
+
+    /**
+     * 处理链路里任何未捕获的异常都必须回一句。
+     *
+     * <p>线上踩过：{@code executor.submit()} 返回的 Future 没人接收，任务里抛出的异常会被
+     * 静默吞掉 —— 没有日志、没有回复、连消息存档都没有，表现就是「调用失败但用户什么都没收到」。
+     * 这里让身份解析抛异常，验证兜底会回一句。</p>
+     */
+    @Test
+    void shouldReplyWhenHandlerThrowsUnexpectedly() throws Exception {
+        when(identityResolver.resolve(anyLong())).thenThrow(new IllegalStateException("redis down"));
+
+        service.onEvent(event(privateCommand("/help")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("出错了"));
+    }
+
     // ============================================================ 生图：所有人都能用
 
     /** 路人也应该能 /画图：生成成功后把图片发出去，再跟一句文字。 */

@@ -343,50 +343,59 @@ public class BotMessageService {
         String turnId = runtimeStatus.beginTurn(channel, event.groupId(), event.userId(),
                 !text.isBlank() ? text : (quoted.isBlank() ? "" : "（引用了：" + quoted + "）"));
         executor.submit(() -> {
-            BotIdentity identity = identityResolver.resolve(event.userId());
-            Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
-            boolean platformFeature =
-                    BotAccessPolicy.platformFeatureAllowed(identity, channel, contextGroup, settings);
-            if (channel == BotChannel.TEMP_SESSION) {
-                // 临时会话探针：确认 OneBot 实现是否带了发起群号（拿不到就按「不在指定群」处理）
-                log.info("收到群临时会话: user={}, 发起群={}, 触发平台功能={}",
-                        event.userId(), event.groupId(), platformFeature);
-            }
-            // 下载图片放在后台线程里做，不占用回调线程
-            List<BotImageFetcher.FetchedImage> images = imageFetcher.fetch(imageRefs);
-
-            // 先存档用户消息：即使后面回答失败，也能查证「他说了什么、发了什么图」
-            String correlationId = archive.recordInbound(event,
-                    describeIncoming(text, imageRefs.size(), images.size()),
-                    kindOf(text, settings, !imageRefs.isEmpty()), identity);
-
-            GeneratedImages generated = new GeneratedImages();
-            BotReport report;
             try {
-                report = answer(event, text, quoted, settings, identity, platformFeature, channel, images, generated);
-            } catch (Exception ex) {
-                log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
-                        event.userId(), identity.platformUser(), ex.getMessage());
-                runtimeStatus.failed(event.userId(), ex.getMessage());
-                // 异常细节只回给有平台功能的会话，避免向陌生人泄露内部实现
-                report = BotReport.fromMarkdown(platformFeature
-                        ? "处理这条消息时出错了：" + ex.getMessage()
-                        : "处理这条消息时出错了，请稍后再试。");
-            }
+                BotIdentity identity = identityResolver.resolve(event.userId());
+                Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
+                boolean platformFeature =
+                        BotAccessPolicy.platformFeatureAllowed(identity, channel, contextGroup, settings);
+                if (channel == BotChannel.TEMP_SESSION) {
+                    // 临时会话探针：确认 OneBot 实现是否带了发起群号（拿不到就按「不在指定群」处理）
+                    log.info("收到群临时会话: user={}, 发起群={}, 触发平台功能={}",
+                            event.userId(), event.groupId(), platformFeature);
+                }
+                // 下载图片放在后台线程里做，不占用回调线程
+                List<BotImageFetcher.FetchedImage> images = imageFetcher.fetch(imageRefs);
 
-            SendOutcome outcome;
-            try {
-                outcome = send(event, group, report, settings.maxReplyLength(), generated);
-            } catch (RuntimeException sendError) {
-                // 发送失败也要把这一轮从「正在处理」里摘掉，否则会永远挂在那儿
-                runtimeStatus.finishTurn(turnId, "发送失败：" + sendError.getMessage());
-                throw sendError;
+                // 先存档用户消息：即使后面回答失败，也能查证「他说了什么、发了什么图」
+                String correlationId = archive.recordInbound(event,
+                        describeIncoming(text, imageRefs.size(), images.size()),
+                        kindOf(text, settings, !imageRefs.isEmpty()), identity);
+
+                GeneratedImages generated = new GeneratedImages();
+                BotReport report;
+                try {
+                    report = answer(event, text, quoted, settings, identity, platformFeature, channel, images, generated);
+                } catch (Exception ex) {
+                    log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
+                            event.userId(), identity.platformUser(), ex.getMessage());
+                    runtimeStatus.failed(event.userId(), ex.getMessage());
+                    // 异常细节只回给有平台功能的会话，避免向陌生人泄露内部实现
+                    report = BotReport.fromMarkdown(platformFeature
+                            ? "处理这条消息时出错了：" + ex.getMessage()
+                            : "处理这条消息时出错了，请稍后再试。");
+                }
+
+                SendOutcome outcome;
+                try {
+                    outcome = send(event, group, report, settings.maxReplyLength(), generated);
+                } catch (RuntimeException sendError) {
+                    // 发送失败也要把这一轮从「正在处理」里摘掉，否则会永远挂在那儿
+                    runtimeStatus.finishTurn(turnId, "发送失败：" + sendError.getMessage());
+                    throw sendError;
+                }
+                runtimeStatus.replied();
+                runtimeStatus.finishTurn(turnId, outcome.content());
+                // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
+                archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
+                        personaOf(identity, platformFeature).name(), correlationId);
+            } catch (Exception uncaught) {
+                // submit() 返回的 Future 没人接收，任务里未捕获的异常会被静默吞掉：
+                // 没有日志、没有回复、连存档都没有 —— 线上表现就是「调用失败但用户什么都没收到」。
+                log.error("处理消息时出现未捕获异常: user={}, channel={}", event.userId(), channel, uncaught);
+                runtimeStatus.failed(event.userId(), uncaught.getMessage());
+                runtimeStatus.finishTurn(turnId, "处理失败：" + uncaught.getMessage());
+                sendText(event, group, "处理这条消息时出错了，请稍后再试。");
             }
-            runtimeStatus.replied();
-            runtimeStatus.finishTurn(turnId, outcome.content());
-            // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
-            archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
-                    personaOf(identity, platformFeature).name(), correlationId);
         });
     }
 
