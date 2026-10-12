@@ -59,6 +59,7 @@ class BotMessageServiceTest {
     private BotUsageTools usageTools;
     private BotChannelStatusService channelStatusService;
     private ImageGenService imageGenService;
+    private BotRuntimeStatus runtimeStatus;
     private Sub2ApiUserCache userCache;
     private BotUserService botUserService;
     private BotIdentityResolver identityResolver;
@@ -84,6 +85,7 @@ class BotMessageServiceTest {
         usageTools = mock(BotUsageTools.class);
         channelStatusService = mock(BotChannelStatusService.class);
         imageGenService = mock(ImageGenService.class);
+        runtimeStatus = new BotRuntimeStatus();
         userCache = mock(Sub2ApiUserCache.class);
         botUserService = mock(BotUserService.class);
         when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台概览内容"));
@@ -100,7 +102,7 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, orderTools, usageTools, channelStatusService, userCache, imageGenService, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, tools, orderTools, usageTools, channelStatusService, userCache, imageGenService, runtimeStatus, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
     }
 
     private OneBotEvent event(String json) throws Exception {

@@ -199,6 +199,7 @@ public class BotMessageService {
     private final BotChannelStatusService channelStatusService;
     private final Sub2ApiUserCache userCache;
     private final ImageGenService imageGenService;
+    private final BotRuntimeStatus runtimeStatus;
     private final BotUserService botUserService;
     private final WeatherTools weatherTools;
     private final BotMessageArchiveService archive;
@@ -227,6 +228,7 @@ public class BotMessageService {
                              BotChannelStatusService channelStatusService,
                              Sub2ApiUserCache userCache,
                              ImageGenService imageGenService,
+                             BotRuntimeStatus runtimeStatus,
                              BotUserService botUserService,
                              WeatherTools weatherTools,
                              BotMessageArchiveService archive,
@@ -244,6 +246,7 @@ public class BotMessageService {
         this.channelStatusService = channelStatusService;
         this.userCache = userCache;
         this.imageGenService = imageGenService;
+        this.runtimeStatus = runtimeStatus;
         this.botUserService = botUserService;
         this.weatherTools = weatherTools;
         this.archive = archive;
@@ -305,9 +308,11 @@ public class BotMessageService {
             // 刻意用 info：这条以前是 debug，导致「机器人为什么不回我」在默认日志级别下完全无痕
             log.info("忽略非白名单会话: channel={}, 来源群={}, user={}",
                     channel, event.groupId(), event.userId());
+            runtimeStatus.dropped(channel, event.groupId(), event.userId(), "不在白名单（群号 / QQ）");
             return;
         }
         if (group && settings.requireMention() && !mentioned(event)) {
+            runtimeStatus.dropped(channel, event.groupId(), event.userId(), "群里没 @机器人");
             return;
         }
         String text = extractText(event);
@@ -317,8 +322,10 @@ public class BotMessageService {
                 : List.of();
         if (text.isBlank() && imageRefs.isEmpty()) {
             // 既没文字也没图片（表情、语音等），目前不支持
+            runtimeStatus.dropped(channel, event.groupId(), event.userId(), "空消息（表情/语音等暂不支持）");
             return;
         }
+        runtimeStatus.inbound();
         executor.submit(() -> {
             BotIdentity identity = identityResolver.resolve(event.userId());
             Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
@@ -344,6 +351,7 @@ public class BotMessageService {
             } catch (Exception ex) {
                 log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                         event.userId(), identity.platformUser(), ex.getMessage());
+                runtimeStatus.failed(event.userId(), ex.getMessage());
                 // 异常细节只回给有平台功能的会话，避免向陌生人泄露内部实现
                 report = BotReport.fromMarkdown(platformFeature
                         ? "处理这条消息时出错了：" + ex.getMessage()
@@ -351,6 +359,7 @@ public class BotMessageService {
             }
 
             SendOutcome outcome = send(event, group, report, settings.maxReplyLength(), generated.snapshot());
+            runtimeStatus.replied();
             // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
             archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
                     personaOf(identity, platformFeature).name(), correlationId);
@@ -371,7 +380,10 @@ public class BotMessageService {
      *
      * <p>白名单为空表示<strong>不限制</strong>（见 {@link BotSettings#matches}）。</p>
      */
-    private boolean allowed(OneBotEvent event, BotChannel channel, BotSettings settings) {
+    /** 大模型是否可用（供「机器人状态」页展示）。 */
+    public boolean llmAvailable() {
+        return !chatClientUnavailable && chatClientBuilder.getIfAvailable() != null;
+    }    private boolean allowed(OneBotEvent event, BotChannel channel, BotSettings settings) {
         return switch (channel) {
             case GROUP, TEMP_SESSION -> settings.isGroupAllowed(event.groupId());
             case PRIVATE -> settings.isUserAllowed(event.userId());

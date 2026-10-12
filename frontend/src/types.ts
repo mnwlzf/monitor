@@ -422,3 +422,51 @@ export interface BotMessageArchiveStats {
   earliest: string | null
   retentionDays: number
 }
+
+/** 机器人运行状态（「机器人状态」页）。进程内统计，重启后清零。 */
+export interface BotStatus {
+  enabled: boolean
+  startedAt: string
+  uptimeSeconds: number
+  llm: {
+    available: boolean
+    model: string | null
+    baseUrl: string | null
+  }
+  onebot: {
+    configured: boolean
+    reachable: boolean
+    online: boolean
+    baseUrl: string | null
+    selfId: number | null
+    nickname: string | null
+    error: string | null
+  }
+  counters: {
+    inbound: number
+    replied: number
+    dropped: number
+    failed: number
+    lastInboundAt: string | null
+    lastOutboundAt: string | null
+  }
+  /** 未回复原因 -> 次数 */
+  dropReasons: Record<string, number>
+  recentDrops: Array<{
+    at: string
+    channel: string
+    groupId: number | null
+    userId: number | null
+    reason: string
+  }>
+  recentErrors: Array<{
+    at: string
+    userId: number | null
+    message: string
+  }>
+  imageGen: {
+    usable: boolean
+    model: string | null
+    maxPerMinute: number
+  }
+}

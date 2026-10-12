@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotAdmin, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
+import type { BotAdmin, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -160,4 +160,9 @@ export async function searchBotMessages(query: BotMessageQuery): Promise<BotMess
 /** 读取消息存档概况。 */
 export async function getBotArchiveStats(): Promise<BotMessageArchiveStats> {
   return apiRequest<BotMessageArchiveStats>('/api/v1/settings/bot/archive/stats')
+}
+
+/** 读取机器人运行状态（含一次 OneBot 实时探活）。 */
+export async function getBotStatus(): Promise<BotStatus> {
+  return apiRequest<BotStatus>('/api/v1/settings/bot/status')
 }

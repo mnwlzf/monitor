@@ -1,5 +1,6 @@
 package com.monitor.platform.bot.onebot;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.bot.QqBotProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +58,75 @@ public class OneBotClient {
         return sendImage("/send_private_msg", "user_id", userId, png);
     }
 
-    private void send(String path, String idField, long id, String text) {
+    /** OneBot 地址（仅用于状态展示）。 */
+    public String baseUrl() {
+        return properties.getApiBaseUrl();
+    }
+
+    /**
+     * 探活：问 NapCat 要运行状态与登录信息（OneBot v11 的 /get_status 与 /get_login_info）。
+     *
+     * <p>「机器人状态」页面用它回答两个最要紧的问题：OneBot 连得上吗、机器人账号在线吗。
+     * 任何失败都翻译成结果对象，不抛异常 —— 页面只是展示，不该因为探活失败而报错。</p>
+     */
+    public ProbeResult probe() {
+        if (!properties.isConfigured()) {
+            return ProbeResult.notConfigured();
+        }
+        try {
+            JsonNode status = postData("/get_status");
+            JsonNode login = postData("/get_login_info");
+            boolean online = status != null && status.path("online").asBoolean(false);
+            Long selfId = null;
+            if (login != null && login.path("user_id").isNumber()) {
+                selfId = login.path("user_id").asLong();
+            }
+            String nickname = login == null ? null : login.path("nickname").asText(null);
+            return ProbeResult.ok(online, selfId, nickname);
+        } catch (RuntimeException ex) {
+            log.warn("OneBot 探活失败: {}", ex.getMessage());
+            return ProbeResult.failed(ex.getMessage());
+        }
+    }
+
+    /** 调一个不关心入参的 OneBot 接口，返回响应里的 data。 */
+    private JsonNode postData(String path) {
+        RestClient.RequestBodySpec spec = restClient.post()
+                .uri(path)
+                .contentType(MediaType.APPLICATION_JSON);
+        String token = properties.getApiToken();
+        if (token != null && !token.isBlank()) {
+            spec = spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+        }
+        JsonNode response = spec.body(Map.of()).retrieve().body(JsonNode.class);
+        return response == null ? null : response.path("data");
+    }
+
+    /**
+     * 探活结果。
+     *
+     * @param configured 是否配了 OneBot 地址（没配就别谈通不通）
+     * @param reachable  这次探测是否拿到了响应
+     * @param online     OneBot 自报的在线状态
+     * @param selfId     机器人自己的 QQ 号，取不到为 null
+     * @param nickname   机器人昵称，取不到为 null
+     * @param error      探测失败时的原因，成功为 null
+     */
+    public record ProbeResult(boolean configured, boolean reachable, boolean online,
+                              Long selfId, String nickname, String error) {
+
+        static ProbeResult notConfigured() {
+            return new ProbeResult(false, false, false, null, null, null);
+        }
+
+        static ProbeResult ok(boolean online, Long selfId, String nickname) {
+            return new ProbeResult(true, true, online, selfId, nickname, null);
+        }
+
+        static ProbeResult failed(String error) {
+            return new ProbeResult(true, false, false, null, null, error);
+        }
+    }    private void send(String path, String idField, long id, String text) {
         dispatch(path, idField, id, text, text);
     }
 
