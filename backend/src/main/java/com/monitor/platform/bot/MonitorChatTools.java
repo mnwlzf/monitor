@@ -10,6 +10,7 @@ import com.monitor.platform.api.dto.ScheduledTaskResponse;
 import com.monitor.platform.api.dto.UpstreamChangeEventResponse;
 import com.monitor.platform.api.service.ScheduledTaskAdminService;
 import com.monitor.platform.api.service.UpstreamAdminService;
+import com.monitor.platform.api.service.UpstreamUsageService;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
@@ -58,15 +59,18 @@ public class MonitorChatTools {
 
     private final PlatformRepository platformRepository;
     private final UpstreamAdminService upstreamAdminService;
+    private final UpstreamUsageService upstreamUsageService;
     private final PoolQueryService poolQueryService;
     private final ScheduledTaskAdminService scheduledTaskAdminService;
 
     public MonitorChatTools(PlatformRepository platformRepository,
                             UpstreamAdminService upstreamAdminService,
+                            UpstreamUsageService upstreamUsageService,
                             PoolQueryService poolQueryService,
                             ScheduledTaskAdminService scheduledTaskAdminService) {
         this.platformRepository = platformRepository;
         this.upstreamAdminService = upstreamAdminService;
+        this.upstreamUsageService = upstreamUsageService;
         this.poolQueryService = poolQueryService;
         this.scheduledTaskAdminService = scheduledTaskAdminService;
     }
@@ -399,7 +403,7 @@ public class MonitorChatTools {
         for (PlatformResponse platform : upstreamAdminService.listPlatforms()) {
             // 关键字过滤在内存里做，所以多取一些候选，避免「近 5 条里恰好没有倍率变化」就查不到
             for (UpstreamChangeEventResponse event
-                    : upstreamAdminService.listChanges(platform.id(), size * 4)) {
+                    : upstreamUsageService.listChanges(platform.id(), size * 4)) {
                 if (matchesChange(event, keyword)) {
                     matched.add(new PlatformChange(platform.name(), event));
                 }
@@ -536,7 +540,7 @@ public class MonitorChatTools {
         List<UsageRow> all = new ArrayList<>();
         OffsetDateTime latest = null;
         for (PlatformResponse platform : upstreamAdminService.listPlatforms()) {
-            for (AccountUsageDashboardResponse usage : upstreamAdminService.listUsageDashboard(platform.id())) {
+            for (AccountUsageDashboardResponse usage : upstreamUsageService.listUsageDashboard(platform.id())) {
                 all.add(new UsageRow(platform.name(), usage, cost(usage)));
                 if (usage.collectedAt() != null && (latest == null || usage.collectedAt().isAfter(latest))) {
                     latest = usage.collectedAt();

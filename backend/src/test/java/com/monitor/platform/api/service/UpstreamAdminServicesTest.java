@@ -43,10 +43,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 平台实例新增 / 修改 / 删除的业务规则测试。
+ * 上游管理与用量查询服务的业务规则测试：平台增删改、凭证解密、用量看板与指标时序。
  */
 @ExtendWith(MockitoExtension.class)
-class UpstreamAdminServicePlatformTest {
+class UpstreamAdminServicesTest {
 
     @Mock private PlatformRepository platformRepository;
     @Mock private AccountRepository accountRepository;
@@ -59,21 +59,29 @@ class UpstreamAdminServicePlatformTest {
     @Mock private CredentialCipher credentialCipher;
 
     private UpstreamAdminService service;
+    private UpstreamUsageService usageService;
 
     @BeforeEach
     void setUp() {
+        JsonPayloads json = new JsonPayloads(new ObjectMapper());
+        UpstreamAccountAccess accounts = new UpstreamAccountAccess(accountRepository, metricSnapshotRepository);
         service = new UpstreamAdminService(
+                platformRepository,
+                accountRepository,
+                groupRepository,
+                apiKeyRepository,
+                credentialService,
+                credentialCipher,
+                json,
+                accounts);
+        usageService = new UpstreamUsageService(
                 platformRepository,
                 accountRepository,
                 metricSnapshotRepository,
                 usageDashboardRepository,
-                groupRepository,
                 changeEventRepository,
-                apiKeyRepository,
-                credentialService,
-                credentialCipher,
-                new ObjectMapper()
-        );
+                json,
+                accounts);
     }
 
     private PlatformEntity platform(int id, String name, String url, String type) {
@@ -249,7 +257,7 @@ class UpstreamAdminServicePlatformTest {
                 usageSnapshot(10, "newapi", new BigDecimal("300.00"), now.minusHours(6)),
                 usageSnapshot(10, "newapi", new BigDecimal("300.80"), now.minusHours(1))));
 
-        List<AccountUsageDashboardResponse> rows = service.listUsageDashboard(1);
+        List<AccountUsageDashboardResponse> rows = usageService.listUsageDashboard(1);
 
         assertEquals(1, rows.size());
         // 累计实际成本保持原语义，不被今日值覆盖。
@@ -278,7 +286,7 @@ class UpstreamAdminServicePlatformTest {
                 usageSnapshot(10, "newapi", new BigDecimal("300.00"), now.minusHours(6)),
                 usageSnapshot(10, "newapi", new BigDecimal("10.00"), now.minusHours(1))));
 
-        List<AccountUsageDashboardResponse> rows = service.listUsageDashboard(1);
+        List<AccountUsageDashboardResponse> rows = usageService.listUsageDashboard(1);
 
         assertEquals(1, rows.size());
         assertFalse(rows.get(0).metrics().has("today_actual_cost"));
@@ -348,7 +356,7 @@ class UpstreamAdminServicePlatformTest {
                 ArgumentMatchers.eq(7), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq(10000)))
                 .thenReturn(List.of(point));
 
-        List<AccountMetricPointResponse> result = service.listAccountMetrics(1, 7, "30d");
+        List<AccountMetricPointResponse> result = usageService.listAccountMetrics(1, 7, "30d");
 
         assertEquals(1, result.size());
         assertEquals(new BigDecimal("12.34"), result.get(0).balance());
@@ -379,7 +387,7 @@ class UpstreamAdminServicePlatformTest {
                 ArgumentMatchers.eq(7), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.eq(10000)))
                 .thenReturn(points);
 
-        List<AccountMetricPointResponse> result = service.listAccountMetrics(1, 7, "90d");
+        List<AccountMetricPointResponse> result = usageService.listAccountMetrics(1, 7, "90d");
 
         assertTrue(result.size() <= 401, "抽稀后点数应不超过上限");
         assertTrue(result.size() < points.size(), "大数据量应被抽稀");

@@ -1,56 +1,36 @@
 package com.monitor.platform.api.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.monitor.platform.api.dto.AccountMetricPointResponse;
-import com.monitor.platform.api.dto.AccountResponse;
 import com.monitor.platform.api.dto.AccountApiKeyResponse;
-import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
+import com.monitor.platform.api.dto.AccountResponse;
 import com.monitor.platform.api.dto.CreateAccountRequest;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
 import com.monitor.platform.api.dto.PlatformResponse;
-import com.monitor.platform.api.dto.UpstreamChangeEventResponse;
-import com.monitor.platform.api.dto.UpstreamGroupResponse;
 import com.monitor.platform.api.dto.UpdateAccountRequest;
 import com.monitor.platform.api.dto.UpdatePlatformRequest;
+import com.monitor.platform.api.dto.UpstreamGroupResponse;
 import com.monitor.platform.collector.application.AccountCredentialService;
-import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
-import com.monitor.platform.collector.repository.AccountUsageDashboardSnapshotRepository;
-import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
-import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
-import com.monitor.platform.collector.repository.entity.AccountEntity;
+import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
-import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity;
-import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
-import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
-import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
+import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import com.monitor.platform.collector.security.CredentialCipher;
 import com.monitor.platform.common.exception.BusinessException;
-import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.Duration;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * 上游平台和账号管理服务。
+ * 上游平台与账号管理：平台/账号增删改查、凭证、渠道与密钥的读取。
+ *
+ * <p>用量看板、指标时序、变更事件等只读统计查询见 {@link UpstreamUsageService}。</p>
  */
 @Service
 public class UpstreamAdminService {
@@ -60,49 +40,31 @@ public class UpstreamAdminService {
     /** 支持手动 Token 登录的平台类型。 */
     private static final String SUPPORTED_TOKEN_PLATFORM = "sub2api";
 
-    /** 指标时序单次最多查询的原始点数。 */
-    private static final int METRIC_MAX_QUERY_POINTS = 10000;
-
-    /** 折线图最多返回的点数，超出时按步长抽稀，避免前端渲染过慢。 */
-    private static final int METRIC_MAX_CHART_POINTS = 400;
-
-    /** New API 平台标识，其「今日消耗」由累计消耗差值推算。 */
-    private static final String PLATFORM_NEW_API = "newapi";
-
-    /** 日统计所属时区，与上游采集口径保持一致。 */
-    private static final ZoneId REPORT_ZONE = BusinessTime.ZONE;
-
     private final PlatformRepository platformRepository;
     private final AccountRepository accountRepository;
-    private final AccountMetricSnapshotRepository metricSnapshotRepository;
-    private final AccountUsageDashboardSnapshotRepository usageDashboardRepository;
     private final UpstreamGroupRepository groupRepository;
-    private final UpstreamChangeEventRepository changeEventRepository;
     private final AccountApiKeyRepository apiKeyRepository;
     private final AccountCredentialService credentialService;
     private final CredentialCipher credentialCipher;
-    private final ObjectMapper objectMapper;
+    private final JsonPayloads json;
+    private final UpstreamAccountAccess accounts;
 
     public UpstreamAdminService(PlatformRepository platformRepository,
                                 AccountRepository accountRepository,
-                                AccountMetricSnapshotRepository metricSnapshotRepository,
-                                AccountUsageDashboardSnapshotRepository usageDashboardRepository,
                                 UpstreamGroupRepository groupRepository,
-                                UpstreamChangeEventRepository changeEventRepository,
                                 AccountApiKeyRepository apiKeyRepository,
                                 AccountCredentialService credentialService,
                                 CredentialCipher credentialCipher,
-                                ObjectMapper objectMapper) {
+                                JsonPayloads json,
+                                UpstreamAccountAccess accounts) {
         this.platformRepository = platformRepository;
         this.accountRepository = accountRepository;
-        this.metricSnapshotRepository = metricSnapshotRepository;
-        this.usageDashboardRepository = usageDashboardRepository;
         this.groupRepository = groupRepository;
-        this.changeEventRepository = changeEventRepository;
         this.apiKeyRepository = apiKeyRepository;
         this.credentialService = credentialService;
         this.credentialCipher = credentialCipher;
-        this.objectMapper = objectMapper;
+        this.json = json;
+        this.accounts = accounts;
     }
 
     /**
@@ -253,7 +215,7 @@ public class UpstreamAdminService {
 
         log.info("创建采集账号成功: accountId={}, platformId={}, loginName={}, authType={}",
                 entity.getId(), platformId, request.loginName(), entity.getAuthType());
-        return toAccountResponse(entity);
+        return accounts.toResponse(entity);
     }
 
     /**
@@ -267,7 +229,7 @@ public class UpstreamAdminService {
     @Transactional
     public AccountResponse updateAccount(Integer platformId, Integer accountId,
                                          UpdateAccountRequest request) {
-        AccountEntity entity = findAccount(platformId, accountId);
+        AccountEntity entity = accounts.require(platformId, accountId);
 
         if (request.loginName() != null && !request.loginName().isBlank()) {
             accountRepository.findByPlatformIdAndEmail(platformId, request.loginName())
@@ -315,7 +277,7 @@ public class UpstreamAdminService {
 
         log.info("更新采集账号成功: accountId={}, platformId={}, loginName={}, authType={}",
                 accountId, platformId, entity.getUsername(), entity.getAuthType());
-        return toAccountResponse(entity);
+        return accounts.toResponse(entity);
     }
 
     /**
@@ -326,7 +288,7 @@ public class UpstreamAdminService {
      */
     @Transactional
     public void deleteAccount(Integer platformId, Integer accountId) {
-        AccountEntity entity = findAccount(platformId, accountId);
+        AccountEntity entity = accounts.require(platformId, accountId);
         accountRepository.softDelete(accountId);
         credentialService.deactivateAll(accountId);
         log.info("删除采集账号成功: accountId={}, platformId={}, loginName={}",
@@ -341,7 +303,7 @@ public class UpstreamAdminService {
     public List<AccountResponse> listAccounts(Integer platformId) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
-        return accountRepository.findByPlatformId(platformId).stream().map(this::toAccountResponse).toList();
+        return accountRepository.findByPlatformId(platformId).stream().map(accounts::toResponse).toList();
     }
 
     /** 归一化认证类型：只有显式 TOKEN 才按 Token 处理，其余按密码登录。 */
@@ -371,17 +333,6 @@ public class UpstreamAdminService {
     }
 
     /**
-     * 校验账号存在且确实属于指定平台，防止跨平台操作。
-     */
-    private AccountEntity findAccount(Integer platformId, Integer accountId) {
-        AccountEntity entity = accountRepository.findById(accountId)
-                .orElseThrow(() -> BusinessException.of("账号不存在: " + accountId));
-        if (!platformId.equals(entity.getPlatformId())) {
-            throw BusinessException.of("账号不属于指定平台: " + accountId);
-        }
-        return entity;
-    }
-    /**
      * 将渠道实体转换为接口响应。
      */
     private UpstreamGroupResponse toGroupResponse(UpstreamGroupEntity entity) {
@@ -390,19 +341,6 @@ public class UpstreamAdminService {
                 entity.getGroupName(), entity.getDescription(), entity.getPlatform(),
                 entity.getCurrentRatio(), entity.getCurrentBaseRatio(), entity.getStatus(),
                 entity.getIsActive(), entity.getFirstSeenAt(), entity.getLastSeenAt(), entity.getLastChangedAt()
-        );
-    }
-
-    /**
-     * 将变更事件实体转换为接口响应。
-     */
-    private UpstreamChangeEventResponse toChangeEventResponse(UpstreamChangeEventEntity entity) {
-        return new UpstreamChangeEventResponse(
-                entity.getId(), entity.getAccountId(), entity.getPlatformType(),
-                entity.getEntityType(), entity.getEntityKey(), entity.getGroupName(), entity.getChangeType(),
-                entity.getFieldName(), entity.getOldValue(), entity.getNewValue(),
-                entity.getSeverity(), entity.getMessage(), entity.getDetectedAt(),
-                Boolean.TRUE.equals(entity.getInUse())
         );
     }
 
@@ -494,7 +432,7 @@ public class UpstreamAdminService {
      * @return 完整明文密钥
      */
     public String revealApiKeySecret(Integer platformId, Integer accountId, Long keyId) {
-        AccountEntity account = findAccount(platformId, accountId);
+        AccountEntity account = accounts.require(platformId, accountId);
         AccountApiKeyEntity apiKey = apiKeyRepository.findById(keyId)
                 .orElseThrow(() -> BusinessException.of("密钥不存在: " + keyId));
         if (!account.getId().equals(apiKey.getAccountId())) {
@@ -523,7 +461,7 @@ public class UpstreamAdminService {
      * @return 明文密码
      */
     public String revealAccountPassword(Integer platformId, Integer accountId, String operator) {
-        AccountEntity account = findAccount(platformId, accountId);
+        AccountEntity account = accounts.require(platformId, accountId);
 
         String password;
         try {
@@ -554,249 +492,7 @@ public class UpstreamAdminService {
                 entity.getModelLimitsEnabled(), entity.getModelLimits(), entity.getAllowIps(),
                 entity.getExpiresAt(), entity.getUpstreamCreatedAt(), entity.getLastUsedAt(),
                 entity.getIsActive(), entity.getFirstSeenAt(), entity.getLastSeenAt(),
-                entity.getLastChangedAt(), readJson(entity.getMetrics())
-        );
-    }
-
-    /**
-     * 查询平台下最近的渠道变更事件，并按发现时间倒序截断。
-     *
-     * @param platformId 平台 ID
-     * @param limit      最大返回条数
-     * @return 变更事件列表
-     */
-    public List<UpstreamChangeEventResponse> listChanges(Integer platformId, int limit) {
-        platformRepository.findById(platformId)
-                .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
-        int safeLimit = Math.max(1, Math.min(limit, 500));
-        List<UpstreamChangeEventResponse> result = new ArrayList<>();
-        for (AccountEntity account : accountRepository.findByPlatformId(platformId)) {
-            for (UpstreamChangeEventEntity event : changeEventRepository.findRecent(account.getId(), safeLimit)) {
-                result.add(toChangeEventResponse(event));
-            }
-        }
-        result.sort(Comparator.comparing(UpstreamChangeEventResponse::detectedAt,
-                Comparator.nullsLast(Comparator.reverseOrder())));
-        return result.stream().limit(safeLimit).toList();
-    }
-
-    /**
-     * 查询平台下各账号的最新用量看板快照。
-     *
-     * <p>newapi 与 sub2api 使用同一张快照表，接口返回统一结构；
-     * 平台未提供的指标为 null，由前端降级展示。</p>
-     */
-    public List<AccountUsageDashboardResponse> listUsageDashboard(Integer platformId) {
-        platformRepository.findById(platformId)
-                .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
-
-        List<AccountEntity> accounts = accountRepository.findByPlatformId(platformId);
-        Map<Integer, AccountEntity> accountMap = new HashMap<>();
-        for (AccountEntity account : accounts) {
-            accountMap.put(account.getId(), account);
-        }
-        if (accountMap.isEmpty()) {
-            return List.of();
-        }
-
-        List<Integer> accountIds = new ArrayList<>(accountMap.keySet());
-        Map<Integer, BigDecimal> newApiTodayCost = calculateNewApiTodayCost(accountIds);
-
-        List<AccountUsageDashboardResponse> result = new ArrayList<>();
-        for (AccountUsageDashboardSnapshotEntity snapshot
-                : usageDashboardRepository.findLatestByAccounts(accountIds)) {
-            AccountEntity account = accountMap.get(snapshot.getAccountId());
-            if (account == null) {
-                continue;
-            }
-            // New API 上游没有当日字段，用当天累计消耗差值补出 metrics.today_actual_cost；
-            // totalActualCost 仍保持「累计实际成本」语义，不被覆盖。
-            JsonNode metrics = readJson(snapshot.getMetrics());
-            if (PLATFORM_NEW_API.equalsIgnoreCase(snapshot.getPlatformType())) {
-                metrics = withTodayActualCost(metrics, newApiTodayCost.get(snapshot.getAccountId()));
-            }
-            result.add(new AccountUsageDashboardResponse(
-                    snapshot.getId(),
-                    snapshot.getAccountId(),
-                    account.getPlatformId(),
-                    account.getDisplayName(),
-                    snapshot.getPlatformType(),
-                    snapshot.getBalance(),
-                    snapshot.getFrozenBalance(),
-                    snapshot.getTotalRequests(),
-                    snapshot.getTotalTokens(),
-                    snapshot.getTotalCost(),
-                    snapshot.getTotalActualCost(),
-                    metrics,
-                    readJson(snapshot.getPlatformStats()),
-                    snapshot.getCollectedAt()
-            ));
-        }
-        return result;
-    }
-
-    /**
-     * 计算 New API 账号的「今日消耗」。
-     *
-     * <p>New API 只提供累计已用额度，没有当日统计，因此用当天首次采集与最新一次采集的
-     * 累计消耗（已换算 USD 的 total_cost）差值作为今日消耗；额度被重置或换套餐导致
-     * 差值为负时跳过，避免展示误导数据。</p>
-     *
-     * @return accountId -> 今日消耗（USD），无法计算时不包含该账号
-     */
-    private Map<Integer, BigDecimal> calculateNewApiTodayCost(List<Integer> accountIds) {
-        OffsetDateTime now = OffsetDateTime.now(REPORT_ZONE);
-        OffsetDateTime dayStart = LocalDate.now(REPORT_ZONE).atStartOfDay(REPORT_ZONE).toOffsetDateTime();
-        List<AccountUsageDashboardSnapshotEntity> snapshots =
-                usageDashboardRepository.findByAccounts(accountIds, dayStart, now);
-        if (snapshots.isEmpty()) {
-            return Map.of();
-        }
-
-        Map<Integer, BigDecimal> first = new HashMap<>();
-        Map<Integer, BigDecimal> last = new HashMap<>();
-        for (AccountUsageDashboardSnapshotEntity snapshot : snapshots) {
-            if (!PLATFORM_NEW_API.equalsIgnoreCase(snapshot.getPlatformType())
-                    || snapshot.getTotalCost() == null) {
-                continue;
-            }
-            first.putIfAbsent(snapshot.getAccountId(), snapshot.getTotalCost());
-            last.put(snapshot.getAccountId(), snapshot.getTotalCost());
-        }
-
-        Map<Integer, BigDecimal> result = new HashMap<>();
-        for (Map.Entry<Integer, BigDecimal> entry : last.entrySet()) {
-            BigDecimal firstCost = first.get(entry.getKey());
-            if (firstCost == null) {
-                continue;
-            }
-            BigDecimal delta = entry.getValue().subtract(firstCost);
-            if (delta.signum() < 0) {
-                continue;
-            }
-            result.put(entry.getKey(), delta);
-        }
-        return result;
-    }
-
-    /**
-     * 把推导出的当日消耗写回 metrics，前端统一读取 today_actual_cost。
-     */
-    private JsonNode withTodayActualCost(JsonNode metrics, BigDecimal todayActualCost) {
-        if (todayActualCost == null) {
-            return metrics;
-        }
-        ObjectNode node = metrics != null && metrics.isObject()
-                ? ((ObjectNode) metrics).deepCopy()
-                : objectMapper.createObjectNode();
-        node.put("today_actual_cost", todayActualCost);
-        return node;
-    }
-
-    /**
-     * 安全解析数据库中保存的 JSON 文本；内容为空或格式错误时返回 null。
-     */
-    private JsonNode readJson(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return objectMapper.readTree(value);
-        } catch (JsonProcessingException ex) {
-            log.warn("用量看板 JSON 字段解析失败，返回空值", ex);
-            return null;
-        }
-    }
-
-    /**
-     * 将账号实体与其最新指标快照组合为接口响应。
-     */
-    /**
-     * 查询账号余额/额度指标时序，供余额详情页折线图使用。
-     *
-     * <p>时间维度支持 {@code 1d}、{@code 7d}、{@code 30d}、{@code 90d}，默认 {@code 7d}。
-     * 点数过多时按步长抽稀到 {@value #METRIC_MAX_CHART_POINTS} 以内，保留首尾点。</p>
-     *
-     * @param platformId 平台 ID
-     * @param accountId  账号 ID
-     * @param range      时间维度
-     * @return 指标时序点（按时间升序）
-     */
-    public List<AccountMetricPointResponse> listAccountMetrics(Integer platformId, Integer accountId, String range) {
-        findAccount(platformId, accountId);
-
-        OffsetDateTime to = OffsetDateTime.now();
-        OffsetDateTime from = to.minus(resolveMetricRange(range));
-        List<AccountMetricSnapshotEntity> snapshots = metricSnapshotRepository
-                .findByAccount(accountId, from, to, METRIC_MAX_QUERY_POINTS);
-
-        return downsampleMetrics(snapshots, METRIC_MAX_CHART_POINTS).stream()
-                .map(this::toMetricPointResponse)
-                .toList();
-    }
-
-    /** 解析时间维度参数。 */
-    private Duration resolveMetricRange(String range) {
-        if (range == null) {
-            return Duration.ofDays(7);
-        }
-        return switch (range.trim().toLowerCase()) {
-            case "1d", "24h" -> Duration.ofDays(1);
-            case "30d" -> Duration.ofDays(30);
-            case "90d" -> Duration.ofDays(90);
-            default -> Duration.ofDays(7);
-        };
-    }
-
-    /**
-     * 等步长抽稀指标点：超过上限时按比例采样，并始终保留最后一个点。
-     */
-    private List<AccountMetricSnapshotEntity> downsampleMetrics(List<AccountMetricSnapshotEntity> points, int maxPoints) {
-        if (points.size() <= maxPoints || maxPoints <= 1) {
-            return points;
-        }
-        List<AccountMetricSnapshotEntity> result = new ArrayList<>(maxPoints + 1);
-        int step = (int) Math.ceil((double) points.size() / maxPoints);
-        for (int i = 0; i < points.size(); i += step) {
-            result.add(points.get(i));
-        }
-        AccountMetricSnapshotEntity last = points.get(points.size() - 1);
-        if (!result.get(result.size() - 1).equals(last)) {
-            result.add(last);
-        }
-        return result;
-    }
-
-    private AccountMetricPointResponse toMetricPointResponse(AccountMetricSnapshotEntity snapshot) {
-        return new AccountMetricPointResponse(
-                snapshot.getCollectedAt(),
-                snapshot.getBalance(),
-                snapshot.getFrozenBalance(),
-                snapshot.getQuota(),
-                snapshot.getUsedQuota(),
-                snapshot.getRequestCount(),
-                snapshot.getQuotaUnit());
-    }
-    private AccountResponse toAccountResponse(AccountEntity entity) {
-        AccountMetricSnapshotEntity snapshot = metricSnapshotRepository.findLatest(entity.getId()).orElse(null);
-        return new AccountResponse(
-                entity.getId(),
-                entity.getPlatformId(),
-                entity.getDisplayName(),
-                entity.getUsername(),
-                entity.getPlatform(),
-                entity.getAuthType(),
-                entity.getCredentialStatus(),
-                entity.getStatus(),
-                snapshot == null ? null : snapshot.getBalance(),
-                snapshot == null ? null : snapshot.getFrozenBalance(),
-                snapshot == null ? null : snapshot.getQuota(),
-                snapshot == null ? null : snapshot.getUsedQuota(),
-                snapshot == null ? null : snapshot.getQuotaUnit(),
-                snapshot == null ? null : snapshot.getRequestCount(),
-                entity.getLastCollectStatus(),
-                entity.getLastCollectedAt(),
-                entity.getNextCollectAt()
+                entity.getLastChangedAt(), json.read(entity.getMetrics())
         );
     }
 }
