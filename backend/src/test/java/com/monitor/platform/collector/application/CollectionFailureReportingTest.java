@@ -65,8 +65,10 @@ class CollectionFailureReportingTest {
                 platformRepository,
                 credentialService,
                 collectionRunRepository,
-                mock(AccountMetricSnapshotRepository.class),
-                mock(AccountUsageDashboardSnapshotRepository.class),
+                new AccountSnapshotWriter(
+                        mock(AccountMetricSnapshotRepository.class),
+                        mock(AccountUsageDashboardSnapshotRepository.class),
+                        new CollectionJson(new ObjectMapper())),
                 mock(UpstreamGroupRepository.class),
                 mock(UpstreamGroupSnapshotRepository.class),
                 mock(AccountApiKeyRepository.class),

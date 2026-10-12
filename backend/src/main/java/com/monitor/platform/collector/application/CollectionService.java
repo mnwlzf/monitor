@@ -15,11 +15,9 @@ import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.common.util.SecretMasker;
 import com.monitor.platform.common.util.Sha256Util;
-import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
 import com.monitor.platform.collector.repository.AccountApiKeySnapshotRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
-import com.monitor.platform.collector.repository.AccountUsageDashboardSnapshotRepository;
 import com.monitor.platform.collector.repository.CollectionRunRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.UpstreamGroupRepository;
@@ -27,8 +25,6 @@ import com.monitor.platform.collector.repository.UpstreamGroupSnapshotRepository
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.collector.repository.entity.AccountApiKeySnapshotEntity;
-import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity;
-import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.CollectionRunEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
@@ -40,7 +36,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -68,8 +63,6 @@ public class CollectionService {
 
     private static final Logger log = LoggerFactory.getLogger(CollectionService.class);
 
-    private static final String PLATFORM_NEW_API = "newapi";
-    private static final String PLATFORM_SUB2_API = "sub2api";
     private static final String COLLECT_STATUS_RUNNING = "RUNNING";
     private static final String COLLECT_STATUS_SUCCESS = "SUCCESS";
     private static final String COLLECT_STATUS_FAILED = "FAILED";
@@ -85,16 +78,13 @@ public class CollectionService {
     private static final int NEW_API_TOKEN_MAX_PAGES = 100;
     /** 采集成功后的默认下次采集间隔。 */
     private static final Duration DEFAULT_COLLECT_INTERVAL = Duration.ofMinutes(10);
-    /** New API 中 1 USD 对应的内部额度数量。 */
-    private static final BigDecimal NEW_API_QUOTA_PER_USD = BigDecimal.valueOf(500000L);
     private static final int MAX_ERROR_LENGTH = 2000;
 
     private final AccountRepository accountRepository;
     private final PlatformRepository platformRepository;
     private final AccountCredentialService credentialService;
     private final CollectionRunRepository collectionRunRepository;
-    private final AccountMetricSnapshotRepository metricSnapshotRepository;
-    private final AccountUsageDashboardSnapshotRepository usageDashboardRepository;
+    private final AccountSnapshotWriter snapshots;
     private final UpstreamGroupRepository groupRepository;
     private final UpstreamGroupSnapshotRepository groupSnapshotRepository;
     private final AccountApiKeyRepository apiKeyRepository;
@@ -110,8 +100,7 @@ public class CollectionService {
                              PlatformRepository platformRepository,
                              AccountCredentialService credentialService,
                              CollectionRunRepository collectionRunRepository,
-                             AccountMetricSnapshotRepository metricSnapshotRepository,
-                             AccountUsageDashboardSnapshotRepository usageDashboardRepository,
+                             AccountSnapshotWriter snapshots,
                              UpstreamGroupRepository groupRepository,
                              UpstreamGroupSnapshotRepository groupSnapshotRepository,
                              AccountApiKeyRepository apiKeyRepository,
@@ -126,8 +115,7 @@ public class CollectionService {
         this.platformRepository = platformRepository;
         this.credentialService = credentialService;
         this.collectionRunRepository = collectionRunRepository;
-        this.metricSnapshotRepository = metricSnapshotRepository;
-        this.usageDashboardRepository = usageDashboardRepository;
+        this.snapshots = snapshots;
         this.groupRepository = groupRepository;
         this.groupSnapshotRepository = groupSnapshotRepository;
         this.apiKeyRepository = apiKeyRepository;
@@ -312,9 +300,9 @@ public class CollectionService {
         long startedMillis = System.currentTimeMillis();
 
         try {
-            if (PLATFORM_NEW_API.equalsIgnoreCase(platformType)) {
+            if (CollectionPlatforms.NEW_API.equalsIgnoreCase(platformType)) {
                 collectNewApi(account, platform, run.getId(), effectiveScope);
-            } else if (PLATFORM_SUB2_API.equalsIgnoreCase(platformType)) {
+            } else if (CollectionPlatforms.SUB2_API.equalsIgnoreCase(platformType)) {
                 collectSub2Api(account, platform, run.getId(), effectiveScope);
             } else {
                 throw new IllegalArgumentException("不支持的平台类型: " + platformType);
@@ -345,7 +333,7 @@ public class CollectionService {
                     OffsetDateTime.now(),
                     durationMs,
                     "COLLECTION_FAILED",
-                    truncate(ex.getMessage(), MAX_ERROR_LENGTH)
+                    CollectionValues.truncate(ex.getMessage(), MAX_ERROR_LENGTH)
             );
             log.error("账号采集失败: accountId={}, runId={}, scope={}, durationMs={}",
                     accountId, run.getId(), effectiveScope, durationMs, ex);
@@ -380,8 +368,8 @@ public class CollectionService {
                 account.getId(), baseUrl, username);
 
         NewApiSelfResponse selfResponse = newApiAdapter.fetchSelf(baseUrl, username, password);
-        saveNewApiMetric(account, collectionRunId, selfResponse);
-        saveNewApiUsageDashboard(account, collectionRunId, selfResponse);
+        snapshots.saveNewApiMetric(account, collectionRunId, selfResponse);
+        snapshots.saveNewApiUsageDashboard(account, collectionRunId, selfResponse);
         log.info("New API 余额采集成功: accountId={}, userId={}, quota={}, usedQuota={}",
                 account.getId(), selfResponse.data().id(), selfResponse.data().quota(), selfResponse.data().usedQuota());
         if (selfResponse.data().id() != null) {
@@ -472,7 +460,7 @@ public class CollectionService {
         if (profileResponse.data() == null) {
             throw new IllegalStateException("Sub2API 个人信息响应缺少 data");
         }
-        saveSub2Metric(account, collectionRunId, profileResponse);
+        snapshots.saveSub2Metric(account, collectionRunId, profileResponse);
         log.info("Sub2API 余额采集成功: accountId={}, userId={}, balance={}, frozenBalance={}",
                 account.getId(), profileResponse.data().id(),
                 profileResponse.data().balance(), profileResponse.data().frozenBalance());
@@ -482,7 +470,7 @@ public class CollectionService {
 
         Sub2UsageDashboardResponse usageResponse =
                 sub2ApiAdapter.fetchUsageDashboardStats(baseUrl, email, password);
-        saveSub2UsageDashboard(account, collectionRunId, profileResponse, usageResponse);
+        snapshots.saveSub2UsageDashboard(account, collectionRunId, profileResponse, usageResponse);
     }
 
     /**
@@ -510,149 +498,6 @@ public class CollectionService {
         syncSub2ApiApiKeys(account, platform.getPlatformType(), collectionRunId, baseUrl, email, password);
     }
 
-    private void saveNewApiMetric(AccountEntity account, Long collectionRunId,
-                                  NewApiSelfResponse response) {
-        NewApiUser user = response.data();
-        String rawData = json.toJson(response);
-        BigDecimal quota = decimal(user.quota());
-        BigDecimal balance = newApiUsd(user.quota());
-
-        AccountMetricSnapshotEntity snapshot = new AccountMetricSnapshotEntity();
-        snapshot.setAccountId(account.getId());
-        snapshot.setCollectionRunId(collectionRunId);
-        snapshot.setPlatformType(PLATFORM_NEW_API);
-        snapshot.setBalance(balance);
-        snapshot.setQuota(quota);
-        snapshot.setUsedQuota(decimal(user.usedQuota()));
-        snapshot.setAffQuota(decimal(user.affQuota()));
-        snapshot.setAffHistoryQuota(decimal(user.affHistoryQuota()));
-        snapshot.setRequestCount(user.requestCount());
-        snapshot.setQuotaUnit("USD");
-        snapshot.setRawData(rawData);
-        snapshot.setContentHash(Sha256Util.hex(rawData));
-        metricSnapshotRepository.save(snapshot);
-    }
-
-    private void saveSub2Metric(AccountEntity account, Long collectionRunId,
-                                Sub2ProfileResponse response) {
-        Sub2ProfileResponse.UserProfile user = response.data();
-        String rawData = json.toJson(response);
-
-        AccountMetricSnapshotEntity snapshot = new AccountMetricSnapshotEntity();
-        snapshot.setAccountId(account.getId());
-        snapshot.setCollectionRunId(collectionRunId);
-        snapshot.setPlatformType(PLATFORM_SUB2_API);
-        snapshot.setBalance(decimal(user.balance()));
-        snapshot.setFrozenBalance(decimal(user.frozenBalance()));
-        snapshot.setQuotaUnit("USD");
-        snapshot.setRawData(rawData);
-        snapshot.setContentHash(Sha256Util.hex(rawData));
-        metricSnapshotRepository.save(snapshot);
-    }
-
-    /**
-     * 写入 New API 用量看板快照。
-     *
-     * <p>New API 只提供累计请求数与额度消耗，token 明细、今日统计、速率等字段留空，
-     * 由前端按空值降级展示。</p>
-     */
-    private void saveNewApiUsageDashboard(AccountEntity account, Long collectionRunId,
-                                          NewApiSelfResponse response) {
-        NewApiUser user = response.data();
-        BigDecimal usedCost = newApiUsd(user.usedQuota());
-
-        AccountUsageDashboardSnapshotEntity snapshot = new AccountUsageDashboardSnapshotEntity();
-        snapshot.setAccountId(account.getId());
-        snapshot.setCollectionRunId(collectionRunId);
-        snapshot.setPlatformType(PLATFORM_NEW_API);
-        snapshot.setBalance(newApiUsd(user.quota()));
-        snapshot.setTotalRequests(user.requestCount());
-        snapshot.setTotalCost(usedCost);
-        snapshot.setTotalActualCost(usedCost);
-        snapshot.setMetrics(json.toJson(newApiUsageMetrics(user)));
-        snapshot.setPlatformStats("[]");
-        snapshot.setRawData(json.toJson(response));
-        usageDashboardRepository.save(snapshot);
-    }
-
-    /**
-     * 写入 Sub2API 用量看板快照。
-     *
-     * <p>看板响应中的 token 明细、今日统计、速率等平台特有指标写入 metrics，
-     * 公共指标保持强类型列，便于跨平台统一查询。</p>
-     */
-    private void saveSub2UsageDashboard(AccountEntity account, Long collectionRunId,
-                                        Sub2ProfileResponse profileResponse,
-                                        Sub2UsageDashboardResponse response) {
-        if (response.data() == null) {
-            throw new IllegalStateException("Sub2API 用量看板响应缺少 data");
-        }
-        Sub2ProfileResponse.UserProfile profile = profileResponse.data();
-        Sub2UsageDashboardResponse.DashboardStats stats = response.data();
-
-        AccountUsageDashboardSnapshotEntity snapshot = new AccountUsageDashboardSnapshotEntity();
-        snapshot.setAccountId(account.getId());
-        snapshot.setCollectionRunId(collectionRunId);
-        snapshot.setPlatformType(PLATFORM_SUB2_API);
-        snapshot.setBalance(decimal(profile.balance()));
-        snapshot.setFrozenBalance(decimal(profile.frozenBalance()));
-        snapshot.setTotalRequests(stats.totalRequests());
-        snapshot.setTotalTokens(stats.totalTokens());
-        snapshot.setTotalCost(stats.totalCost());
-        snapshot.setTotalActualCost(stats.totalActualCost());
-        snapshot.setMetrics(json.toJson(sub2UsageMetrics(stats)));
-        snapshot.setPlatformStats(json.toJson(stats.byPlatform() == null ? List.of() : stats.byPlatform()));
-        snapshot.setRawData(json.toJson(response));
-        usageDashboardRepository.save(snapshot);
-    }
-
-    /**
-     * New API 平台特有明细。额度保留上游原始 quota，quota_per_usd 供前端换算。
-     */
-    private Map<String, Object> newApiUsageMetrics(NewApiUser user) {
-        Map<String, Object> metrics = new LinkedHashMap<>();
-        metrics.put("quota", user.quota());
-        metrics.put("used_quota", user.usedQuota());
-        metrics.put("aff_quota", user.affQuota());
-        metrics.put("aff_history_quota", user.affHistoryQuota());
-        metrics.put("quota_unit", "USD");
-        metrics.put("quota_per_usd", NEW_API_QUOTA_PER_USD);
-        return metrics;
-    }
-
-    /**
-     * Sub2API 平台特有明细。
-     */
-    private Map<String, Object> sub2UsageMetrics(Sub2UsageDashboardResponse.DashboardStats stats) {
-        Map<String, Object> metrics = new LinkedHashMap<>();
-        metrics.put("total_api_keys", stats.totalApiKeys());
-        metrics.put("active_api_keys", stats.activeApiKeys());
-        metrics.put("total_input_tokens", stats.totalInputTokens());
-        metrics.put("total_output_tokens", stats.totalOutputTokens());
-        metrics.put("total_cache_creation_tokens", stats.totalCacheCreationTokens());
-        metrics.put("total_cache_read_tokens", stats.totalCacheReadTokens());
-        metrics.put("today_requests", stats.todayRequests());
-        metrics.put("today_input_tokens", stats.todayInputTokens());
-        metrics.put("today_output_tokens", stats.todayOutputTokens());
-        metrics.put("today_cache_creation_tokens", stats.todayCacheCreationTokens());
-        metrics.put("today_cache_read_tokens", stats.todayCacheReadTokens());
-        metrics.put("today_tokens", stats.todayTokens());
-        metrics.put("today_cost", stats.todayCost());
-        metrics.put("today_actual_cost", stats.todayActualCost());
-        metrics.put("average_duration_ms", stats.averageDurationMs());
-        metrics.put("rpm", stats.rpm());
-        metrics.put("tpm", stats.tpm());
-        return metrics;
-    }
-
-    /**
-     * 将 New API 原始 quota 换算为 USD，为空时返回 null。
-     */
-    private BigDecimal newApiUsd(Long quota) {
-        BigDecimal value = decimal(quota);
-        return value == null ? null : value.divide(NEW_API_QUOTA_PER_USD, 8, RoundingMode.HALF_UP);
-    }
-
     private void syncNewApiGroups(AccountEntity account, String platformType,
                                   Long collectionRunId, NewApiGroupsResponse response) {
         if (response.data() == null) {
@@ -676,8 +521,8 @@ public class CollectionService {
                 entity = newGroup(account, platformType, externalGroupId, now);
             }
 
-            BigDecimal ratio = decimal(group.ratio());
-            BigDecimal baseRatio = decimal(group.baseRatio());
+            BigDecimal ratio = CollectionValues.decimal(group.ratio());
+            BigDecimal baseRatio = CollectionValues.decimal(group.baseRatio());
             String status = Boolean.TRUE.equals(group.scheduleActive()) ? "SCHEDULE_ACTIVE" : "ACTIVE";
             String rawData = json.toJson(group);
             boolean changed = isNew;
@@ -739,7 +584,7 @@ public class CollectionService {
                 entity = newGroup(account, platformType, externalGroupId, now);
             }
 
-            BigDecimal ratio = decimal(group.rateMultiplier());
+            BigDecimal ratio = CollectionValues.decimal(group.rateMultiplier());
             String rawData = json.toJson(group);
             boolean changed = isNew;
 
@@ -844,12 +689,12 @@ public class CollectionService {
                                        BigDecimal baseRatio, String status,
                                        String groupName, String platform, String description) {
         boolean changed = false;
-        if (different(entity.getCurrentRatio(), ratio)) {
+        if (CollectionValues.different(entity.getCurrentRatio(), ratio)) {
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.RATE_CHANGED,
                     "ratio", entity.getCurrentRatio(), ratio, "倍率变化: " + externalGroupId);
             changed = true;
         }
-        if (different(entity.getCurrentBaseRatio(), baseRatio)) {
+        if (CollectionValues.different(entity.getCurrentBaseRatio(), baseRatio)) {
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.BASE_RATE_CHANGED,
                     "base_ratio", entity.getCurrentBaseRatio(), baseRatio,
                     "基础倍率变化: " + externalGroupId);
@@ -938,8 +783,8 @@ public class CollectionService {
                     fetchNewApiFullKey(baseUrl, username, password, item.id()));
 
             String status = normalizeNewApiTokenStatus(item.status());
-            BigDecimal remainQuota = newApiUsd(item.remainQuota());
-            BigDecimal usedQuota = newApiUsd(item.usedQuota());
+            BigDecimal remainQuota = CollectionValues.newApiUsd(item.remainQuota());
+            BigDecimal usedQuota = CollectionValues.newApiUsd(item.usedQuota());
             boolean changed = isNew || rotated;
             if (!isNew) {
                 changed = recordApiKeyChanges(account, platformType, collectionRunId, entity,
@@ -1309,7 +1154,7 @@ public class CollectionService {
         metrics.put("user_id", item.userId());
         metrics.put("remain_quota_raw", item.remainQuota());
         metrics.put("used_quota_raw", item.usedQuota());
-        metrics.put("quota_per_usd", NEW_API_QUOTA_PER_USD);
+        metrics.put("quota_per_usd", CollectionValues.newApiQuotaPerUsd());
         metrics.put("cross_group_retry", item.crossGroupRetry());
         metrics.put("group_route_config", item.groupRouteConfig());
         metrics.put("group_route_sticky", item.groupRouteSticky());
@@ -1399,43 +1244,9 @@ public class CollectionService {
         OffsetDateTime now = OffsetDateTime.now();
 
         account.setLastCollectStatus(COLLECT_STATUS_FAILED);
-        account.setLastCollectError(truncate(ex.getMessage(), MAX_ERROR_LENGTH));
+        account.setLastCollectError(CollectionValues.truncate(ex.getMessage(), MAX_ERROR_LENGTH));
         account.setConsecutiveFailures(failures);
         account.setNextCollectAt(now.plusMinutes(Math.min(60, failures * 5L)));
         accountRepository.save(account);
-    }
-
-    /**
-     * 将 Long 型上游额度安全转换为 BigDecimal。
-     */
-    private BigDecimal decimal(Long value) {
-        return value == null ? null : BigDecimal.valueOf(value);
-    }
-
-    /**
-     * 将 Double 型上游金额安全转换为 BigDecimal。
-     */
-    private BigDecimal decimal(Double value) {
-        return value == null ? null : BigDecimal.valueOf(value);
-    }
-
-    /**
-     * 使用数值比较判断两个 BigDecimal 是否不同，避免 1.0 与 1.00 被误判。
-     */
-    private boolean different(BigDecimal left, BigDecimal right) {
-        if (left == null || right == null) {
-            return left != right;
-        }
-        return left.compareTo(right) != 0;
-    }
-
-    /**
-     * 截断过长的错误信息，避免超过数据库字段长度。
-     */
-    private String truncate(String value, int maxLength) {
-        if (value == null || value.length() <= maxLength) {
-            return value;
-        }
-        return value.substring(0, maxLength);
     }
 }
