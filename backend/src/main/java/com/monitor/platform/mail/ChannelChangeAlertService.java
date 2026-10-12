@@ -1,21 +1,15 @@
 package com.monitor.platform.mail;
 
-import com.monitor.platform.collector.repository.AccountRepository;
-import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
-import com.monitor.platform.collector.repository.entity.AccountEntity;
-import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
-import org.springframework.web.util.HtmlUtils;
 
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,9 +39,6 @@ public class ChannelChangeAlertService {
     /** 单封邮件最多包含的变更条数，防止异常数据把邮件撑爆。 */
     private static final int MAX_EVENTS = 200;
 
-    private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
     private static final String SUMMARY_SYSTEM_PROMPT = """
             你是运维助手，负责把上游渠道的变更记录总结成给运维看的中文邮件正文。
             要求：
@@ -58,23 +49,20 @@ public class ChannelChangeAlertService {
             """;
 
     private final UpstreamChangeEventRepository changeEventRepository;
-    private final AccountRepository accountRepository;
-    private final PlatformRepository platformRepository;
+    private final AccountNameResolver accountNameResolver;
     private final MailRecipientRepository mailRecipientRepository;
     private final SmtpConfigProvider smtpConfigProvider;
     private final MailService mailService;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
     public ChannelChangeAlertService(UpstreamChangeEventRepository changeEventRepository,
-                                     AccountRepository accountRepository,
-                                     PlatformRepository platformRepository,
+                                     AccountNameResolver accountNameResolver,
                                      MailRecipientRepository mailRecipientRepository,
                                      SmtpConfigProvider smtpConfigProvider,
                                      MailService mailService,
                                      ObjectProvider<ChatClient.Builder> chatClientBuilder) {
         this.changeEventRepository = changeEventRepository;
-        this.accountRepository = accountRepository;
-        this.platformRepository = platformRepository;
+        this.accountNameResolver = accountNameResolver;
         this.mailRecipientRepository = mailRecipientRepository;
         this.smtpConfigProvider = smtpConfigProvider;
         this.mailService = mailService;
@@ -115,7 +103,7 @@ public class ChannelChangeAlertService {
      */
     public void sendDailyDigest() {
         try {
-            OffsetDateTime to = OffsetDateTime.now(REPORT_ZONE);
+            OffsetDateTime to = OffsetDateTime.now(BusinessTime.ZONE);
             OffsetDateTime from = to.minusDays(1);
             List<UpstreamChangeEventEntity> events =
                     changeEventRepository.findGroupEventsBetween(from, to, false, MAX_EVENTS);
@@ -176,7 +164,7 @@ public class ChannelChangeAlertService {
             if (answer == null || answer.isBlank()) {
                 return null;
             }
-            return escape(answer.trim()).replace("\n", "<br>");
+            return MailFormat.escape(answer.trim()).replace("\n", "<br>");
         } catch (Exception ex) {
             log.warn("渠道变更总结失败，将退回原始明细: {}", ex.getMessage());
             return null;
@@ -187,12 +175,12 @@ public class ChannelChangeAlertService {
     private String rawLines(List<UpstreamChangeEventEntity> events, Map<Integer, String> accountNames) {
         StringBuilder sb = new StringBuilder();
         for (UpstreamChangeEventEntity event : events) {
-            sb.append("- ").append(formatTime(event.getDetectedAt()))
-                    .append(' ').append(accountName(event.getAccountId(), accountNames))
+            sb.append("- ").append(MailFormat.formatTime(event.getDetectedAt()))
+                    .append(' ').append(accountNameResolver.accountName(event.getAccountId(), accountNames))
                     .append(" 渠道=").append(channelName(event))
                     .append(' ').append(event.getMessage() == null ? event.getChangeType() : event.getMessage());
-            String before = scalar(event.getOldValue());
-            String after = scalar(event.getNewValue());
+            String before = MailFormat.scalar(event.getOldValue());
+            String after = MailFormat.scalar(event.getNewValue());
             if (before != null || after != null) {
                 sb.append("（").append(before == null ? "?" : before)
                         .append(" -> ").append(after == null ? "?" : after).append("）");
@@ -231,12 +219,14 @@ public class ChannelChangeAlertService {
                 .append("</tr>");
         for (UpstreamChangeEventEntity event : events) {
             html.append("<tr>")
-                    .append("<td>").append(formatTime(event.getDetectedAt())).append("</td>")
-                    .append("<td>").append(escape(platformName(event.getAccountId(), platformNames))).append("</td>")
-                    .append("<td>").append(escape(accountName(event.getAccountId(), accountNames))).append("</td>")
-                    .append("<td>").append(escape(channelName(event))).append("</td>")
-                    .append("<td>").append(escape(severityLabel(event.getSeverity()))).append("</td>")
-                    .append("<td>").append(escape(changeLabel(event.getChangeType()))).append("</td>")
+                    .append("<td>").append(MailFormat.formatTime(event.getDetectedAt())).append("</td>")
+                    .append("<td>").append(MailFormat.escape(
+                            accountNameResolver.platformName(event.getAccountId(), platformNames))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(
+                            accountNameResolver.accountName(event.getAccountId(), accountNames))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(channelName(event))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(severityLabel(event.getSeverity()))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(changeLabel(event.getChangeType()))).append("</td>")
                     .append("<td>").append(changeDescription(event)).append("</td>")
                     .append("</tr>");
         }
@@ -251,14 +241,16 @@ public class ChannelChangeAlertService {
             return event.getGroupName();
         }
         return event.getEntityKey() == null ? "-" : event.getEntityKey();
-    }    /** 变化列：标量变化展示「旧值 → 新值」，整块 JSON 只给结论。 */
+    }
+
+    /** 变化列：标量变化展示「旧值 → 新值」，整块 JSON 只给结论。 */
     private String changeDescription(UpstreamChangeEventEntity event) {
-        String before = scalar(event.getOldValue());
-        String after = scalar(event.getNewValue());
+        String before = MailFormat.scalar(event.getOldValue());
+        String after = MailFormat.scalar(event.getNewValue());
         if (before == null || after == null || before.startsWith("{") || before.startsWith("[")) {
-            return escape(event.getMessage());
+            return MailFormat.escape(event.getMessage());
         }
-        return escape(before) + " → " + escape(after);
+        return MailFormat.escape(before) + " → " + MailFormat.escape(after);
     }
 
     private String severityLabel(String severity) {
@@ -278,58 +270,5 @@ public class ChannelChangeAlertService {
             case "GROUP_UPDATED" -> "渠道更新";
             default -> changeType;
         };
-    }
-
-    private String platformName(Integer accountId, Map<Integer, String> platformNames) {
-        if (accountId == null) {
-            return "未知平台";
-        }
-        return platformNames.computeIfAbsent(accountId, id -> accountRepository.findById(id)
-                .map(AccountEntity::getPlatformId)
-                .flatMap(platformRepository::findById)
-                .map(PlatformEntity::getPlatformName)
-                .orElse("未知平台"));
-    }
-
-    private String accountName(Integer accountId, Map<Integer, String> accountNames) {
-        if (accountId == null) {
-            return "未知账号";
-        }
-        return accountNames.computeIfAbsent(accountId, id -> accountRepository.findById(id)
-                .map(this::displayName)
-                .orElse("账号 " + id));
-    }
-
-    private String displayName(AccountEntity account) {
-        if (account.getDisplayName() != null && !account.getDisplayName().isBlank()) {
-            return account.getDisplayName();
-        }
-        if (account.getUsername() != null && !account.getUsername().isBlank()) {
-            return account.getUsername();
-        }
-        return "账号 " + account.getId();
-    }
-
-    /** 变更事件里存的是 JSON 文本，字符串会带引号，这里去掉引号便于阅读。 */
-    private String scalar(String jsonValue) {
-        if (jsonValue == null) {
-            return null;
-        }
-        String text = jsonValue.trim();
-        if (text.isEmpty() || "null".equals(text)) {
-            return null;
-        }
-        if (text.length() >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
-            text = text.substring(1, text.length() - 1);
-        }
-        return text;
-    }
-
-    private String formatTime(OffsetDateTime time) {
-        return time == null ? "—" : TIME_FORMATTER.format(time.atZoneSameInstant(REPORT_ZONE));
-    }
-
-    private String escape(String value) {
-        return value == null ? "" : HtmlUtils.htmlEscape(value);
     }
 }

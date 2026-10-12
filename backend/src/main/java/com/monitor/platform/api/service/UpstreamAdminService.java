@@ -32,6 +32,7 @@ import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.security.CredentialCipher;
 import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -69,7 +70,7 @@ public class UpstreamAdminService {
     private static final String PLATFORM_NEW_API = "newapi";
 
     /** 日统计所属时区，与上游采集口径保持一致。 */
-    private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId REPORT_ZONE = BusinessTime.ZONE;
 
     private final PlatformRepository platformRepository;
     private final AccountRepository accountRepository;

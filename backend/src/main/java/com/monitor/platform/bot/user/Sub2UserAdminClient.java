@@ -2,6 +2,7 @@ package com.monitor.platform.bot.user;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.common.time.BusinessTime;
 import com.monitor.platform.config.RestClientConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,8 +47,7 @@ public class Sub2UserAdminClient {
     private static final String USERS_PATH = "/api/v1/admin/users";
     private static final String USAGE_STATS_PATH = "/api/v1/admin/usage/stats";
     private static final String API_KEY_HEADER = "x-api-key";
-    private static final String TIMEZONE = "Asia/Shanghai";
-    private static final ZoneId ZONE = ZoneId.of(TIMEZONE);
+    private static final ZoneId ZONE = BusinessTime.ZONE;
     private static final int MAX_ERROR_LENGTH = 300;
     /** 搜索用户时返回的候选条数上限。 */
     private static final int SEARCH_PAGE_SIZE = 20;
@@ -101,7 +101,7 @@ public class Sub2UserAdminClient {
     public Sub2AdminUsageStats fetchUsageStats(String baseUrl, String adminKey, long userId, String period) {
         JsonNode data = execute(() -> restClient.get()
                 .uri(baseUrl + USAGE_STATS_PATH + "?user_id={id}&period={period}&timezone={tz}",
-                        userId, period, TIMEZONE)
+                        userId, period, BusinessTime.ZONE_ID)
                 .header(API_KEY_HEADER, adminKey)
                 .retrieve()
                 .body(JsonNode.class), "查询用户用量");

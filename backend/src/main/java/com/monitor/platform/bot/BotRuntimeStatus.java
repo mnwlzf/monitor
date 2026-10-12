@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import com.monitor.platform.common.time.BusinessTime;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -31,7 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @Component
 public class BotRuntimeStatus {
 
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
 
     /** 一段对话内容最多留这么多字符（问与答各自截断）。 */
     private static final int MAX_TEXT = 200;

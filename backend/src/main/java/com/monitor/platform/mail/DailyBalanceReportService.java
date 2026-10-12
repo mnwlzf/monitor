@@ -6,16 +6,15 @@ import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.util.HtmlUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -39,7 +38,6 @@ import java.util.stream.Collectors;
 public class DailyBalanceReportService {
 
     private static final Logger log = LoggerFactory.getLogger(DailyBalanceReportService.class);
-    private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final PlatformRepository platformRepository;
     private final AccountRepository accountRepository;
@@ -67,9 +65,9 @@ public class DailyBalanceReportService {
      */
     public void sendDailyReport() {
         try {
-            LocalDate reportDate = LocalDate.now(REPORT_ZONE).minusDays(1);
-            OffsetDateTime from = reportDate.atStartOfDay(REPORT_ZONE).toOffsetDateTime();
-            OffsetDateTime to = reportDate.plusDays(1).atStartOfDay(REPORT_ZONE).toOffsetDateTime();
+            LocalDate reportDate = LocalDate.now(BusinessTime.ZONE).minusDays(1);
+            OffsetDateTime from = reportDate.atStartOfDay(BusinessTime.ZONE).toOffsetDateTime();
+            OffsetDateTime to = reportDate.plusDays(1).atStartOfDay(BusinessTime.ZONE).toOffsetDateTime();
 
             List<PlatformReport> reports = buildReports(from, to);
             if (reports.isEmpty()) {
@@ -140,7 +138,7 @@ public class DailyBalanceReportService {
                     subtotal = subtotal.add(value);
                     hasValue = true;
                 }
-                rows.add(new AccountReport(displayName(account), value, balances.get(account.getId())));
+                rows.add(new AccountReport(MailFormat.displayName(account), value, balances.get(account.getId())));
             }
             reports.add(new PlatformReport(platform.getPlatformName(), rows, hasValue ? subtotal : null));
         }
@@ -186,16 +184,6 @@ public class DailyBalanceReportService {
         return snapshot.getTotalActualCost() != null ? snapshot.getTotalActualCost() : snapshot.getTotalCost();
     }
 
-    private String displayName(AccountEntity account) {
-        if (account.getDisplayName() != null && !account.getDisplayName().isBlank()) {
-            return account.getDisplayName();
-        }
-        if (account.getUsername() != null && !account.getUsername().isBlank()) {
-            return account.getUsername();
-        }
-        return "账号 " + account.getId();
-    }
-
     private String buildSubject(LocalDate reportDate) {
         return "[Monitor] 昨日余额消耗报表（" + reportDate + "）";
     }
@@ -214,14 +202,14 @@ public class DailyBalanceReportService {
         for (PlatformReport platform : reports) {
             for (AccountReport account : platform.accounts()) {
                 html.append("<tr>")
-                        .append("<td>").append(escape(platform.platformName())).append("</td>")
-                        .append("<td>").append(escape(account.accountName())).append("</td>")
+                        .append("<td>").append(MailFormat.escape(platform.platformName())).append("</td>")
+                        .append("<td>").append(MailFormat.escape(account.accountName())).append("</td>")
                         .append("<td align=\"right\">").append(money(account.consumption(), 4)).append("</td>")
                         .append("<td align=\"right\">").append(money(account.balance(), 2)).append("</td>")
                         .append("</tr>");
             }
             html.append("<tr style=\"background:#fafafa;font-weight:600\">")
-                    .append("<td colspan=\"2\">").append(escape(platform.platformName())).append(" 合计</td>")
+                    .append("<td colspan=\"2\">").append(MailFormat.escape(platform.platformName())).append(" 合计</td>")
                     .append("<td align=\"right\">").append(money(platform.total(), 4)).append("</td>")
                     .append("<td></td>")
                     .append("</tr>");
@@ -236,10 +224,6 @@ public class DailyBalanceReportService {
             return "—";
         }
         return "$" + value.setScale(scale, RoundingMode.HALF_UP).toPlainString();
-    }
-
-    private String escape(String value) {
-        return value == null ? "" : HtmlUtils.htmlEscape(value);
     }
 
     /** 单个账号的昨日消耗与当前余额。 */

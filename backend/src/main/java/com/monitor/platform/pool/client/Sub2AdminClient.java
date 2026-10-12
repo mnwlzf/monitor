@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.config.RestClientConfig;
 import com.monitor.platform.pool.PoolAccountTypes;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -45,7 +46,7 @@ public class Sub2AdminClient {
     private static final String API_KEY_HEADER = "x-api-key";
     /** 只拉取 API Key 类型的号池账号，其他类型（oauth 等）不参与监控。 */
     private static final String ACCOUNT_TYPE_FILTER = PoolAccountTypes.API_KEY;
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
     private static final String[] ARRAY_KEYS = {"items", "list", "records", "rows", "accounts", "results", "data"};
     private static final int MAX_ERROR_LENGTH = 300;
 

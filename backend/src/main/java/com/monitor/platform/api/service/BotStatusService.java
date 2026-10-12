@@ -8,6 +8,7 @@ import com.monitor.platform.bot.BotSettingsService;
 import com.monitor.platform.bot.image.ImageGenProperties;
 import com.monitor.platform.bot.image.ImageGenService;
 import com.monitor.platform.bot.onebot.OneBotClient;
+import com.monitor.platform.common.time.BusinessTime;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -24,7 +25,7 @@ import java.util.List;
 @Service
 public class BotStatusService {
 
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
 
     private final BotRuntimeStatus runtimeStatus;
     private final BotSettingsService settingsService;

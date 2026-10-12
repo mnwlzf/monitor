@@ -3,6 +3,7 @@ package com.monitor.platform.bot.usage;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.usage.Sub2UserUsageReader.UserConsumption;
 import com.monitor.platform.bot.usage.Sub2UserUsageReader.UsageSummary;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
@@ -32,7 +33,7 @@ public class BotUsageTools {
     private static final Logger log = LoggerFactory.getLogger(BotUsageTools.class);
 
     /** 业务时区，与只读库读取侧保持一致。 */
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
 
     /** 明细默认条数 / 上限。 */
     public static final int DEFAULT_LIMIT = 30;

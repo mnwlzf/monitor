@@ -5,6 +5,7 @@ import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.pool.PoolAdminKeyResolver;
+import com.monitor.platform.common.time.BusinessTime;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -29,7 +30,7 @@ import java.util.Optional;
 @Service
 public class BotUserService {
 
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("MM-dd HH:mm");
     /** 密钥列表单次最多拉取的条数。 */
     private static final int API_KEY_PAGE_SIZE = 50;

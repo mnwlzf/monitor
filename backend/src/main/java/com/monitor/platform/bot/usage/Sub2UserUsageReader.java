@@ -1,12 +1,6 @@
 package com.monitor.platform.bot.usage;
 
-import com.monitor.platform.pool.ingest.PoolIngestProperties;
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
-import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.monitor.platform.pool.ingest.Sub2ReadOnlyJdbc;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
@@ -28,17 +22,14 @@ import java.util.List;
  * <p>取数用的列都是 {@code 001_init.sql} / {@code 005_schema_parity.sql} 就有的，
  * 不碰后续迁移新增的列，避免部署版本没跑到那些迁移时报列不存在。</p>
  *
- * <p>复用 {@link PoolIngestProperties} 里已经配好的只读连接信息，但<strong>不依赖 {@code enabled} 开关</strong>；
- * 自己持有一个只读连接池——与 {@code Sub2ApiUsageLogReader} / {@code Sub2PaymentOrderReader}
- * 各持一个池是同样的取舍：功能开关互相独立，共用池就要把生命周期抽成第三个 Bean，收益不抵复杂度。</p>
+ * <p>复用 {@code monitor.pool.ingest.*} 里已经配好的只读连接信息，但<strong>不依赖 {@code enabled} 开关</strong>；
+ * 连接池统一由 {@link Sub2ReadOnlyJdbc} 提供，这里只负责取数。</p>
  *
  * <p>需要上游给只读账号授权：{@code usage_logs}（号池增量采集已经在用）。
  * 关联用户信息还需要 {@code public.users}，见 {@code GRANT SELECT ON public.users TO monitor_ro;}。</p>
  */
 @Component
 public class Sub2UserUsageReader {
-
-    private static final Logger log = LoggerFactory.getLogger(Sub2UserUsageReader.class);
 
     /** 按用户聚合余额消耗，按实际消耗倒序。 */
     private static final String SELECT_BY_USER = """
@@ -87,23 +78,20 @@ public class Sub2UserUsageReader {
             rs.getBigDecimal("actual_cost")
     );
 
-    private final PoolIngestProperties properties;
+    private final Sub2ReadOnlyJdbc jdbc;
 
-    /** 只读连接池，懒初始化。 */
-    private volatile HikariDataSource dataSource;
-
-    public Sub2UserUsageReader(PoolIngestProperties properties) {
-        this.properties = properties;
+    public Sub2UserUsageReader(Sub2ReadOnlyJdbc jdbc) {
+        this.jdbc = jdbc;
     }
 
     /** 是否配置了可用的只读库连接（不看增量采集开关）。 */
     public boolean isAvailable() {
-        return properties.hasConnection();
+        return jdbc.hasConnection();
     }
 
     /** 指定时间窗内按用户聚合的余额消耗，按实际消耗倒序，最多 {@code limit} 行。 */
     public List<UserConsumption> byUser(OffsetDateTime from, OffsetDateTime to, int limit) {
-        return template().query(connection -> {
+        return jdbc.template().query(connection -> {
             var statement = connection.prepareStatement(SELECT_BY_USER);
             statement.setObject(1, from);
             statement.setObject(2, to);
@@ -114,7 +102,7 @@ public class Sub2UserUsageReader {
 
     /** 指定时间窗的汇总（不受明细条数上限影响）。 */
     public UsageSummary summarise(OffsetDateTime from, OffsetDateTime to) {
-        List<UsageSummary> rows = template().query(connection -> {
+        List<UsageSummary> rows = jdbc.template().query(connection -> {
             var statement = connection.prepareStatement(SELECT_SUMMARY);
             statement.setObject(1, from);
             statement.setObject(2, to);
@@ -128,54 +116,6 @@ public class Sub2UserUsageReader {
         return rows.isEmpty()
                 ? new UsageSummary(0L, 0L, BigDecimal.ZERO, BigDecimal.ZERO)
                 : rows.get(0);
-    }
-
-    /**
-     * 懒创建只读连接池。
-     *
-     * <p>池化失败不 fail-fast：上游库临时不可达时只在查询处报错，不影响 monitor 启动。</p>
-     */
-    private JdbcTemplate template() {
-        HikariDataSource current = dataSource;
-        if (current == null) {
-            synchronized (this) {
-                current = dataSource;
-                if (current == null) {
-                    current = createDataSource();
-                    dataSource = current;
-                }
-            }
-        }
-        JdbcTemplate jdbcTemplate = new JdbcTemplate(current);
-        jdbcTemplate.setQueryTimeout(Math.max(1, (int) properties.getQueryTimeout().toSeconds()));
-        return jdbcTemplate;
-    }
-
-    private HikariDataSource createDataSource() {
-        HikariConfig config = new HikariConfig();
-        config.setPoolName("sub2api-usage-ro");
-        config.setJdbcUrl(properties.getUrl());
-        config.setUsername(properties.getUsername());
-        config.setPassword(properties.getPassword());
-        config.setMaximumPoolSize(2);
-        config.setMinimumIdle(1);
-        // 只读双保险：连接池 readOnly + 上游给只读角色
-        config.setReadOnly(true);
-        config.setAutoCommit(true);
-        config.setConnectionTimeout(properties.getConnectTimeout().toMillis());
-        config.setInitializationFailTimeout(-1);
-        log.info("初始化 Sub2API 用量只读数据源: url={}", properties.getUrl());
-        return new HikariDataSource(config);
-    }
-
-    @PreDestroy
-    public void close() {
-        HikariDataSource current = dataSource;
-        if (current != null) {
-            current.close();
-            dataSource = null;
-            log.info("已关闭 Sub2API 用量只读数据源");
-        }
     }
 
     /** 单个用户在时间窗内的余额消耗。 */

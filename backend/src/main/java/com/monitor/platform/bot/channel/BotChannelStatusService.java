@@ -2,6 +2,7 @@ package com.monitor.platform.bot.channel;
 
 import com.monitor.platform.bot.channel.Sub2ChannelStatusReader.ChannelStatusRow;
 import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -34,7 +35,7 @@ public class BotChannelStatusService {
     private static final Logger log = LoggerFactory.getLogger(BotChannelStatusService.class);
 
     /** 业务时区。 */
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
 
     /** 允许的时间窗，与其它报表保持同一套写法。 */
     private static final Set<String> RANGES =
