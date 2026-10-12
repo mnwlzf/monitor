@@ -79,21 +79,19 @@
             </el-tag>
           </h4>
           <el-empty v-if="status.activeTurns.length === 0" description="当前空闲" :image-size="60" />
-          <el-table v-else :data="status.activeTurns" size="small" border>
-            <el-table-column label="开始于" width="160">
-              <template #default="{ row }">{{ formatTime(row.at) }}</template>
-            </el-table-column>
-            <el-table-column label="通道" width="120">
-              <template #default="{ row }">{{ channelLabel(row.channel) }}</template>
-            </el-table-column>
-            <el-table-column label="来源群" width="140">
-              <template #default="{ row }">{{ row.groupId ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="QQ" width="140">
-              <template #default="{ row }">{{ row.userId ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="正在处理的内容" prop="text" show-overflow-tooltip />
-          </el-table>
+          <div v-else class="turn-grid">
+            <div v-for="(turn, index) in status.activeTurns" :key="index" class="turn-card">
+              <div class="turn-card-head">
+                <span class="turn-target">{{ turn.groupId ?? '私聊' }} · {{ turn.userId ?? '—' }}</span>
+                <el-tag size="small" type="warning" effect="plain">{{ channelLabel(turn.channel) }}</el-tag>
+              </div>
+              <div class="turn-card-body">{{ turn.text || '（无文字内容）' }}</div>
+              <div class="turn-card-foot">
+                <span>开始 {{ formatTime(turn.at) }}</span>
+                <span class="turn-elapsed">已用 {{ formatMs(elapsedSince(turn.at)) }}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="status-section">
@@ -175,6 +173,9 @@ import type { BotStatus } from '../types'
 const REFRESH_INTERVAL = 5000
 
 const status = ref<BotStatus | null>(null)
+/** 每秒跳动一次，让「正在处理」的耗时实时走。 */
+const now = ref(Date.now())
+let clock: number | undefined
 const loading = ref(false)
 const error = ref('')
 const autoRefresh = ref(true)
@@ -225,9 +226,18 @@ watch(autoRefresh, startTimer)
 onMounted(() => {
   load()
   startTimer()
+  clock = window.setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
 })
 
-onUnmounted(stopTimer)
+onUnmounted(() => {
+  stopTimer()
+  if (clock !== undefined) {
+    window.clearInterval(clock)
+    clock = undefined
+  }
+})
 
 function channelLabel(channel: string) {
   if (channel === 'GROUP') return '群聊'
@@ -241,6 +251,13 @@ function formatTime(value: string | null | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+/** 从「开始时间」到现在过了多久（毫秒）。 */
+function elapsedSince(at: string) {
+  const started = new Date(at).getTime()
+  if (Number.isNaN(started)) return 0
+  return Math.max(0, now.value - started)
 }
 
 function formatMs(ms: number) {
@@ -300,8 +317,63 @@ function formatUptime(seconds: number) {
 }
 
 .status-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 10px;
   font-size: 14px;
+}
+
+/* 正在处理：卡片流水线，左右并排、上下排列，能同时铺很多个 */
+.turn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.turn-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 3px solid var(--el-color-warning);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+}
+
+.turn-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.turn-target {
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.turn-card-body {
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 4.5em;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.turn-card-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.turn-elapsed {
+  color: var(--el-color-warning);
+  font-weight: 600;
 }
 
 .status-tags {

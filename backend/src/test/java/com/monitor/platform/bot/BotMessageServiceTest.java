@@ -187,7 +187,20 @@ class BotMessageServiceTest {
         verify(client, never()).sendGroupMessage(anyLong(), anyString());
     }
 
+    /** 群里没 @机器人：不算「未回复」—— 这条消息本来就不需要回。 */
     @Test
+    void shouldNotCountGroupMessageWithoutMentionAsDropped() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"group","group_id":222,"user_id":999,
+                 "self_id":1,"raw_message":"/平台",
+                 "message":[{"type":"text","data":{"text":"/平台"}}]}
+                """));
+
+        verify(client, never()).sendGroupMessage(anyLong(), anyString());
+        assertEquals(0L, runtimeStatus.droppedCount());
+    }    @Test
     void shouldIgnoreGroupMessageWithoutMention() throws Exception {
         identityIs(admin());
 

@@ -315,7 +315,8 @@ public class BotMessageService {
             return;
         }
         if (group && settings.requireMention() && !mentioned(event)) {
-            runtimeStatus.dropped(channel, event.groupId(), event.userId(), "群里没 @机器人");
+            // 刻意不计入「未回复」：这条消息本来就不需要机器人回，
+            // 计进去会让统计被正常群聊刷满，反而看不出真正被拦下的消息
             return;
         }
         String text = extractText(event);
