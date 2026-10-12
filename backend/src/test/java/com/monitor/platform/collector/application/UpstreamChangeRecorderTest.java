@@ -15,38 +15,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>线上问题：severity 以前写死 {@code INFO}，结果「渠道涨价」和「新增一个渠道」
  * 长得一模一样，全被噪声淹没 —— 而涨价是直接关系成本的，必须浮出来。</p>
  */
-class CollectionServiceChangeSeverityTest {
+class UpstreamChangeRecorderTest {
 
     @Test
     void shouldWarnWhenRateGoesUp() {
-        assertEquals("WARNING", CollectionService.groupChangeSeverity(
+        assertEquals("WARNING", UpstreamChangeRecorder.groupChangeSeverity(
                 "RATE_CHANGED", new BigDecimal("1.0"), new BigDecimal("1.5")));
     }
 
     /** 降价是好事，不用当成警告打扰人。 */
     @Test
     void shouldNotWarnWhenRateGoesDown() {
-        assertEquals("INFO", CollectionService.groupChangeSeverity(
+        assertEquals("INFO", UpstreamChangeRecorder.groupChangeSeverity(
                 "RATE_CHANGED", new BigDecimal("1.5"), new BigDecimal("1.0")));
     }
 
     @Test
     void shouldWarnWhenBaseRateGoesUp() {
-        assertEquals("WARNING", CollectionService.groupChangeSeverity(
+        assertEquals("WARNING", UpstreamChangeRecorder.groupChangeSeverity(
                 "BASE_RATE_CHANGED", new BigDecimal("2.0"), new BigDecimal("2.5")));
     }
 
     @Test
     void shouldWarnWhenGroupRemoved() {
-        assertEquals("WARNING", CollectionService.groupChangeSeverity(
+        assertEquals("WARNING", UpstreamChangeRecorder.groupChangeSeverity(
                 "GROUP_REMOVED", null, null));
     }
 
     @Test
     void shouldStayInfoForOtherChanges() {
-        assertEquals("INFO", CollectionService.groupChangeSeverity("GROUP_ADDED", null, null));
-        assertEquals("INFO", CollectionService.groupChangeSeverity("GROUP_UPDATED", "a", "b"));
-        assertEquals("INFO", CollectionService.groupChangeSeverity("STATUS_CHANGED", "1", "0"));
+        assertEquals("INFO", UpstreamChangeRecorder.groupChangeSeverity("GROUP_ADDED", null, null));
+        assertEquals("INFO", UpstreamChangeRecorder.groupChangeSeverity("GROUP_UPDATED", "a", "b"));
+        assertEquals("INFO", UpstreamChangeRecorder.groupChangeSeverity("STATUS_CHANGED", "1", "0"));
     }
 
     /**
@@ -61,13 +61,13 @@ class CollectionServiceChangeSeverityTest {
         group.setIsActive(true);
 
         group.setStatus("active");
-        assertTrue(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+        assertTrue(UpstreamChangeRecorder.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
 
         group.setStatus("ACTIVE");
-        assertTrue(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+        assertTrue(UpstreamChangeRecorder.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
 
         group.setStatus("disabled");
-        assertFalse(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+        assertFalse(UpstreamChangeRecorder.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
     }
 
     /** 上游已移除的渠道（is_active = false）不算使用中。 */
@@ -77,17 +77,17 @@ class CollectionServiceChangeSeverityTest {
         group.setStatus("active");
         group.setIsActive(false);
 
-        assertFalse(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+        assertFalse(UpstreamChangeRecorder.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
 
         // 移除事件本身也不算 —— 此刻已经用不到了
         group.setIsActive(true);
-        assertFalse(CollectionService.groupInUse(group, "is_active", true, false));
+        assertFalse(UpstreamChangeRecorder.groupInUse(group, "is_active", true, false));
     }    /** 值不可比较时（缺值、非数字）保守处理：不误报警告。 */
     @Test
     void shouldNotWarnWhenValuesAreNotComparable() {
-        assertEquals("INFO", CollectionService.groupChangeSeverity(
+        assertEquals("INFO", UpstreamChangeRecorder.groupChangeSeverity(
                 "RATE_CHANGED", null, new BigDecimal("1.5")));
-        assertEquals("INFO", CollectionService.groupChangeSeverity(
+        assertEquals("INFO", UpstreamChangeRecorder.groupChangeSeverity(
                 "RATE_CHANGED", "abc", "def"));
     }
 }

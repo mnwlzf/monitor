@@ -69,13 +69,13 @@ class CollectionFailureReportingTest {
                 mock(AccountUsageDashboardSnapshotRepository.class),
                 mock(UpstreamGroupRepository.class),
                 mock(UpstreamGroupSnapshotRepository.class),
-                mock(UpstreamChangeEventRepository.class),
                 mock(AccountApiKeyRepository.class),
                 mock(AccountApiKeySnapshotRepository.class),
                 mock(CredentialCipher.class),
                 newApiAdapter,
                 mock(Sub2ApiAdapter.class),
-                new ObjectMapper(),
+                new CollectionJson(new ObjectMapper()),
+                new UpstreamChangeRecorder(mock(UpstreamChangeEventRepository.class), new CollectionJson(new ObjectMapper())),
                 synchronousExecutor);
 
         platform = new PlatformEntity();
