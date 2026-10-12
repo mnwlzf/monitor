@@ -700,20 +700,23 @@ class BotMessageServiceTest {
     }    // ============================================================ 群临时会话：来源群 + QQ 双重判定
 
     /**
-     * 线上问题：来源群是启用群，但发送者不在私聊白名单 —— 必须不回复。
+     * 临时会话的<strong>唯一限制是来源群</strong>：只要发起群在「允许的群号」里就放行，
+     * <strong>不看</strong>发送者是否在私聊白名单里。
      *
-     * <p>临时会话既不是群聊（不能只看群），也不等于好友私聊（不能只看 QQ）。</p>
+     * <p>线上问题：用户 1981329205 在启用群 1097845610 里发起临时会话，因为不在
+     * 「允许的私聊 QQ」里被静默丢弃，而同一个人在群里 @机器人 却正常 —— 规则自相矛盾。
+     * 临时会话本质是「群成员跟机器人说话」，权限应当继承自群。</p>
      */
     @Test
-    void shouldRejectTempSessionWhenUserNotWhitelisted() throws Exception {
+    void shouldAllowTempSessionBySourceGroupOnly() throws Exception {
         identityIs(BotIdentity.guest());
 
         service.onEvent(event(tempSessionCommandFrom(222L, 888L, "/help")));
 
-        verify(client, never()).sendPrivateMessage(anyLong(), anyString());
+        verify(client, timeout(3000)).sendPrivateMessage(eq(888L), contains("我能做的事"));
     }
 
-    /** 来源群与发送者都命中白名单时才回复。 */
+    /** 来源群与发送者都在白名单里时，当然也能用。 */
     @Test
     void shouldAllowTempSessionWhenGroupAndUserBothAllowed() throws Exception {
         identityIs(BotIdentity.guest());
@@ -723,7 +726,7 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("我能做的事"));
     }
 
-    /** 发送者在私聊白名单，但来源群没启用 —— 同样不回复，避免任意群都能借临时会话找上来。 */
+    /** 来源群没启用 —— 不回复（唯一限制就是来源群）。发送者在不在私聊白名单都不影响。 */
     @Test
     void shouldRejectTempSessionWhenSourceGroupNotAllowed() throws Exception {
         identityIs(BotIdentity.guest());

@@ -360,18 +360,20 @@ public class BotMessageService {
     /**
      * 是否允许这条消息触发机器人。
      *
-     * <p><strong>群临时会话既不是群聊、也不等于好友私聊</strong>，所以判定和另外两种都不同：
-     * 它必须<strong>同时</strong>满足「来源群在启用列表里」和「发送者在私聊白名单里」。
-     * 只看 QQ 会让任意群的临时会话都能找上来；只看群等于把私聊白名单架空了。</p>
+     * <ul>
+     *     <li>{@code GROUP} / {@code TEMP_SESSION}：只看<strong>群</strong>是否在「允许的群号」里。
+     *         临时会话的<strong>唯一限制就是发起它的那个群</strong>，不看发送者 QQ ——
+     *         它本质是「群成员跟机器人说话」，权限继承自群，和群里 @机器人 保持一致。
+     *         取不到群号时按不在白名单处理（fail-closed）；</li>
+     *     <li>{@code PRIVATE}：看发送者是否在「允许的私聊 QQ」里 ——
+     *         这一条是给<strong>好友私聊</strong>用的，用来拦住陌生人加好友后直接私聊。</li>
+     * </ul>
      *
-     * <p>注意白名单为空表示<strong>不限制</strong>（见 {@link BotSettings#matches}），
-     * 所以空列表时该条件自动成立。</p>
+     * <p>白名单为空表示<strong>不限制</strong>（见 {@link BotSettings#matches}）。</p>
      */
     private boolean allowed(OneBotEvent event, BotChannel channel, BotSettings settings) {
         return switch (channel) {
-            case GROUP -> settings.isGroupAllowed(event.groupId());
-            case TEMP_SESSION -> settings.isGroupAllowed(event.groupId())
-                    && settings.isUserAllowed(event.userId());
+            case GROUP, TEMP_SESSION -> settings.isGroupAllowed(event.groupId());
             case PRIVATE -> settings.isUserAllowed(event.userId());
         };
     }
