@@ -130,6 +130,17 @@ public class AccountApiKeySync {
         return changed;
     }
 
+    /**
+     * 记录一条密钥生命周期事件（新增 / 轮换 / 失效），自动带上「使用中」判定。
+     *
+     * @param newValue 新增事件传入密钥原始响应；轮换 / 失效事件传 null
+     */
+    public void recordKeyChange(AccountEntity account, String platformType, Long collectionRunId,
+                                AccountApiKeyEntity entity, String changeType,
+                                String fieldName, Object newValue, String message) {
+        changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, entity, changeType,
+                fieldName, null, newValue, message, isKeyInUse(entity.getStatus()));
+    }
     /** 密钥归一化状态是否为启用（正在使用）。 */
     public boolean isKeyInUse(String status) {
         return KEY_STATUS_ACTIVE.equalsIgnoreCase(status);
