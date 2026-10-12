@@ -20,4 +20,16 @@ public interface UpstreamChangeEventMapper  {
     /** 查询指定时间之后、涉及正在使用密钥的变更事件，用于邮件提醒。 */
     List<UpstreamChangeEventEntity> selectInUseKeyEventsSince(@Param("since") java.time.OffsetDateTime since,
                                                              @Param("limit") int limit);
+
+    /** 查询指定时间之后、<b>正在使用的渠道</b>发生的倍率变化，用于实时告警。 */
+    List<UpstreamChangeEventEntity> selectInUseGroupRateEventsSince(
+            @Param("since") java.time.OffsetDateTime since,
+            @Param("limit") int limit);
+
+    /** 查询指定时间窗内的渠道变更；inUse 决定取在用的还是非在用的（每日汇总取后者）。 */
+    List<UpstreamChangeEventEntity> selectGroupEventsBetween(
+            @Param("from") java.time.OffsetDateTime from,
+            @Param("to") java.time.OffsetDateTime to,
+            @Param("inUse") boolean inUse,
+            @Param("limit") int limit);
 }

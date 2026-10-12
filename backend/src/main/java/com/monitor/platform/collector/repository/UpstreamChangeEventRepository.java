@@ -57,4 +57,25 @@ public class UpstreamChangeEventRepository {
         int safeLimit = Math.max(1, Math.min(limit, 1000));
         return eventMapper.selectInUseKeyEventsSince(since, safeLimit);
     }
+
+    /**
+     * 查询指定时间之后、<b>正在使用的渠道</b>发生的倍率变化。
+     *
+     * <p>供渠道实时告警使用：只返回 in_use 为真的 GROUP 倍率类事件。</p>
+     */
+    public List<UpstreamChangeEventEntity> findInUseGroupRateEventsSince(OffsetDateTime since, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return eventMapper.selectInUseGroupRateEventsSince(since, safeLimit);
+    }
+
+    /**
+     * 查询指定时间窗内的渠道变更，可按「是否在用」筛选。
+     *
+     * @param inUse true 取在用的、false 取非在用的（每日汇总用它取后者）
+     */
+    public List<UpstreamChangeEventEntity> findGroupEventsBetween(OffsetDateTime from, OffsetDateTime to,
+                                                                   boolean inUse, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return eventMapper.selectGroupEventsBetween(from, to, inUse, safeLimit);
+    }
 }

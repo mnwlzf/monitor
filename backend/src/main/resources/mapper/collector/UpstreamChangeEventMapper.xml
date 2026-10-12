@@ -57,4 +57,28 @@
         ORDER BY detected_at DESC
         LIMIT #{limit}
     </select>
+
+    <!-- 正在使用渠道的倍率变化：实时告警只关心这一类（直接关系成本） -->
+    <select id="selectInUseGroupRateEventsSince" resultMap="UpstreamChangeEventResultMap">
+        SELECT <include refid="UpstreamChangeEventColumns"/>
+        FROM upstream_change_events
+        WHERE in_use = TRUE
+          AND entity_type = 'GROUP'
+          AND change_type IN ('RATE_CHANGED', 'BASE_RATE_CHANGED')
+          AND detected_at &gt;= #{since}
+        ORDER BY detected_at DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 渠道变更：按「是否在用」筛，每日汇总用它取非在用的那部分 -->
+    <select id="selectGroupEventsBetween" resultMap="UpstreamChangeEventResultMap">
+        SELECT <include refid="UpstreamChangeEventColumns"/>
+        FROM upstream_change_events
+        WHERE entity_type = 'GROUP'
+          AND in_use = #{inUse}
+          AND detected_at &gt;= #{from}
+          AND detected_at &lt; #{to}
+        ORDER BY detected_at DESC
+        LIMIT #{limit}
+    </select>
 </mapper>

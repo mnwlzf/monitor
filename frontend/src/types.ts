@@ -211,7 +211,7 @@ export interface MailSettings {
 /**
  * 邮件事件场景：不同事件使用各自的收件人。
  */
-export type MailScene = 'BALANCE_ALERT' | 'DAILY_REPORT' | 'API_KEY_CHANGE'
+export type MailScene = 'BALANCE_ALERT' | 'DAILY_REPORT' | 'API_KEY_CHANGE' | 'CHANNEL_ALERT' | 'CHANNEL_DIGEST'
 
 /**
  * 邮件收件人（按事件场景区分）。

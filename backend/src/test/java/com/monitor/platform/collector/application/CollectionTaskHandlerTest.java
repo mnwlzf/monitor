@@ -2,6 +2,7 @@ package com.monitor.platform.collector.application;
 
 import com.monitor.platform.mail.ApiKeyChangeAlertService;
 import com.monitor.platform.mail.BalanceAlertService;
+import com.monitor.platform.mail.ChannelChangeAlertService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -18,13 +19,14 @@ class CollectionTaskHandlerTest {
     private final CollectionService collectionService = mock(CollectionService.class);
     private final BalanceAlertService balanceAlertService = mock(BalanceAlertService.class);
     private final ApiKeyChangeAlertService apiKeyChangeAlertService = mock(ApiKeyChangeAlertService.class);
+    private final ChannelChangeAlertService channelChangeAlertService = mock(ChannelChangeAlertService.class);
 
     @Test
     void handlersRouteToExpectedScope() {
         new CollectBalancesTaskHandler(collectionService, balanceAlertService).execute();
         verify(collectionService).collectAllAccounts(CollectionScope.BALANCE);
 
-        new CollectGroupsTaskHandler(collectionService).execute();
+        new CollectGroupsTaskHandler(collectionService, channelChangeAlertService).execute();
         verify(collectionService).collectAllAccounts(CollectionScope.GROUPS);
 
         new CollectApiKeysTaskHandler(collectionService, apiKeyChangeAlertService).execute();
@@ -38,7 +40,7 @@ class CollectionTaskHandlerTest {
     void handlerCodesAreDistinctAndStable() {
         List<String> codes = List.of(
                 new CollectBalancesTaskHandler(collectionService, balanceAlertService).code(),
-                new CollectGroupsTaskHandler(collectionService).code(),
+                new CollectGroupsTaskHandler(collectionService, channelChangeAlertService).code(),
                 new CollectApiKeysTaskHandler(collectionService, apiKeyChangeAlertService).code(),
                 new CollectAllAccountsTaskHandler(collectionService).code());
 

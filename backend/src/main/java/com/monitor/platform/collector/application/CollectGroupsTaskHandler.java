@@ -1,7 +1,10 @@
 package com.monitor.platform.collector.application;
 
 import com.monitor.platform.common.schedule.ScheduledTaskHandler;
+import com.monitor.platform.mail.ChannelChangeAlertService;
 import org.springframework.stereotype.Component;
+
+import java.time.OffsetDateTime;
 
 /**
  * 分组·渠道倍率采集任务处理器。
@@ -13,9 +16,12 @@ import org.springframework.stereotype.Component;
 public class CollectGroupsTaskHandler implements ScheduledTaskHandler {
 
     private final CollectionService collectionService;
+    private final ChannelChangeAlertService channelChangeAlertService;
 
-    public CollectGroupsTaskHandler(CollectionService collectionService) {
+    public CollectGroupsTaskHandler(CollectionService collectionService,
+                                    ChannelChangeAlertService channelChangeAlertService) {
         this.collectionService = collectionService;
+        this.channelChangeAlertService = channelChangeAlertService;
     }
 
     @Override
@@ -35,6 +41,13 @@ public class CollectGroupsTaskHandler implements ScheduledTaskHandler {
 
     @Override
     public void execute() {
-        collectionService.collectAllAccounts(CollectionScope.GROUPS);
+        OffsetDateTime startedAt = OffsetDateTime.now();
+        try {
+            collectionService.collectAllAccounts(CollectionScope.GROUPS);
+        } finally {
+            // 采集完成（含部分失败）后，立刻对「正在使用渠道的倍率变化」发实时告警 ——
+            // 涨价直接关系成本，不能等到人主动去看
+            channelChangeAlertService.notifyInUseRateChanges(startedAt);
+        }
     }
 }

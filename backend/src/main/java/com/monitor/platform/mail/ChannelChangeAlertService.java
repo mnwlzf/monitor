@@ -1,0 +1,326 @@
+package com.monitor.platform.mail;
+
+import com.monitor.platform.collector.repository.AccountRepository;
+import com.monitor.platform.collector.repository.PlatformRepository;
+import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
+import com.monitor.platform.collector.repository.entity.AccountEntity;
+import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.stereotype.Service;
+import org.springframework.web.util.HtmlUtils;
+
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 渠道变更提醒服务。
+ *
+ * <p>两类邮件，收件人各自配置（{@link MailScene}）：</p>
+ * <ul>
+ *     <li><b>实时告警</b>（{@link #notifyInUseRateChanges}）：<strong>正在使用</strong>的渠道发生
+ *         <strong>倍率变化</strong>时立刻发 —— 涨价直接关系成本，不能等；</li>
+ *     <li><b>每日汇总</b>（{@link #sendDailyDigest}）：非在用渠道的变更每天一封，
+ *         避免它们把实时告警淹掉。</li>
+ * </ul>
+ *
+ * <p><strong>正文由大模型总结</strong>：把原始变更读成人话再发。但模型只是「锦上添花」——
+ * 没配模型、调用失败、返回为空，都会自动退回原始明细表格，
+ * <strong>绝不因为模型问题导致该发的告警发不出去</strong>。</p>
+ *
+ * <p>本类所有方法都不抛异常：发信失败只记日志，不拖累采集任务。</p>
+ */
+@Service
+public class ChannelChangeAlertService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChannelChangeAlertService.class);
+
+    /** 单封邮件最多包含的变更条数，防止异常数据把邮件撑爆。 */
+    private static final int MAX_EVENTS = 200;
+
+    private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    private static final String SUMMARY_SYSTEM_PROMPT = """
+            你是运维助手，负责把上游渠道的变更记录总结成给运维看的中文邮件正文。
+            要求：
+            1. 只讲记录里的事实，不编造、不猜测原因；
+            2. 优先说清楚「哪些渠道的倍率变了、是涨还是降、涨了多少」——这直接关系成本；
+            3. 直接输出正文，不要 Markdown 标题、表格或代码块；
+            4. 控制在 200 字以内，能一眼看完。
+            """;
+
+    private final UpstreamChangeEventRepository changeEventRepository;
+    private final AccountRepository accountRepository;
+    private final PlatformRepository platformRepository;
+    private final MailRecipientRepository mailRecipientRepository;
+    private final SmtpConfigProvider smtpConfigProvider;
+    private final MailService mailService;
+    private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
+
+    public ChannelChangeAlertService(UpstreamChangeEventRepository changeEventRepository,
+                                     AccountRepository accountRepository,
+                                     PlatformRepository platformRepository,
+                                     MailRecipientRepository mailRecipientRepository,
+                                     SmtpConfigProvider smtpConfigProvider,
+                                     MailService mailService,
+                                     ObjectProvider<ChatClient.Builder> chatClientBuilder) {
+        this.changeEventRepository = changeEventRepository;
+        this.accountRepository = accountRepository;
+        this.platformRepository = platformRepository;
+        this.mailRecipientRepository = mailRecipientRepository;
+        this.smtpConfigProvider = smtpConfigProvider;
+        this.mailService = mailService;
+        this.chatClientBuilder = chatClientBuilder;
+    }
+
+    /**
+     * 正在使用渠道的倍率变化 —— 实时告警。
+     *
+     * <p>渠道采集任务结束后调用，以任务开始时间为界，只发本轮新产生的变化，
+     * 避免同一批变更被反复提醒。</p>
+     *
+     * @param since 本轮采集开始时间；为空时跳过，避免误发历史变更
+     */
+    public void notifyInUseRateChanges(OffsetDateTime since) {
+        if (since == null) {
+            return;
+        }
+        try {
+            List<UpstreamChangeEventEntity> events =
+                    changeEventRepository.findInUseGroupRateEventsSince(since, MAX_EVENTS);
+            if (events.isEmpty()) {
+                return;
+            }
+            String subject = "[Monitor] 正在使用的渠道倍率变化（" + events.size() + " 项）";
+            send(MailScene.CHANNEL_ALERT, events, subject,
+                    "以下 <b>正在使用</b> 的渠道发生了倍率变化，请确认是否为预期调整 —— 上调会直接推高成本。",
+                    "渠道实时告警");
+        } catch (Exception ex) {
+            log.error("渠道倍率告警发送失败", ex);
+        }
+    }
+
+    /**
+     * 非在用渠道的变更 —— 每日汇总。
+     *
+     * <p>默认汇总「最近 24 小时」，由定时任务每天调用一次。</p>
+     */
+    public void sendDailyDigest() {
+        try {
+            OffsetDateTime to = OffsetDateTime.now(REPORT_ZONE);
+            OffsetDateTime from = to.minusDays(1);
+            List<UpstreamChangeEventEntity> events =
+                    changeEventRepository.findGroupEventsBetween(from, to, false, MAX_EVENTS);
+            if (events.isEmpty()) {
+                log.debug("最近 24 小时没有非在用渠道的变更，不发送汇总");
+                return;
+            }
+            String subject = "[Monitor] 非在用渠道变更汇总（" + events.size() + " 项）";
+            send(MailScene.CHANNEL_DIGEST, events, subject,
+                    "以下是最近 24 小时内 <b>非在用</b> 渠道的变更汇总，仅供了解，不需要立即处理。",
+                    "渠道变更日报");
+        } catch (Exception ex) {
+            log.error("渠道变更日报发送失败", ex);
+        }
+    }
+
+    /** 取收件人、读取 SMTP、组正文并发信。任何一环缺失都只记日志、不抛异常。 */
+    private void send(MailScene scene, List<UpstreamChangeEventEntity> events,
+                      String subject, String intro, String sceneLabel) {
+        List<MailRecipientEntity> recipients = mailRecipientRepository.findByScene(scene);
+        if (recipients.isEmpty()) {
+            log.info("检测到{}但未配置收件人，暂不发送: scene={}, eventCount={}", sceneLabel, scene, events.size());
+            return;
+        }
+        SmtpConfig smtpConfig = smtpConfigProvider.load();
+        if (!smtpConfig.isConfigured()) {
+            log.warn("检测到{}但 SMTP 未配置，暂不发送: eventCount={}", sceneLabel, events.size());
+            return;
+        }
+
+        Map<Integer, String> accountNames = new HashMap<>();
+        Map<Integer, String> platformNames = new HashMap<>();
+        String summary = summarize(events, accountNames);
+        String body = buildBody(events, intro, summary, accountNames, platformNames);
+        List<String> to = recipients.stream().map(MailRecipientEntity::getEmail).toList();
+        mailService.send(smtpConfig, to, subject, body);
+        log.info("{}邮件已发送: recipients={}, eventCount={}, aiSummary={}",
+                sceneLabel, to, events.size(), summary != null);
+    }
+
+    /**
+     * 让大模型把原始变更读成一段人话。
+     *
+     * <p>模型没配、调用失败、返回为空 —— 任何一种情况都返回 {@code null}，
+     * 调用方会退回原始明细表格。**告警的送达不能依赖模型可用。**</p>
+     */
+    private String summarize(List<UpstreamChangeEventEntity> events, Map<Integer, String> accountNames) {
+        ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
+        if (builder == null) {
+            return null;
+        }
+        try {
+            String answer = builder.build().prompt()
+                    .system(SUMMARY_SYSTEM_PROMPT)
+                    .user("原始变更记录：\n" + rawLines(events, accountNames))
+                    .call()
+                    .content();
+            if (answer == null || answer.isBlank()) {
+                return null;
+            }
+            return escape(answer.trim()).replace("\n", "<br>");
+        } catch (Exception ex) {
+            log.warn("渠道变更总结失败，将退回原始明细: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    /** 喂给模型的原始行（一行一条，含账号与旧值→新值）。 */
+    private String rawLines(List<UpstreamChangeEventEntity> events, Map<Integer, String> accountNames) {
+        StringBuilder sb = new StringBuilder();
+        for (UpstreamChangeEventEntity event : events) {
+            sb.append("- ").append(formatTime(event.getDetectedAt()))
+                    .append(' ').append(accountName(event.getAccountId(), accountNames))
+                    .append(' ').append(event.getMessage() == null ? event.getChangeType() : event.getMessage());
+            String before = scalar(event.getOldValue());
+            String after = scalar(event.getNewValue());
+            if (before != null || after != null) {
+                sb.append("（").append(before == null ? "?" : before)
+                        .append(" -> ").append(after == null ? "?" : after).append("）");
+            }
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
+    private String buildBody(List<UpstreamChangeEventEntity> events, String intro, String summary,
+                             Map<Integer, String> accountNames, Map<Integer, String> platformNames) {
+        StringBuilder html = new StringBuilder();
+        html.append("<p>").append(intro).append("</p>");
+
+        if (summary != null) {
+            html.append("<div style=\"background:#f6f8fa;border-left:3px solid #409eff;")
+                    .append("padding:10px 12px;margin:14px 0;font-size:13px\">")
+                    .append("<strong>大模型总结</strong>")
+                    .append("<p style=\"margin:8px 0 0;line-height:1.7\">").append(summary).append("</p>")
+                    .append("</div>");
+        } else {
+            html.append("<p style=\"color:#999;font-size:12px\">")
+                    .append("（未生成 AI 总结：未配置大模型或调用失败，下面直接列出原始变更）</p>");
+        }
+
+        html.append("<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" ")
+                .append("style=\"border-collapse:collapse;font-size:13px\">");
+        html.append("<tr style=\"background:#f5f5f5\">")
+                .append("<th align=\"left\">时间</th>")
+                .append("<th align=\"left\">平台</th>")
+                .append("<th align=\"left\">账号</th>")
+                .append("<th align=\"left\">级别</th>")
+                .append("<th align=\"left\">类型</th>")
+                .append("<th align=\"left\">变化</th>")
+                .append("</tr>");
+        for (UpstreamChangeEventEntity event : events) {
+            html.append("<tr>")
+                    .append("<td>").append(formatTime(event.getDetectedAt())).append("</td>")
+                    .append("<td>").append(escape(platformName(event.getAccountId(), platformNames))).append("</td>")
+                    .append("<td>").append(escape(accountName(event.getAccountId(), accountNames))).append("</td>")
+                    .append("<td>").append(escape(severityLabel(event.getSeverity()))).append("</td>")
+                    .append("<td>").append(escape(changeLabel(event.getChangeType()))).append("</td>")
+                    .append("<td>").append(changeDescription(event)).append("</td>")
+                    .append("</tr>");
+        }
+        html.append("</table>");
+        html.append("<p style=\"color:#888;font-size:12px\">本邮件由 Monitor 渠道采集任务自动发送。</p>");
+        return html.toString();
+    }
+
+    /** 变化列：标量变化展示「旧值 → 新值」，整块 JSON 只给结论。 */
+    private String changeDescription(UpstreamChangeEventEntity event) {
+        String before = scalar(event.getOldValue());
+        String after = scalar(event.getNewValue());
+        if (before == null || after == null || before.startsWith("{") || before.startsWith("[")) {
+            return escape(event.getMessage());
+        }
+        return escape(before) + " → " + escape(after);
+    }
+
+    private String severityLabel(String severity) {
+        return "WARNING".equalsIgnoreCase(severity) ? "⚠ 警告" : "信息";
+    }
+
+    private String changeLabel(String changeType) {
+        if (changeType == null) {
+            return "未知";
+        }
+        return switch (changeType) {
+            case "RATE_CHANGED" -> "倍率变化";
+            case "BASE_RATE_CHANGED" -> "基础倍率变化";
+            case "STATUS_CHANGED" -> "状态变化";
+            case "GROUP_ADDED" -> "渠道新增";
+            case "GROUP_REMOVED" -> "渠道移除";
+            case "GROUP_UPDATED" -> "渠道更新";
+            default -> changeType;
+        };
+    }
+
+    private String platformName(Integer accountId, Map<Integer, String> platformNames) {
+        if (accountId == null) {
+            return "未知平台";
+        }
+        return platformNames.computeIfAbsent(accountId, id -> accountRepository.findById(id)
+                .map(AccountEntity::getPlatformId)
+                .flatMap(platformRepository::findById)
+                .map(PlatformEntity::getPlatformName)
+                .orElse("未知平台"));
+    }
+
+    private String accountName(Integer accountId, Map<Integer, String> accountNames) {
+        if (accountId == null) {
+            return "未知账号";
+        }
+        return accountNames.computeIfAbsent(accountId, id -> accountRepository.findById(id)
+                .map(this::displayName)
+                .orElse("账号 " + id));
+    }
+
+    private String displayName(AccountEntity account) {
+        if (account.getDisplayName() != null && !account.getDisplayName().isBlank()) {
+            return account.getDisplayName();
+        }
+        if (account.getUsername() != null && !account.getUsername().isBlank()) {
+            return account.getUsername();
+        }
+        return "账号 " + account.getId();
+    }
+
+    /** 变更事件里存的是 JSON 文本，字符串会带引号，这里去掉引号便于阅读。 */
+    private String scalar(String jsonValue) {
+        if (jsonValue == null) {
+            return null;
+        }
+        String text = jsonValue.trim();
+        if (text.isEmpty() || "null".equals(text)) {
+            return null;
+        }
+        if (text.length() >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
+            text = text.substring(1, text.length() - 1);
+        }
+        return text;
+    }
+
+    private String formatTime(OffsetDateTime time) {
+        return time == null ? "—" : TIME_FORMATTER.format(time.atZoneSameInstant(REPORT_ZONE));
+    }
+
+    private String escape(String value) {
+        return value == null ? "" : HtmlUtils.htmlEscape(value);
+    }
+}

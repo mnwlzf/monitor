@@ -176,6 +176,43 @@
       <el-divider content-position="left">该事件的收件人</el-divider>
       <RecipientEditor scene="API_KEY_CHANGE" :can-write="canWrite" />
     </el-card>
+
+    <el-card shadow="never" class="admin-card">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>渠道倍率变化提醒（实时）</h3>
+            <p>正在使用的渠道倍率发生变化时立刻发邮件 —— 上调会直接推高成本，不能等</p>
+          </div>
+        </div>
+      </template>
+
+      <small class="admin-form-hint">
+        由「分组·渠道倍率采集」任务在采集完成后触发，只提醒本轮新产生的变化，且只覆盖<strong>正在使用</strong>的渠道。
+        邮件正文由大模型读取原始变更后总结；模型不可用时自动退回原始明细。
+      </small>
+
+      <el-divider content-position="left">该事件的收件人</el-divider>
+      <RecipientEditor scene="CHANNEL_ALERT" :can-write="canWrite" />
+    </el-card>
+
+    <el-card shadow="never" class="admin-card">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>渠道变更汇总（每日）</h3>
+            <p>非在用渠道的变更每天汇总一封，避免把实时告警淹掉</p>
+          </div>
+        </div>
+      </template>
+
+      <small class="admin-form-hint">
+        汇总最近 24 小时<strong>非在用</strong>渠道的变更。发送时间与启停在「定时任务」页配置（任务：渠道变更每日汇总）。
+      </small>
+
+      <el-divider content-position="left">该事件的收件人</el-divider>
+      <RecipientEditor scene="CHANNEL_DIGEST" :can-write="canWrite" />
+    </el-card>
     <el-card shadow="never" class="admin-card" v-loading="botLoading">
       <template #header>
         <div class="admin-card-header">
