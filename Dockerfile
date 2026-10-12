@@ -36,7 +36,7 @@ FROM eclipse-temurin:21-jre AS runtime
 ENV TZ=Asia/Shanghai \
     SERVER_ADDRESS=0.0.0.0 \
     SERVER_PORT=8080 \
-    JAVA_OPTS="-XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8"
+    JAVA_OPTS="-XX:MaxRAMPercentage=60 -Dfile.encoding=UTF-8"
 
 # 说明：QQ 机器人渲染长回复图片所需的中文字体已随 JAR 打包
 # （backend/src/main/resources/fonts/wqy-microhei.ttc），这里不需要再装系统字体。

@@ -9,6 +9,10 @@ services:
   app:
     image: ${MONITOR_IMAGE:-ghcr.io/mnwlzf/monitor:latest}
     container_name: monitor
+    # 内存上限：不加这条时 JVM 会按【宿主机】内存算堆（-XX:MaxRAMPercentage），
+    # 在 2G 小机器上会去要 1.44G 堆，直接把整机推进 swap。
+    # 配合 JAVA_OPTS 的 MaxRAMPercentage=60：堆约 540M，留 40% 给元空间/线程/直接内存。
+    mem_limit: 900m
     build:
       context: .
       dockerfile: Dockerfile
