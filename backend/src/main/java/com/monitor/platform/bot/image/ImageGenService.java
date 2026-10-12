@@ -82,6 +82,19 @@ public class ImageGenService {
      * @return 成功时带图片字节与上游改写后的提示词；失败时带一句可直接回复的话
      */
     public Result generate(String prompt) {
+        return generate(prompt, null);
+    }
+
+    /**
+     * 生成一张图，并在<strong>通过限频、真的要开始画</strong>时回调一下。
+     *
+     * <p>回调刻意放在限频检查之后：调用方用它发「正在画，稍等」这类开场提示，
+     * 如果放在检查之前，撞上全局限频时就会先来一句「正在画…」紧接着「太频繁了」，
+     * 反而更让人困惑。</p>
+     *
+     * @param onAccepted 真的开始画时的回调，可为 null；回调抛异常不影响生图
+     */
+    public Result generate(String prompt, Runnable onAccepted) {
         if (!properties.isUsable()) {
             return Result.failure("生图没开启或没配密钥。");
         }
@@ -97,6 +110,14 @@ public class ImageGenService {
             long seconds = Math.max(1, limiter.retryAfter().toSeconds() + 1);
             return Result.failure("生图太频繁了，一分钟最多 " + properties.getMaxPerMinute()
                     + " 张，约 " + seconds + " 秒后再试。");
+        }
+
+        if (onAccepted != null) {
+            try {
+                onAccepted.run();
+            } catch (RuntimeException callbackError) {
+                log.warn("生图开始回调失败（不影响生图）: {}", callbackError.getMessage());
+            }
         }
 
         try {

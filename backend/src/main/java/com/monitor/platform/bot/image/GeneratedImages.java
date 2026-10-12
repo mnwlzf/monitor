@@ -2,6 +2,7 @@ package com.monitor.platform.bot.image;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 一次消息处理里生成的图片，按请求持有。
@@ -24,10 +25,22 @@ public class GeneratedImages {
      */
     private volatile String notice;
 
+    /** 「正在画…」这类开场提示一轮只发一次（模型可能连着调几次工具）。 */
+    private final AtomicBoolean startNotified = new AtomicBoolean();
+
     public void add(byte[] image) {
         if (image != null && image.length > 0) {
             images.add(image);
         }
+    }
+
+    /**
+     * 抢占「本轮是否已经提示过开始了」。
+     *
+     * @return true 表示本次调用是第一个，调用方应当去发那句开场提示
+     */
+    public boolean markStartNotified() {
+        return startNotified.compareAndSet(false, true);
     }
 
     /** 记下一条必须让用户看到的话（覆盖式，只保留最新一条）。 */

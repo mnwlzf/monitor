@@ -191,6 +191,13 @@ public class BotMessageService {
     /** 非平台用户看到「未知命令」时的统一回复，不暴露平台功能的存在。 */
     private static final String UNKNOWN_COMMAND = "这个命令我用不了，发送 /help 看看能做什么。";
 
+    /**
+     * 生图开始时的开场提示。
+     *
+     * <p>生图一次要 20 秒以上、加上发图接近 40 秒，没有这句用户会以为机器人没反应。</p>
+     */
+    private static final String IMAGE_START_NOTICE = "🎨 收到，正在画，大概 30 秒～1 分钟，画好就发给你～";
+
     /** 用户只发图片、没带文字时的提示词。 */
     private static final String IMAGE_ONLY_PROMPT = "这是我发来的图片，请描述并回应。";
 
@@ -442,7 +449,7 @@ public class BotMessageService {
             case "weather", "天气" -> weather(arg);
 
             // 生图同样与平台无关，所有人都能用；限频在 ImageGenService 里做（全局一分钟 3 张）
-            case "draw", "画图", "生图" -> draw(arg, generated);
+            case "draw", "画图", "生图" -> draw(arg, generated, event);
 
             // 渠道状态：对外功能，管理员与平台用户都能看；非平台用户按未知命令处理
             case "渠道状态", "channelstatus" -> platformFeature
@@ -626,7 +633,8 @@ public class BotMessageService {
                     channelStatusService, identity.admin(), viewerUserId(identity)));
         }
         // 生图：所有人都能用，图片归属到本条消息（按请求构造，避免串到别人的回复里）
-        request = request.tools(new ImageGenTools(imageGenService, generated));
+        request = request.tools(new ImageGenTools(imageGenService, generated,
+                    () -> notifyImageStart(event, generated)));
         String answer = request
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)))
                 .call()
@@ -830,8 +838,9 @@ public class BotMessageService {
      * <p>命令与模型工具共用同一条取数链路（{@link ImageGenService}），
      * 限频也在那里统一做，所以「敲命令」和「说人话」走的是同一个闸门。</p>
      */
-    private BotReport draw(String prompt, GeneratedImages generated) {
-        ImageGenService.Result result = imageGenService.generate(prompt);
+    private BotReport draw(String prompt, GeneratedImages generated, OneBotEvent event) {
+        ImageGenService.Result result = imageGenService.generate(prompt,
+                () -> notifyImageStart(event, generated));
         if (!result.ok()) {
             return text(result.error());
         }
@@ -839,7 +848,20 @@ public class BotMessageService {
         return text("画好了。");
     }
 
-    /** 存档内容带上「本次还发了生成图」的标记，便于事后检索。 */
+    /**
+     * 发一句「正在画，稍等」。
+     *
+     * <p>一轮对话只发一次（模型可能连着调几次工具）。刻意由生图服务在
+     * <strong>通过限频之后</strong>回调触发，避免先「正在画…」再「太频繁了」。</p>
+     */
+    private void notifyImageStart(OneBotEvent event, GeneratedImages generated) {
+        if (!generated.markStartNotified()) {
+            return;
+        }
+        boolean group = "group".equals(event.messageType());
+        sendText(event, group, IMAGE_START_NOTICE);
+        log.info("已发送生图开场提示: user={}, group={}", event.userId(), event.groupId());
+    }    /** 存档内容带上「本次还发了生成图」的标记，便于事后检索。 */
     private static String archiveContent(String text, List<byte[]> generatedImages) {
         return generatedImages.isEmpty() ? text : "[生成图 ×" + generatedImages.size() + "] " + text;
     }

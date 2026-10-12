@@ -13,17 +13,23 @@ public class ImageGenTools {
 
     private final ImageGenService service;
     private final GeneratedImages generated;
+    private final Runnable onStart;
 
-    public ImageGenTools(ImageGenService service, GeneratedImages generated) {
+    /**
+     * @param onStart 真的开始画时的回调（发「正在画，稍等」这类开场提示），可为 null。
+     *                生图一次要 20 秒以上，没有这句用户会以为机器人没反应。
+     */
+    public ImageGenTools(ImageGenService service, GeneratedImages generated, Runnable onStart) {
         this.service = service;
         this.generated = generated;
+        this.onStart = onStart;
     }
 
     @Tool(description = "根据一句中文描述生成一张图片并发给用户。当用户说「画一张…」「生成图片」「来张图」时调用。"
             + "prompt 用中文写清楚主体、场景与风格；一次只生成一张。"
             + "受全局限频约束：一分钟最多三张，超了要告诉用户稍后再试。")
     public String generateImage(String prompt) {
-        ImageGenService.Result result = service.generate(prompt);
+        ImageGenService.Result result = service.generate(prompt, onStart);
         if (!result.ok()) {
             // 同时记进本轮上下文：模型万一把这句吞了，发送层会兜底告诉用户，
             // 不会出现「触发了限频却一声不吭」的情况
