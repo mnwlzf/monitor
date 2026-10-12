@@ -1255,7 +1255,7 @@ public class CollectionService {
         // 新增/轮换密钥的前后值可能是整块上游响应（含明文 key），落库前必须脱敏
         event.setOldValue(toRedactedJson(oldValue));
         event.setNewValue(toRedactedJson(newValue));
-        event.setSeverity("INFO");
+        event.setSeverity(groupChangeSeverity(changeType, oldValue, newValue));
         event.setMessage(message);
         event.setInUse(inUse);
         event.setDetectedAt(OffsetDateTime.now());
@@ -1420,7 +1420,7 @@ public class CollectionService {
         return metrics;
     }
 
-    private void recordChange(AccountEntity account, String platformType, Long collectionRunId,
+    /**     * 渠道变更的级别。     *     * <p>以前这里写死 {@code "INFO"}，结果「渠道涨价」和「新增一个渠道」长得一模一样，     * 全淹没在噪声里 —— 而涨价是直接关系到成本的，必须浮出来。</p>     *     * <ul>     *     <li>倍率（含基础倍率）<strong>上调</strong> → {@code WARNING}（成本上升）；下调 → {@code INFO}；</li>     *     <li>渠道被移除 → {@code WARNING}；</li>     *     <li>其余（新增、改名、改描述等）→ {@code INFO}。</li>     * </ul>     */    static String groupChangeSeverity(String changeType, Object oldValue, Object newValue) {        if (CHANGE_RATE_CHANGED.equals(changeType) || CHANGE_BASE_RATE_CHANGED.equals(changeType)) {            BigDecimal before = toDecimal(oldValue);            BigDecimal after = toDecimal(newValue);            if (before != null && after != null && after.compareTo(before) > 0) {                return "WARNING";            }            return "INFO";        }        if (CHANGE_GROUP_REMOVED.equals(changeType)) {            return "WARNING";        }        return "INFO";    }    private static BigDecimal toDecimal(Object value) {        if (value instanceof BigDecimal decimal) {            return decimal;        }        if (value instanceof Number number) {            return new BigDecimal(number.toString());        }        if (value instanceof String text && !text.isBlank()) {            try {                return new BigDecimal(text.trim());            } catch (NumberFormatException ignored) {                return null;            }        }        return null;    }    private void recordChange(AccountEntity account, String platformType, Long collectionRunId,
                               UpstreamGroupEntity entity, String changeType,
                               String fieldName, Object oldValue, Object newValue,
                               String message) {
@@ -1435,7 +1435,7 @@ public class CollectionService {
         event.setFieldName(fieldName);
         event.setOldValue(toJson(oldValue));
         event.setNewValue(toJson(newValue));
-        event.setSeverity("INFO");
+        event.setSeverity(groupChangeSeverity(changeType, oldValue, newValue));
         event.setMessage(message);
         event.setDetectedAt(OffsetDateTime.now());
         event.setMetadata("{}");

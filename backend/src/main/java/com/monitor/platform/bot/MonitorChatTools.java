@@ -158,9 +158,11 @@ public class MonitorChatTools {
         return accountReport(keyword).toPlainText();
     }
 
-    @Tool(description = "查询最近的账号与密钥变更记录，limit 为返回条数，默认 5")
-    public String recentChanges(int limit) {
-        return changesReport(limit).toPlainText();
+    @Tool(description = "查询最近的账号 / 密钥 / 渠道变更记录。"
+            + "filter 可选：填「倍率」只看渠道倍率变化（上调会标成 WARNING，直接关系成本），"
+            + "也可填渠道名或账号名做关键字过滤，留空看全部。limit 为返回条数，默认 5，最多 20")
+    public String recentChanges(String filter, int limit) {
+        return changesReport(filter, limit).toPlainText();
     }
 
     @Tool(description = "查询全平台账号的用量排行：余额、今日消耗、累计消耗与累计请求数。"
@@ -374,33 +376,122 @@ public class MonitorChatTools {
         return BotReport.of("账号查询：" + keyword.trim(), List.of(table), List.of());
     }
 
-    /** 最近的账号 / 密钥变更。 */
-    public BotReport changesReport(int limit) {
-        int size = limit <= 0 ? 5 : Math.min(limit, 20);
-        List<BotReport.Row> rows = new ArrayList<>();
-        for (PlatformResponse platform : upstreamAdminService.listPlatforms()) {
-            for (UpstreamChangeEventResponse event : upstreamAdminService.listChanges(platform.id(), size)) {
-                if (rows.size() >= size) {
-                    break;
-                }
-                rows.add(BotReport.Row.of(
-                        time(event.detectedAt()),
-                        platform.name(),
-                        event.message() == null
-                                ? (event.changeType() + " " + event.fieldName())
-                                : event.message()));
-            }
-        }
-        if (rows.isEmpty()) {
-            return BotReport.fromMarkdown("最近没有任何变更记录。");
+    /**
+     * 最近的账号 / 密钥 / 渠道变更。
+     *
+     * <p>排序刻意是「警告优先，再按时间倒序」：渠道<strong>涨价</strong>直接关系成本，
+     * 必须排在最前面，而不是被「新增了一个渠道」这种噪声淹掉。</p>
+     *
+     * @param filter       关键字；填「倍率」只看渠道倍率变化，也可以填渠道名/账号名。
+     *                     纯数字会被当成条数（例如 {@code /变更 20}）
+     * @param defaultLimit 返回条数，默认 5，上限 20
+     */
+    public BotReport changesReport(String filter, int defaultLimit) {
+        int size = defaultLimit <= 0 ? 5 : Math.min(defaultLimit, 20);
+        String keyword = filter == null ? "" : filter.trim().toLowerCase(Locale.ROOT);
+        // /变更 20 这种纯数字写法当条数处理，剩下的才当关键字
+        if (keyword.matches("\\d{1,3}")) {
+            size = Math.max(1, Math.min(Integer.parseInt(keyword), 20));
+            keyword = "";
         }
 
-        BotReport.Block table = new BotReport.Block("最近 " + rows.size() + " 条", List.of(
+        List<PlatformChange> matched = new ArrayList<>();
+        for (PlatformResponse platform : upstreamAdminService.listPlatforms()) {
+            // 关键字过滤在内存里做，所以多取一些候选，避免「近 5 条里恰好没有倍率变化」就查不到
+            for (UpstreamChangeEventResponse event
+                    : upstreamAdminService.listChanges(platform.id(), size * 4)) {
+                if (matchesChange(event, keyword)) {
+                    matched.add(new PlatformChange(platform.name(), event));
+                }
+            }
+        }
+        if (matched.isEmpty()) {
+            return BotReport.fromMarkdown(keyword.isEmpty()
+                    ? "最近没有任何变更记录。"
+                    : "最近没有匹配「" + filter + "」的变更记录。");
+        }
+
+        matched.sort(Comparator
+                .comparing((PlatformChange item) -> warning(item.event()) ? 0 : 1)
+                .thenComparing(item -> item.event().detectedAt(),
+                        Comparator.nullsLast(Comparator.reverseOrder())));
+        List<PlatformChange> shown = matched.subList(0, Math.min(size, matched.size()));
+
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (PlatformChange item : shown) {
+            rows.add(BotReport.Row.of(
+                    time(item.event().detectedAt()),
+                    warning(item.event()) ? "⚠ 警告" : "信息",
+                    item.platform(),
+                    changeText(item.event())));
+        }
+
+        BotReport.Block table = new BotReport.Block("最近 " + rows.size() + " 条"
+                + (keyword.isEmpty() ? "（警告优先）" : "（筛选：" + filter + "）"), List.of(
                 BotReport.Col.left("时间"),
+                BotReport.Col.left("级别"),
                 BotReport.Col.left("平台"),
                 BotReport.Col.left("内容")), rows, null);
 
-        return BotReport.of("账号 / 密钥变更", List.of(table), List.of());
+        List<String> notes = new ArrayList<>();
+        long warnings = matched.stream().filter(item -> warning(item.event())).count();
+        if (warnings > 0) {
+            notes.add("其中 " + warnings + " 条是警告（倍率上调 / 渠道移除），值得优先看。");
+        }
+        notes.add("想看渠道涨价可以问「最近有哪些渠道涨价了」，或发 /变更 倍率。");
+        return BotReport.of("变更记录", List.of(table), notes);
+    }
+
+    /** 一条变更 + 它属于哪个平台。 */
+    private record PlatformChange(String platform, UpstreamChangeEventResponse event) {
+    }
+
+    private static boolean warning(UpstreamChangeEventResponse event) {
+        return "WARNING".equalsIgnoreCase(event.severity());
+    }
+
+    /** 关键字过滤：填「倍率」只看倍率类变化，其它按 内容/字段/新旧值 模糊匹配。 */
+    private static boolean matchesChange(UpstreamChangeEventResponse event, String keyword) {
+        if (keyword.isEmpty()) {
+            return true;
+        }
+        if ("倍率".equals(keyword) || "rate".equals(keyword)) {
+            return "RATE_CHANGED".equalsIgnoreCase(event.changeType())
+                    || "BASE_RATE_CHANGED".equalsIgnoreCase(event.changeType());
+        }
+        String haystack = String.join(" ",
+                String.valueOf(event.message()),
+                String.valueOf(event.changeType()),
+                String.valueOf(event.fieldName()),
+                String.valueOf(event.entityKey()),
+                String.valueOf(event.oldValue()),
+                String.valueOf(event.newValue())).toLowerCase(Locale.ROOT);
+        return haystack.contains(keyword);
+    }
+
+    /** 变更的可读说明，标量变化补上「旧值 → 新值」。 */
+    private static String changeText(UpstreamChangeEventResponse event) {
+        String base = event.message() == null || event.message().isBlank()
+                ? event.changeType() + " " + event.fieldName()
+                : event.message();
+        String before = scalar(event.oldValue());
+        String after = scalar(event.newValue());
+        if (before == null && after == null) {
+            return base;
+        }
+        return base + "（" + (before == null ? "?" : before) + " → " + (after == null ? "?" : after) + "）";
+    }
+
+    /** 只展示短标量；新增/轮换这类整块 JSON 不往表格里塞。 */
+    private static String scalar(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim().replaceAll("^\"|\"$", "");
+        if (trimmed.isEmpty() || trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            return null;
+        }
+        return trimmed.length() <= 24 ? trimmed : trimmed.substring(0, 24) + "…";
     }
 
     // ============================================================
