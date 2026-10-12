@@ -450,6 +450,24 @@ export interface BotStatus {
     lastInboundAt: string | null
     lastOutboundAt: string | null
   }
+  /** 正在处理的对话（谁、哪个群、说了什么） */
+  activeTurns: Array<{
+    at: string
+    channel: string
+    groupId: number | null
+    userId: number | null
+    text: string
+  }>
+  /** 最近完成的对话（问了什么、答了什么、耗时） */
+  recentTurns: Array<{
+    at: string
+    channel: string
+    groupId: number | null
+    userId: number | null
+    question: string
+    answer: string
+    elapsedMs: number
+  }>
   /** 未回复原因 -> 次数 */
   dropReasons: Record<string, number>
   recentDrops: Array<{

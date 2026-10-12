@@ -60,6 +60,33 @@ class BotRuntimeStatusTest {
     }
 
     @Test
+    void shouldTrackActiveAndRecentTurns() {
+        BotRuntimeStatus status = new BotRuntimeStatus();
+
+        String turnId = status.beginTurn(BotChannel.GROUP, 222L, 10001L, "你好");
+
+        assertEquals(1, status.activeTurns().size());
+        assertEquals("你好", status.activeTurns().get(0).text());
+        assertEquals(10001L, (long) status.activeTurns().get(0).userId());
+
+        status.finishTurn(turnId, "你也好");
+
+        assertEquals(0, status.activeTurns().size());
+        assertEquals(1, status.recentTurns().size());
+        assertEquals("你也好", status.recentTurns().get(0).answer());
+        assertEquals(222L, (long) status.recentTurns().get(0).groupId());
+        assertTrue(status.recentTurns().get(0).elapsedMs() >= 0);
+    }
+
+    @Test
+    void shouldIgnoreUnknownTurnOnFinish() {
+        BotRuntimeStatus status = new BotRuntimeStatus();
+
+        status.finishTurn("not-exists", "x");
+
+        assertEquals(0, status.recentTurns().size());
+        assertEquals(0, status.activeTurns().size());
+    }    @Test
     void shouldReportUptime() {
         BotRuntimeStatus status = new BotRuntimeStatus();
         assertTrue(status.uptimeSeconds() >= 0);

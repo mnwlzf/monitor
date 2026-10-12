@@ -82,6 +82,9 @@ public class BotMessageService {
      */
     private static final Pattern HEATMAP_MARKER = Pattern.compile("\\[\\[HEATMAP:([A-Za-z0-9]+)]]");
 
+    /** 引用内容只作为上下文，太长就截断，避免把提示词撑爆。 */
+    private static final int QUOTED_MAX_LENGTH = 300;
+
     /** 邮箱格式校验：够用即可，不做 RFC 级校验。 */
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
@@ -316,16 +319,21 @@ public class BotMessageService {
             return;
         }
         String text = extractText(event);
+        // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见
+        String quoted = quotedText(event);
         // 图片段单独抽出来：之前只认文本段，导致「只发图片」的消息被当成空消息直接丢掉
         List<BotImageFetcher.ImageRef> imageRefs = visionProperties.isEnabled()
                 ? BotImageFetcher.extract(event.message())
                 : List.of();
-        if (text.isBlank() && imageRefs.isEmpty()) {
-            // 既没文字也没图片（表情、语音等），目前不支持
+        if (text.isBlank() && quoted.isBlank() && imageRefs.isEmpty()) {
+            // 既没文字、没引用也没图片（表情、语音等），目前不支持
             runtimeStatus.dropped(channel, event.groupId(), event.userId(), "空消息（表情/语音等暂不支持）");
             return;
         }
         runtimeStatus.inbound();
+        // 「机器人状态」页要能看到正在和谁对话、说的什么；只引用一条消息时把引用内容当内容
+        String turnId = runtimeStatus.beginTurn(channel, event.groupId(), event.userId(),
+                !text.isBlank() ? text : (quoted.isBlank() ? "" : "（引用了：" + quoted + "）"));
         executor.submit(() -> {
             BotIdentity identity = identityResolver.resolve(event.userId());
             Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
@@ -347,7 +355,7 @@ public class BotMessageService {
             GeneratedImages generated = new GeneratedImages();
             BotReport report;
             try {
-                report = answer(event, text, settings, identity, platformFeature, channel, images, generated);
+                report = answer(event, text, quoted, settings, identity, platformFeature, channel, images, generated);
             } catch (Exception ex) {
                 log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                         event.userId(), identity.platformUser(), ex.getMessage());
@@ -358,8 +366,16 @@ public class BotMessageService {
                         : "处理这条消息时出错了，请稍后再试。");
             }
 
-            SendOutcome outcome = send(event, group, report, settings.maxReplyLength(), generated.snapshot());
+            SendOutcome outcome;
+            try {
+                outcome = send(event, group, report, settings.maxReplyLength(), generated.snapshot());
+            } catch (RuntimeException sendError) {
+                // 发送失败也要把这一轮从「正在处理」里摘掉，否则会永远挂在那儿
+                runtimeStatus.finishTurn(turnId, "发送失败：" + sendError.getMessage());
+                throw sendError;
+            }
             runtimeStatus.replied();
+            runtimeStatus.finishTurn(turnId, outcome.content());
             // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
             archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
                     personaOf(identity, platformFeature).name(), correlationId);
@@ -390,7 +406,7 @@ public class BotMessageService {
         };
     }
 
-    private BotReport answer(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
+    private BotReport answer(OneBotEvent event, String text, String quoted, BotSettings settings, BotIdentity identity,
                              boolean platformFeature, BotChannel channel,
                              List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         String prefix = settings.commandPrefix();
@@ -398,7 +414,7 @@ public class BotMessageService {
         if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
             return command(text.substring(prefix.length()).trim(), identity, platformFeature, event, generated);
         }
-        return askModel(event, text, settings, identity, platformFeature, channel, images, generated);
+        return askModel(event, text, quoted, settings, identity, platformFeature, channel, images, generated);
     }
 
     /** 确定性命令：没配大模型也能用。 */
@@ -573,7 +589,7 @@ public class BotMessageService {
         return "当前绑定邮箱：" + identity.email();
     }
 
-    private BotReport askModel(OneBotEvent event, String text, BotSettings settings, BotIdentity identity,
+    private BotReport askModel(OneBotEvent event, String text, String quoted, BotSettings settings, BotIdentity identity,
                                boolean platformFeature, BotChannel channel,
                                List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         Persona persona = personaOf(identity, platformFeature);
@@ -584,7 +600,7 @@ public class BotMessageService {
                     : "看图片需要开启大模型（SPRING_AI_MODEL_CHAT）。当前可用命令：\n" + help(identity, platformFeature);
             return text(message);
         }
-        String promptText = text.isBlank() ? IMAGE_ONLY_PROMPT : text;
+        String promptText = buildPrompt(text, quoted, !images.isEmpty());
         ChatClient.ChatClientRequestSpec request = chatClient.prompt()
                 .user(spec -> {
                     spec.text(promptText);
@@ -833,7 +849,70 @@ public class BotMessageService {
                 : client.sendPrivateImage(event.userId(), png);
     }
 
-    /** 只取文本段，@ 机器人、图片等非文本段自然被丢掉。 */
+    /**
+     * 引用（回复）消息的原文。
+     *
+     * <p>QQ 的引用在消息段里只有一个 {@code reply} 段，<strong>通常只带消息 id、不带正文</strong>，
+     * 所以用户引用一条消息再问「这个是什么」时模型完全是瞎的。这里按两步取：</p>
+     * <ol>
+     *     <li>段里自带 {@code text} / {@code content}（部分实现会带）就直接用；</li>
+     *     <li>否则拿 id 调 OneBot 的 {@code get_msg} 把原文取回来。</li>
+     * </ol>
+     *
+     * <p>取不到就返回空串 —— 少一段上下文不该让整条回复失败。</p>
+     */
+    private String quotedText(OneBotEvent event) {
+        JsonNode message = event.message();
+        if (message == null || !message.isArray()) {
+            return "";
+        }
+        for (JsonNode segment : message) {
+            if (!"reply".equals(segment.path("type").asText())) {
+                continue;
+            }
+            JsonNode data = segment.path("data");
+            String inline = data.path("text").asText("");
+            if (inline.isBlank()) {
+                inline = data.path("content").asText("");
+            }
+            if (!inline.isBlank()) {
+                return clip(inline);
+            }
+            String id = data.path("id").asText("");
+            if (!id.isBlank()) {
+                return clip(client.fetchMessageText(id));
+            }
+        }
+        return "";
+    }
+
+    private static String clip(String text) {
+        if (text == null) {
+            return "";
+        }
+        String trimmed = text.trim().replaceAll("\\s+", " ");
+        return trimmed.length() <= QUOTED_MAX_LENGTH
+                ? trimmed
+                : trimmed.substring(0, QUOTED_MAX_LENGTH) + "…";
+    }
+
+    /**
+     * 组装发给模型的用户消息：把引用内容放在前面当上下文。
+     *
+     * <p>只引用、没打字时也要有话说 —— 以前这种情况会被判成「空消息」直接丢掉。</p>
+     */
+    private static String buildPrompt(String text, String quoted, boolean hasImages) {
+        StringBuilder sb = new StringBuilder();
+        if (!quoted.isBlank()) {
+            sb.append("（用户引用了这条消息：").append(quoted).append("）").append('\n');
+        }
+        if (text.isBlank()) {
+            sb.append(hasImages ? IMAGE_ONLY_PROMPT : "用户只引用了上面这条消息，没有额外文字，请自然地回应。");
+        } else {
+            sb.append(text);
+        }
+        return sb.toString();
+    }    /** 只取文本段，@ 机器人、图片等非文本段自然被丢掉。 */
     private String extractText(OneBotEvent event) {
         JsonNode message = event.message();
         if (message != null && message.isArray()) {

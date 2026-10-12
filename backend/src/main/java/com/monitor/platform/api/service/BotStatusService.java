@@ -71,6 +71,17 @@ public class BotStatusService {
                         d.at(), d.channel(), d.groupId(), d.userId(), d.reason()))
                 .toList();
 
+        List<BotStatusResponse.ActiveTurnView> activeTurns = runtimeStatus.activeTurns().stream()
+                .map(t -> new BotStatusResponse.ActiveTurnView(
+                        t.at(), t.channel(), t.groupId(), t.userId(), t.text()))
+                .toList();
+
+        List<BotStatusResponse.TurnView> recentTurns = runtimeStatus.recentTurns().stream()
+                .map(t -> new BotStatusResponse.TurnView(
+                        t.at(), t.channel(), t.groupId(), t.userId(),
+                        t.question(), t.answer(), t.elapsedMs()))
+                .toList();
+
         List<BotStatusResponse.ErrorView> errors = runtimeStatus.recentErrors().stream()
                 .map(e -> new BotStatusResponse.ErrorView(e.at(), e.userId(), e.message()))
                 .toList();
@@ -84,6 +95,8 @@ public class BotStatusService {
                         probe.configured(), probe.reachable(), probe.online(),
                         oneBotBaseUrl(), probe.selfId(), probe.nickname(), probe.error()),
                 counters,
+                activeTurns,
+                recentTurns,
                 runtimeStatus.dropReasons(),
                 drops,
                 errors,

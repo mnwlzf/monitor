@@ -72,6 +72,52 @@
         </el-descriptions>
 
         <div class="status-section">
+          <h4>
+            正在处理
+            <el-tag v-if="status.activeTurns.length" type="warning" effect="plain" size="small">
+              {{ status.activeTurns.length }} 条
+            </el-tag>
+          </h4>
+          <el-empty v-if="status.activeTurns.length === 0" description="当前空闲" :image-size="60" />
+          <el-table v-else :data="status.activeTurns" size="small" border>
+            <el-table-column label="开始于" width="160">
+              <template #default="{ row }">{{ formatTime(row.at) }}</template>
+            </el-table-column>
+            <el-table-column label="通道" width="120">
+              <template #default="{ row }">{{ channelLabel(row.channel) }}</template>
+            </el-table-column>
+            <el-table-column label="来源群" width="140">
+              <template #default="{ row }">{{ row.groupId ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="QQ" width="140">
+              <template #default="{ row }">{{ row.userId ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="正在处理的内容" prop="text" show-overflow-tooltip />
+          </el-table>
+        </div>
+
+        <div class="status-section">
+          <h4>最近对话</h4>
+          <el-empty v-if="status.recentTurns.length === 0" description="暂无" :image-size="60" />
+          <el-table v-else :data="status.recentTurns" size="small" border>
+            <el-table-column label="时间" width="160">
+              <template #default="{ row }">{{ formatTime(row.at) }}</template>
+            </el-table-column>
+            <el-table-column label="通道" width="110">
+              <template #default="{ row }">{{ channelLabel(row.channel) }}</template>
+            </el-table-column>
+            <el-table-column label="群 / QQ" width="180">
+              <template #default="{ row }">{{ row.groupId ?? '私聊' }} / {{ row.userId ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="用户说" prop="question" show-overflow-tooltip />
+            <el-table-column label="机器人答" prop="answer" show-overflow-tooltip />
+            <el-table-column label="耗时" width="90" align="right">
+              <template #default="{ row }">{{ formatMs(row.elapsedMs) }}</template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div class="status-section">
           <h4>未回复原因分布</h4>
           <el-empty v-if="reasonEntries.length === 0" description="本次启动以来没有被丢弃的消息" :image-size="60" />
           <div v-else class="status-tags">
@@ -195,6 +241,11 @@ function formatTime(value: string | null | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function formatMs(ms: number) {
+  if (ms < 1000) return `${ms} ms`
+  return `${(ms / 1000).toFixed(1)} s`
 }
 
 function formatUptime(seconds: number) {

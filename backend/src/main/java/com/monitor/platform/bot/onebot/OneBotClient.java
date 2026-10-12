@@ -64,6 +64,74 @@ public class OneBotClient {
     }
 
     /**
+     * 取回被引用消息的文字内容（OneBot 的 /get_msg）。
+     *
+     * <p>QQ 的引用（回复）在消息段里只有一个 {@code reply} 段，通常<strong>只带消息 id</strong>，
+     * 不带被引用消息的正文。所以用户引用一条消息再问「这个是什么」时，模型看不到那条消息。
+     * 这里用 id 把原文取回来，供上下文使用。</p>
+     *
+     * <p>取不到（消息被撤回、实现不支持、权限不足）时返回空串，绝不抛异常 ——
+     * 少一段上下文不该让整条回复失败。</p>
+     *
+     * @param messageId 被引用消息的 id
+     * @return 拼好的纯文本（图片等非文本段用占位符表示）；取不到时空串
+     */
+    public String fetchMessageText(String messageId) {
+        if (!properties.isConfigured() || messageId == null || messageId.isBlank()) {
+            return "";
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        try {
+            // OneBot 的 message_id 标准上是整数；有的实现用字符串，两种都兼容
+            body.put("message_id", Long.parseLong(messageId.trim()));
+        } catch (NumberFormatException ex) {
+            body.put("message_id", messageId.trim());
+        }
+        try {
+            JsonNode data = postData("/get_msg", body);
+            if (data == null) {
+                return "";
+            }
+            return textOf(data.path("message"));
+        } catch (RuntimeException ex) {
+            log.debug("取引用消息失败: id={}, err={}", messageId, ex.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 把 OneBot 的消息段拼成纯文本。
+     *
+     * <p>{@code message} 可能是消息段数组，也可能是字符串（{@code post_format=string}），两种都收。</p>
+     */
+    static String textOf(JsonNode message) {
+        if (message == null || message.isMissingNode() || message.isNull()) {
+            return "";
+        }
+        if (message.isTextual()) {
+            return message.asText("").trim();
+        }
+        if (!message.isArray()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (JsonNode segment : message) {
+            String type = segment.path("type").asText();
+            switch (type) {
+                case "text" -> sb.append(segment.path("data").path("text").asText(""));
+                case "at" -> sb.append('@').append(segment.path("data").path("qq").asText(""));
+                case "image" -> sb.append("[图片]");
+                case "face" -> sb.append("[表情]");
+                case "record" -> sb.append("[语音]");
+                case "video" -> sb.append("[视频]");
+                case "file" -> sb.append("[文件]");
+                default -> {
+                    // 其它段（reply / json / forward 等）不拼进正文
+                }
+            }
+        }
+        return sb.toString().replaceAll("\\s+", " ").trim();
+    }    /**
      * 探活：问 NapCat 要运行状态与登录信息（OneBot v11 的 /get_status 与 /get_login_info）。
      *
      * <p>「机器人状态」页面用它回答两个最要紧的问题：OneBot 连得上吗、机器人账号在线吗。
@@ -74,8 +142,8 @@ public class OneBotClient {
             return ProbeResult.notConfigured();
         }
         try {
-            JsonNode status = postData("/get_status");
-            JsonNode login = postData("/get_login_info");
+            JsonNode status = postData("/get_status", Map.of());
+            JsonNode login = postData("/get_login_info", Map.of());
             boolean online = status != null && status.path("online").asBoolean(false);
             Long selfId = null;
             if (login != null && login.path("user_id").isNumber()) {
@@ -89,8 +157,8 @@ public class OneBotClient {
         }
     }
 
-    /** 调一个不关心入参的 OneBot 接口，返回响应里的 data。 */
-    private JsonNode postData(String path) {
+    /** 调一个 OneBot 接口，返回响应里的 data。 */
+    private JsonNode postData(String path, Map<String, Object> body) {
         RestClient.RequestBodySpec spec = restClient.post()
                 .uri(path)
                 .contentType(MediaType.APPLICATION_JSON);
@@ -98,7 +166,7 @@ public class OneBotClient {
         if (token != null && !token.isBlank()) {
             spec = spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
         }
-        JsonNode response = spec.body(Map.of()).retrieve().body(JsonNode.class);
+        JsonNode response = spec.body(body == null ? Map.of() : body).retrieve().body(JsonNode.class);
         return response == null ? null : response.path("data");
     }
 

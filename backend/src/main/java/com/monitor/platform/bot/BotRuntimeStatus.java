@@ -7,11 +7,13 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayDeque;
+import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -31,6 +33,9 @@ public class BotRuntimeStatus {
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
+    /** 一段对话内容最多留这么多字符（问与答各自截断）。 */
+    private static final int MAX_TEXT = 200;
+
     /** 最近事件最多留这么多条，避免无限增长。 */
     private static final int MAX_RECENT = 30;
 
@@ -47,10 +52,69 @@ public class BotRuntimeStatus {
     private final Deque<DropEvent> recentDrops = new ArrayDeque<>();
     private final Deque<ErrorEvent> recentErrors = new ArrayDeque<>();
 
+    /** 正在处理的一轮对话（key 是内部序号）。 */
+    private final Map<String, ActiveTurn> activeTurns = new ConcurrentHashMap<>();
+
+    /** 最近完成的对话：问了什么、答了什么、花了多久。 */
+    private final Deque<Turn> recentTurns = new ArrayDeque<>();
+    private final AtomicLong turnSeq = new AtomicLong();
+
     private volatile OffsetDateTime lastInboundAt;
     private volatile OffsetDateTime lastOutboundAt;
 
-    /** 收到一条会被处理的消息（已通过白名单等闸门）。 */
+    /**
+     * 开始一轮对话，返回用于结束它的 id。
+     *
+     * <p>「机器人状态」页面用它在「正在处理」里显示：正在和谁、哪个群、说的什么。</p>
+     */
+    public String beginTurn(BotChannel channel, Long groupId, Long userId, String text) {
+        String id = "t" + turnSeq.incrementAndGet();
+        activeTurns.put(id, new ActiveTurn(OffsetDateTime.now(ZONE), String.valueOf(channel),
+                groupId, userId, clip(text)));
+        return id;
+    }
+
+    /** 结束一轮对话，把「问了什么 / 答了什么 / 花了多久」记进最近对话。 */
+    public void finishTurn(String turnId, String answer) {
+        if (turnId == null) {
+            return;
+        }
+        ActiveTurn turn = activeTurns.remove(turnId);
+        if (turn == null) {
+            return;
+        }
+        long elapsedMs = Math.max(0, Duration.between(turn.at().toInstant(), Instant.now()).toMillis());
+        Turn done = new Turn(turn.at(), turn.channel(), turn.groupId(), turn.userId(),
+                turn.text(), clip(answer), elapsedMs);
+        synchronized (recentTurns) {
+            recentTurns.addFirst(done);
+            while (recentTurns.size() > MAX_RECENT) {
+                recentTurns.removeLast();
+            }
+        }
+    }
+
+    /** 正在处理的对话（按开始时间，早的在前）。 */
+    public List<ActiveTurn> activeTurns() {
+        List<ActiveTurn> list = new ArrayList<>(activeTurns.values());
+        list.sort(Comparator.comparing(ActiveTurn::at));
+        return list;
+    }
+
+    /** 最近完成的对话，最新在前。 */
+    public List<Turn> recentTurns() {
+        synchronized (recentTurns) {
+            return new ArrayList<>(recentTurns);
+        }
+    }
+
+    private static String clip(String text) {
+        if (text == null) {
+            return "";
+        }
+        String flat = text.trim().replaceAll("\\s+", " ");
+        return flat.length() <= MAX_TEXT ? flat : flat.substring(0, MAX_TEXT) + "…";
+    }    /** 收到一条会被处理的消息（已通过白名单等闸门）。 */
     public void inbound() {
         inbound.incrementAndGet();
         lastInboundAt = OffsetDateTime.now(ZONE);
@@ -148,6 +212,31 @@ public class BotRuntimeStatus {
     }
 
     /**
+     * 正在处理的一轮对话。
+     *
+     * @param at      收到时间（含排队等待）
+     * @param channel 通道
+     * @param groupId 群号（群聊为本群，临时会话为发起群，好友私聊为空）
+     * @param userId  发送者 QQ
+     * @param text    用户说了什么（已截断）
+     */
+    public record ActiveTurn(OffsetDateTime at, String channel, Long groupId, Long userId, String text) {
+    }
+
+    /**
+     * 一轮已完成的对话。
+     *
+     * @param at        开始时间
+     * @param channel   通道
+     * @param groupId   群号
+     * @param userId    发送者 QQ
+     * @param question  用户说了什么（已截断）
+     * @param answer    机器人答了什么（已截断）
+     * @param elapsedMs 从收到到发出用了多久
+     */
+    public record Turn(OffsetDateTime at, String channel, Long groupId, Long userId,
+                       String question, String answer, long elapsedMs) {
+    }    /**
      * 一条被丢弃的消息。
      *
      * @param at      发生时间

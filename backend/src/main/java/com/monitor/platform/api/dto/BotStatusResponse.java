@@ -16,6 +16,8 @@ import java.util.Map;
  * @param llm           大模型状态
  * @param onebot        OneBot / NapCat 连接状态（实时探测）
  * @param counters      本次启动以来的收发计数
+ * @param activeTurns   正在处理的对话（谁、哪个群、说了什么）
+ * @param recentTurns   最近完成的对话（问了什么、答了什么、耗时）
  * @param dropReasons   丢弃原因分布
  * @param recentDrops   最近被丢弃的消息（最新在前）
  * @param recentErrors  最近的处理错误（最新在前）
@@ -28,6 +30,8 @@ public record BotStatusResponse(
         LlmInfo llm,
         OneBotInfo onebot,
         Counters counters,
+        List<ActiveTurnView> activeTurns,
+        List<TurnView> recentTurns,
         Map<String, Long> dropReasons,
         List<DropView> recentDrops,
         List<ErrorView> recentErrors,
@@ -46,6 +50,15 @@ public record BotStatusResponse(
     /** 收发计数。 */
     public record Counters(long inbound, long replied, long dropped, long failed,
                            OffsetDateTime lastInboundAt, OffsetDateTime lastOutboundAt) {
+    }
+
+    /** 正在处理的一轮对话。 */
+    public record ActiveTurnView(OffsetDateTime at, String channel, Long groupId, Long userId, String text) {
+    }
+
+    /** 一轮已完成的对话。 */
+    public record TurnView(OffsetDateTime at, String channel, Long groupId, Long userId,
+                           String question, String answer, long elapsedMs) {
     }
 
     /** 一条被丢弃的消息。 */
