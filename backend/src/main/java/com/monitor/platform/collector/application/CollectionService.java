@@ -80,6 +80,9 @@ public class CollectionService {
     private static final String COLLECT_STATUS_FAILED = "FAILED";
     private static final String CREDENTIAL_STATUS_VALID = "VALID";
     private static final String ENTITY_TYPE_GROUP = "GROUP";
+
+    /** 渠道状态：启用（即「使用中」）。newapi 给的是 {@code ACTIVE}，sub2api 是 {@code active}。 */
+    private static final String GROUP_STATUS_ACTIVE = "active";
     private static final String CHANGE_GROUP_ADDED = "GROUP_ADDED";
     private static final String CHANGE_GROUP_REMOVED = "GROUP_REMOVED";
     private static final String CHANGE_GROUP_UPDATED = "GROUP_UPDATED";
@@ -1255,7 +1258,7 @@ public class CollectionService {
         // 新增/轮换密钥的前后值可能是整块上游响应（含明文 key），落库前必须脱敏
         event.setOldValue(toRedactedJson(oldValue));
         event.setNewValue(toRedactedJson(newValue));
-        event.setSeverity(groupChangeSeverity(changeType, oldValue, newValue));
+        event.setSeverity("INFO");
         event.setMessage(message);
         event.setInUse(inUse);
         event.setDetectedAt(OffsetDateTime.now());
@@ -1420,7 +1423,30 @@ public class CollectionService {
         return metrics;
     }
 
-    /**     * 渠道变更的级别。     *     * <p>以前这里写死 {@code "INFO"}，结果「渠道涨价」和「新增一个渠道」长得一模一样，     * 全淹没在噪声里 —— 而涨价是直接关系到成本的，必须浮出来。</p>     *     * <ul>     *     <li>倍率（含基础倍率）<strong>上调</strong> → {@code WARNING}（成本上升）；下调 → {@code INFO}；</li>     *     <li>渠道被移除 → {@code WARNING}；</li>     *     <li>其余（新增、改名、改描述等）→ {@code INFO}。</li>     * </ul>     */    static String groupChangeSeverity(String changeType, Object oldValue, Object newValue) {        if (CHANGE_RATE_CHANGED.equals(changeType) || CHANGE_BASE_RATE_CHANGED.equals(changeType)) {            BigDecimal before = toDecimal(oldValue);            BigDecimal after = toDecimal(newValue);            if (before != null && after != null && after.compareTo(before) > 0) {                return "WARNING";            }            return "INFO";        }        if (CHANGE_GROUP_REMOVED.equals(changeType)) {            return "WARNING";        }        return "INFO";    }    private static BigDecimal toDecimal(Object value) {        if (value instanceof BigDecimal decimal) {            return decimal;        }        if (value instanceof Number number) {            return new BigDecimal(number.toString());        }        if (value instanceof String text && !text.isBlank()) {            try {                return new BigDecimal(text.trim());            } catch (NumberFormatException ignored) {                return null;            }        }        return null;    }    private void recordChange(AccountEntity account, String platformType, Long collectionRunId,
+    /**     * 渠道变更的级别。     *     * <p>以前这里写死 {@code "INFO"}，结果「渠道涨价」和「新增一个渠道」长得一模一样，     * 全淹没在噪声里 —— 而涨价是直接关系到成本的，必须浮出来。</p>     *     * <ul>     *     <li>倍率（含基础倍率）<strong>上调</strong> → {@code WARNING}（成本上升）；下调 → {@code INFO}；</li>     *     <li>渠道被移除 → {@code WARNING}；</li>     *     <li>其余（新增、改名、改描述等）→ {@code INFO}。</li>     * </ul>     */    static String groupChangeSeverity(String changeType, Object oldValue, Object newValue) {        if (CHANGE_RATE_CHANGED.equals(changeType) || CHANGE_BASE_RATE_CHANGED.equals(changeType)) {            BigDecimal before = toDecimal(oldValue);            BigDecimal after = toDecimal(newValue);            if (before != null && after != null && after.compareTo(before) > 0) {                return "WARNING";            }            return "INFO";        }        if (CHANGE_GROUP_REMOVED.equals(changeType)) {            return "WARNING";        }        return "INFO";    }    private static BigDecimal toDecimal(Object value) {        if (value instanceof BigDecimal decimal) {            return decimal;        }        if (value instanceof Number number) {            return new BigDecimal(number.toString());        }        if (value instanceof String text && !text.isBlank()) {            try {                return new BigDecimal(text.trim());            } catch (NumberFormatException ignored) {                return null;            }        }        return null;    }    /**
+     * 这条渠道变更是否发生在「使用中」的渠道上。
+     *
+     * <p>口径与密钥的 {@code isKeyInUse} 对齐（见 {@code V14__mark_in_use_key_changes.sql}）：
+     * <strong>变更前后任一时刻处于启用，就算使用中</strong>。渠道对应的「启用」就是状态为
+     * {@code active} / {@code ACTIVE}。</p>
+     *
+     * <p>为什么必须补上：渠道事件以前根本没设过 {@code in_use}，仓库默认填 false ——
+     * 结果「正在使用的渠道涨价」和「一个早就下架的渠道改名」在数据里完全一样，
+     * 邮件只能全发，全是噪声。</p>
+     */
+    static boolean groupInUse(UpstreamGroupEntity entity, String fieldName,
+                                      Object oldValue, Object newValue) {
+        if ("status".equals(fieldName)) {
+            // 状态变更事件：前后任一时刻为启用都算
+            return isGroupActive(oldValue) || isGroupActive(newValue);
+        }
+        // 其它变更（倍率、名称、移除等）：看渠道当时的启用状态
+        return entity != null && isGroupActive(entity.getStatus());
+    }
+
+    private static boolean isGroupActive(Object status) {
+        return status != null && GROUP_STATUS_ACTIVE.equalsIgnoreCase(String.valueOf(status).trim());
+    }    private void recordChange(AccountEntity account, String platformType, Long collectionRunId,
                               UpstreamGroupEntity entity, String changeType,
                               String fieldName, Object oldValue, Object newValue,
                               String message) {
@@ -1436,6 +1462,7 @@ public class CollectionService {
         event.setOldValue(toJson(oldValue));
         event.setNewValue(toJson(newValue));
         event.setSeverity(groupChangeSeverity(changeType, oldValue, newValue));
+        event.setInUse(groupInUse(entity, fieldName, oldValue, newValue));
         event.setMessage(message);
         event.setDetectedAt(OffsetDateTime.now());
         event.setMetadata("{}");

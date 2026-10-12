@@ -1,10 +1,13 @@
 package com.monitor.platform.collector.application;
 
+import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 渠道变更的级别判定。
@@ -46,7 +49,31 @@ class CollectionServiceChangeSeverityTest {
         assertEquals("INFO", CollectionService.groupChangeSeverity("STATUS_CHANGED", "1", "0"));
     }
 
-    /** 值不可比较时（缺值、非数字）保守处理：不误报警告。 */
+    /** 「使用中」：渠道状态为启用（active / ACTIVE）就算使用中。 */
+    @Test
+    void shouldMarkGroupChangeInUseWhenChannelActive() {
+        UpstreamGroupEntity group = new UpstreamGroupEntity();
+
+        group.setStatus("active");
+        assertTrue(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+
+        group.setStatus("ACTIVE");
+        assertTrue(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+
+        group.setStatus("disabled");
+        assertFalse(CollectionService.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+    }
+
+    /** 状态变更：口径与密钥一致 —— 变更前后任一时刻为启用，就算使用中。 */
+    @Test
+    void shouldMarkStatusChangeInUseWhenEitherSideActive() {
+        UpstreamGroupEntity group = new UpstreamGroupEntity();
+        group.setStatus("disabled");
+
+        assertTrue(CollectionService.groupInUse(group, "status", "ACTIVE", "disabled"));
+        assertTrue(CollectionService.groupInUse(group, "status", "disabled", "active"));
+        assertFalse(CollectionService.groupInUse(group, "status", "disabled", "disabled"));
+    }    /** 值不可比较时（缺值、非数字）保守处理：不误报警告。 */
     @Test
     void shouldNotWarnWhenValuesAreNotComparable() {
         assertEquals("INFO", CollectionService.groupChangeSeverity(

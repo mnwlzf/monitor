@@ -413,6 +413,7 @@ public class MonitorChatTools {
 
         matched.sort(Comparator
                 .comparing((PlatformChange item) -> warning(item.event()) ? 0 : 1)
+                .thenComparing((PlatformChange item) -> inUse(item.event()) ? 0 : 1)
                 .thenComparing(item -> item.event().detectedAt(),
                         Comparator.nullsLast(Comparator.reverseOrder())));
         List<PlatformChange> shown = matched.subList(0, Math.min(size, matched.size()));
@@ -423,6 +424,7 @@ public class MonitorChatTools {
                     time(item.event().detectedAt()),
                     warning(item.event()) ? "⚠ 警告" : "信息",
                     item.platform(),
+                    inUse(item.event()) ? "使用中" : "—",
                     changeText(item.event())));
         }
 
@@ -431,6 +433,7 @@ public class MonitorChatTools {
                 BotReport.Col.left("时间"),
                 BotReport.Col.left("级别"),
                 BotReport.Col.left("平台"),
+                BotReport.Col.left("使用中"),
                 BotReport.Col.left("内容")), rows, null);
 
         List<String> notes = new ArrayList<>();
@@ -438,7 +441,7 @@ public class MonitorChatTools {
         if (warnings > 0) {
             notes.add("其中 " + warnings + " 条是警告（倍率上调 / 渠道移除），值得优先看。");
         }
-        notes.add("想看渠道涨价可以问「最近有哪些渠道涨价了」，或发 /变更 倍率。");
+        notes.add("想看渠道涨价可以问「最近有哪些渠道涨价了」，或发 /变更 倍率；只看使用中的渠道发「/变更 使用中」。");
         return BotReport.of("变更记录", List.of(table), notes);
     }
 
@@ -450,10 +453,18 @@ public class MonitorChatTools {
         return "WARNING".equalsIgnoreCase(event.severity());
     }
 
+    /** 变更是否发生在「使用中」的渠道/密钥上（由采集侧按状态判定，见 V14 迁移）。 */
+    private static boolean inUse(UpstreamChangeEventResponse event) {
+        return Boolean.TRUE.equals(event.inUse());
+    }
+
     /** 关键字过滤：填「倍率」只看倍率类变化，其它按 内容/字段/新旧值 模糊匹配。 */
     private static boolean matchesChange(UpstreamChangeEventResponse event, String keyword) {
         if (keyword.isEmpty()) {
             return true;
+        }
+        if ("使用中".equals(keyword) || "在用".equals(keyword) || "inuse".equals(keyword)) {
+            return Boolean.TRUE.equals(event.inUse());
         }
         if ("倍率".equals(keyword) || "rate".equals(keyword)) {
             return "RATE_CHANGED".equalsIgnoreCase(event.changeType())
