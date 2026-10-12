@@ -102,7 +102,7 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         service = new BotMessageService(
-                settingsService, client, tools, orderTools, usageTools, channelStatusService, userCache, imageGenService, runtimeStatus, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, new BotChatClientFactory(tools, orderTools, usageTools, weatherTools, provider));
+                settingsService, client, new BotMessageParser(client), tools, orderTools, usageTools, channelStatusService, userCache, imageGenService, runtimeStatus, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, new BotChatClientFactory(tools, orderTools, usageTools, weatherTools, provider));
     }
 
     private OneBotEvent event(String json) throws Exception {

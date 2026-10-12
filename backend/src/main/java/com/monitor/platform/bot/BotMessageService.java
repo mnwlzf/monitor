@@ -78,7 +78,6 @@ public class BotMessageService {
     private static final Pattern HEATMAP_MARKER = Pattern.compile("\\[\\[HEATMAP:([A-Za-z0-9]+)]]");
 
     /** 引用内容只作为上下文，太长就截断，避免把提示词撑爆。 */
-    private static final int QUOTED_MAX_LENGTH = 300;
 
     /** 邮箱格式校验：够用即可，不做 RFC 级校验。 */
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
@@ -140,11 +139,9 @@ public class BotMessageService {
      */
     private static final String IMAGE_START_NOTICE = "🎨 收到，正在画，大概 30 秒～1 分钟，画好就发给你～";
 
-    /** 用户只发图片、没带文字时的提示词。 */
-    private static final String IMAGE_ONLY_PROMPT = "这是我发来的图片，请描述并回应。";
-
     private final BotSettingsService settingsService;
     private final OneBotClient client;
+    private final BotMessageParser parser;
     private final MonitorChatTools tools;
     private final BotOrderTools orderTools;
     private final BotUsageTools usageTools;
@@ -170,6 +167,7 @@ public class BotMessageService {
 
     public BotMessageService(BotSettingsService settingsService,
                              OneBotClient client,
+                             BotMessageParser parser,
                              MonitorChatTools tools,
                              BotOrderTools orderTools,
                              BotUsageTools usageTools,
@@ -188,6 +186,7 @@ public class BotMessageService {
                              BotChatClientFactory chatClients) {
         this.settingsService = settingsService;
         this.client = client;
+        this.parser = parser;
         this.tools = tools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
@@ -228,14 +227,14 @@ public class BotMessageService {
             runtimeStatus.dropped(channel, event.groupId(), event.userId(), "不在白名单（群号 / QQ）");
             return;
         }
-        if (group && settings.requireMention() && !mentioned(event)) {
+        if (group && settings.requireMention() && !parser.mentioned(event)) {
             // 刻意不计入「未回复」：这条消息本来就不需要机器人回，
             // 计进去会让统计被正常群聊刷满，反而看不出真正被拦下的消息
             return;
         }
-        String text = extractText(event);
+        String text = parser.extractText(event);
         // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见
-        String quoted = quotedText(event);
+        String quoted = parser.quotedText(event);
         // 图片段单独抽出来：之前只认文本段，导致「只发图片」的消息被当成空消息直接丢掉
         List<BotImageFetcher.ImageRef> imageRefs = visionProperties.isEnabled()
                 ? BotImageFetcher.extract(event.message())
@@ -524,7 +523,7 @@ public class BotMessageService {
                     : "看图片需要开启大模型（SPRING_AI_MODEL_CHAT）。当前可用命令：\n" + help(identity, platformFeature);
             return text(message);
         }
-        String promptText = buildPrompt(text, quoted, !images.isEmpty());
+        String promptText = parser.buildPrompt(text, quoted, !images.isEmpty());
         ChatClient.ChatClientRequestSpec request = chatClient.prompt()
                 .user(spec -> {
                     spec.text(promptText);
@@ -651,7 +650,7 @@ public class BotMessageService {
         if (noticeApplied) {
             report = BotReport.fromMarkdown(plain);
         }
-        String truncated = truncate(plain, maxReplyLength);
+        String truncated = parser.truncate(plain, maxReplyLength);
         if (truncated.equals(plain)) {
             sendText(event, group, plain);
             return new SendOutcome(archiveContent(plain, generatedImages), archiveKind(generatedImages));
@@ -757,113 +756,6 @@ public class BotMessageService {
                 : client.sendPrivateImage(event.userId(), png);
     }
 
-    /**
-     * 引用（回复）消息的原文。
-     *
-     * <p>QQ 的引用在消息段里只有一个 {@code reply} 段，<strong>通常只带消息 id、不带正文</strong>，
-     * 所以用户引用一条消息再问「这个是什么」时模型完全是瞎的。这里按两步取：</p>
-     * <ol>
-     *     <li>段里自带 {@code text} / {@code content}（部分实现会带）就直接用；</li>
-     *     <li>否则拿 id 调 OneBot 的 {@code get_msg} 把原文取回来。</li>
-     * </ol>
-     *
-     * <p>取不到就返回空串 —— 少一段上下文不该让整条回复失败。</p>
-     */
-    private String quotedText(OneBotEvent event) {
-        JsonNode message = event.message();
-        if (message == null || !message.isArray()) {
-            return "";
-        }
-        for (JsonNode segment : message) {
-            if (!"reply".equals(segment.path("type").asText())) {
-                continue;
-            }
-            JsonNode data = segment.path("data");
-            String inline = data.path("text").asText("");
-            if (inline.isBlank()) {
-                inline = data.path("content").asText("");
-            }
-            if (!inline.isBlank()) {
-                return clip(inline);
-            }
-            String id = data.path("id").asText("");
-            if (!id.isBlank()) {
-                return clip(client.fetchMessageText(id));
-            }
-        }
-        return "";
-    }
-
-    private static String clip(String text) {
-        if (text == null) {
-            return "";
-        }
-        String trimmed = text.trim().replaceAll("\\s+", " ");
-        return trimmed.length() <= QUOTED_MAX_LENGTH
-                ? trimmed
-                : trimmed.substring(0, QUOTED_MAX_LENGTH) + "…";
-    }
-
-    /**
-     * 组装发给模型的用户消息：把引用内容放在前面当上下文。
-     *
-     * <p>只引用、没打字时也要有话说 —— 以前这种情况会被判成「空消息」直接丢掉。</p>
-     */
-    private static String buildPrompt(String text, String quoted, boolean hasImages) {
-        StringBuilder sb = new StringBuilder();
-        if (!quoted.isBlank()) {
-            sb.append("（用户引用了这条消息：").append(quoted).append("）").append('\n');
-        }
-        if (text.isBlank()) {
-            sb.append(hasImages ? IMAGE_ONLY_PROMPT : "用户只引用了上面这条消息，没有额外文字，请自然地回应。");
-        } else {
-            sb.append(text);
-        }
-        return sb.toString();
-    }    /** 只取文本段，@ 机器人、图片等非文本段自然被丢掉。 */
-    private String extractText(OneBotEvent event) {
-        JsonNode message = event.message();
-        if (message != null && message.isArray()) {
-            StringBuilder sb = new StringBuilder();
-            for (JsonNode segment : message) {
-                if ("text".equals(segment.path("type").asText())) {
-                    sb.append(segment.path("data").path("text").asText(""));
-                }
-            }
-            String text = sb.toString().trim();
-            if (!text.isEmpty()) {
-                return text;
-            }
-        }
-        String raw = event.rawMessage();
-        if (raw == null) {
-            return "";
-        }
-        // post_format=string 时 message 是字符串，这里把 CQ 码去掉
-        return raw.replaceAll("\\[CQ:[^]]*]", " ").replaceAll("\\s+", " ").trim();
-    }
-
-    private boolean mentioned(OneBotEvent event) {
-        JsonNode message = event.message();
-        if (message != null && message.isArray()) {
-            for (JsonNode segment : message) {
-                if ("at".equals(segment.path("type").asText())
-                        && String.valueOf(event.selfId()).equals(segment.path("data").path("qq").asText())) {
-                    return true;
-                }
-            }
-        }
-        String raw = event.rawMessage();
-        return raw != null && event.selfId() != null && raw.contains("[CQ:at,qq=" + event.selfId());
-    }
-
-    private String truncate(String text, int maxReplyLength) {
-        if (text == null) {
-            return "";
-        }
-        int max = Math.max(50, maxReplyLength);
-        return text.length() <= max ? text : text.substring(0, max) + "…（已截断）";
-    }
 
     private static int parseInt(String value, int fallback) {
         try {
