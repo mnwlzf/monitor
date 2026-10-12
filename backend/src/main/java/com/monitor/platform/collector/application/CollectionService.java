@@ -14,22 +14,13 @@ import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.common.util.SecretMasker;
-import com.monitor.platform.common.util.Sha256Util;
-import com.monitor.platform.collector.repository.AccountApiKeyRepository;
-import com.monitor.platform.collector.repository.AccountApiKeySnapshotRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.CollectionRunRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
-import com.monitor.platform.collector.repository.UpstreamGroupRepository;
-import com.monitor.platform.collector.repository.UpstreamGroupSnapshotRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
-import com.monitor.platform.collector.repository.entity.AccountApiKeySnapshotEntity;
 import com.monitor.platform.collector.repository.entity.CollectionRunEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
-import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
-import com.monitor.platform.collector.repository.entity.UpstreamGroupSnapshotEntity;
-import com.monitor.platform.collector.security.CredentialCipher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -45,7 +36,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -85,11 +75,8 @@ public class CollectionService {
     private final AccountCredentialService credentialService;
     private final CollectionRunRepository collectionRunRepository;
     private final AccountSnapshotWriter snapshots;
-    private final UpstreamGroupRepository groupRepository;
-    private final UpstreamGroupSnapshotRepository groupSnapshotRepository;
-    private final AccountApiKeyRepository apiKeyRepository;
-    private final AccountApiKeySnapshotRepository apiKeySnapshotRepository;
-    private final CredentialCipher credentialCipher;
+    private final UpstreamGroupSync groupSync;
+    private final AccountApiKeySync apiKeySync;
     private final NewApiAdapter newApiAdapter;
     private final Sub2ApiAdapter sub2ApiAdapter;
     private final CollectionJson json;
@@ -101,11 +88,8 @@ public class CollectionService {
                              AccountCredentialService credentialService,
                              CollectionRunRepository collectionRunRepository,
                              AccountSnapshotWriter snapshots,
-                             UpstreamGroupRepository groupRepository,
-                             UpstreamGroupSnapshotRepository groupSnapshotRepository,
-                             AccountApiKeyRepository apiKeyRepository,
-                             AccountApiKeySnapshotRepository apiKeySnapshotRepository,
-                             CredentialCipher credentialCipher,
+                             UpstreamGroupSync groupSync,
+                             AccountApiKeySync apiKeySync,
                              NewApiAdapter newApiAdapter,
                              Sub2ApiAdapter sub2ApiAdapter,
                              CollectionJson json,
@@ -116,11 +100,8 @@ public class CollectionService {
         this.credentialService = credentialService;
         this.collectionRunRepository = collectionRunRepository;
         this.snapshots = snapshots;
-        this.groupRepository = groupRepository;
-        this.groupSnapshotRepository = groupSnapshotRepository;
-        this.apiKeyRepository = apiKeyRepository;
-        this.apiKeySnapshotRepository = apiKeySnapshotRepository;
-        this.credentialCipher = credentialCipher;
+        this.groupSync = groupSync;
+        this.apiKeySync = apiKeySync;
         this.newApiAdapter = newApiAdapter;
         this.sub2ApiAdapter = sub2ApiAdapter;
         this.json = json;
@@ -498,247 +479,50 @@ public class CollectionService {
         syncSub2ApiApiKeys(account, platform.getPlatformType(), collectionRunId, baseUrl, email, password);
     }
 
+    /** New API 分组/渠道倍率同步：映射成统一快照后交给 {@link UpstreamGroupSync}。 */
     private void syncNewApiGroups(AccountEntity account, String platformType,
                                   Long collectionRunId, NewApiGroupsResponse response) {
         if (response.data() == null) {
             return;
         }
-
-        Map<String, UpstreamGroupEntity> existing = activeGroupMap(account.getId());
-        Set<String> activeExternalIds = new HashSet<>();
-        OffsetDateTime now = OffsetDateTime.now();
-        int added = 0;
-        int updated = 0;
-
+        List<UpstreamGroupSync.GroupSnapshot> groups = new ArrayList<>();
         for (Map.Entry<String, NewApiGroupsResponse.Group> entry : response.data().entrySet()) {
             String externalGroupId = entry.getKey();
             NewApiGroupsResponse.Group group = entry.getValue();
-            activeExternalIds.add(externalGroupId);
-
-            UpstreamGroupEntity entity = existing.get(externalGroupId);
-            boolean isNew = entity == null;
-            if (isNew) {
-                entity = newGroup(account, platformType, externalGroupId, now);
-            }
-
-            BigDecimal ratio = CollectionValues.decimal(group.ratio());
-            BigDecimal baseRatio = CollectionValues.decimal(group.baseRatio());
-            String status = Boolean.TRUE.equals(group.scheduleActive()) ? "SCHEDULE_ACTIVE" : "ACTIVE";
-            String rawData = json.toJson(group);
-            boolean changed = isNew;
-
-            if (!isNew) {
-                changed = recordGroupChanges(account, platformType, collectionRunId, entity,
-                        externalGroupId, ratio, baseRatio, status,
-                        externalGroupId, null, group.desc());
-            }
-
-            entity.setGroupName(externalGroupId);
-            entity.setDescription(group.desc());
-            entity.setCurrentRatio(ratio);
-            entity.setCurrentBaseRatio(baseRatio);
-            entity.setStatus(status);
-            entity.setIsActive(true);
-            entity.setLastSeenAt(now);
-            entity.setMetadata(rawData);
-            if (changed) {
-                entity.setLastChangedAt(now);
-            }
-            groupRepository.save(entity);
-
-            if (isNew) {
-                added++;
-                changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.GROUP_ADDED,
-                        null, null, rawData, "渠道新增: " + externalGroupId);
-            } else if (changed) {
-                updated++;
-            }
-
-            saveGroupSnapshot(entity, collectionRunId, ratio, baseRatio, status, true, rawData);
+            groups.add(new UpstreamGroupSync.GroupSnapshot(
+                    externalGroupId,
+                    externalGroupId,
+                    group.desc(),
+                    null,
+                    CollectionValues.decimal(group.ratio()),
+                    CollectionValues.decimal(group.baseRatio()),
+                    Boolean.TRUE.equals(group.scheduleActive()) ? "SCHEDULE_ACTIVE" : "ACTIVE",
+                    json.toJson(group)));
         }
-
-        int removed = deactivateMissingGroups(account, platformType, collectionRunId, existing, activeExternalIds, now);
-        log.info("New API 分组同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
-                account.getId(), response.data().size(), added, updated, removed);
+        groupSync.sync(account, platformType, collectionRunId, groups, "New API");
     }
 
+    /** Sub2API 分组/渠道倍率同步：映射成统一快照后交给 {@link UpstreamGroupSync}。 */
     private void syncSub2Groups(AccountEntity account, String platformType,
                                 Long collectionRunId, Sub2GroupsResponse response) {
         if (response.data() == null) {
             return;
         }
-
-        Map<String, UpstreamGroupEntity> existing = activeGroupMap(account.getId());
-        Set<String> activeExternalIds = new HashSet<>();
-        OffsetDateTime now = OffsetDateTime.now();
-        int added = 0;
-        int updated = 0;
-
+        List<UpstreamGroupSync.GroupSnapshot> groups = new ArrayList<>();
         for (Sub2GroupsResponse.Group group : response.data()) {
-            String externalGroupId = String.valueOf(group.id());
-            activeExternalIds.add(externalGroupId);
-
-            UpstreamGroupEntity entity = existing.get(externalGroupId);
-            boolean isNew = entity == null;
-            if (isNew) {
-                entity = newGroup(account, platformType, externalGroupId, now);
-            }
-
-            BigDecimal ratio = CollectionValues.decimal(group.rateMultiplier());
-            String rawData = json.toJson(group);
-            boolean changed = isNew;
-
-            if (!isNew) {
-                changed = recordGroupChanges(account, platformType, collectionRunId, entity,
-                        externalGroupId, ratio, null, group.status(),
-                        group.name(), group.platform(), group.description());
-            }
-
-            entity.setGroupName(group.name());
-            entity.setDescription(group.description());
-            entity.setPlatform(group.platform());
-            entity.setCurrentRatio(ratio);
-            entity.setCurrentBaseRatio(null);
-            entity.setStatus(group.status());
-            entity.setIsActive(true);
-            entity.setLastSeenAt(now);
-            entity.setMetadata(rawData);
-            if (changed) {
-                entity.setLastChangedAt(now);
-            }
-            groupRepository.save(entity);
-
-            if (isNew) {
-                added++;
-                changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.GROUP_ADDED,
-                        null, null, rawData, "渠道新增: " + group.name());
-            } else if (changed) {
-                updated++;
-            }
-
-            saveGroupSnapshot(entity, collectionRunId, ratio, null, group.status(), true, rawData);
+            groups.add(new UpstreamGroupSync.GroupSnapshot(
+                    String.valueOf(group.id()),
+                    group.name(),
+                    group.description(),
+                    group.platform(),
+                    CollectionValues.decimal(group.rateMultiplier()),
+                    null,
+                    group.status(),
+                    json.toJson(group)));
         }
-
-        int removed = deactivateMissingGroups(account, platformType, collectionRunId, existing, activeExternalIds, now);
-        log.info("Sub2API 分组同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
-                account.getId(), response.data().size(), added, updated, removed);
+        groupSync.sync(account, platformType, collectionRunId, groups, "Sub2API");
     }
 
-    /**
-     * 查询账号当前有效分组，并以外部分组 ID 建立索引，便于本轮采集做增量对比。
-     */
-    private Map<String, UpstreamGroupEntity> activeGroupMap(Integer accountId) {
-        Map<String, UpstreamGroupEntity> result = new HashMap<>();
-        for (UpstreamGroupEntity group : groupRepository.findByAccount(accountId, true)) {
-            result.put(group.getExternalGroupId(), group);
-        }
-        return result;
-    }
-
-    /**
-     * 创建新发现的分组实体，并初始化首次发现和最后可见时间。
-     */
-    private UpstreamGroupEntity newGroup(AccountEntity account, String platformType,
-                                         String externalGroupId, OffsetDateTime now) {
-        UpstreamGroupEntity entity = new UpstreamGroupEntity();
-        entity.setAccountId(account.getId());
-        entity.setPlatformType(platformType);
-        entity.setExternalGroupId(externalGroupId);
-        entity.setIsActive(true);
-        entity.setFirstSeenAt(now);
-        entity.setLastSeenAt(now);
-        entity.setLastChangedAt(now);
-        return entity;
-    }
-
-    /**
-     * 将本轮上游未返回的分组标记为下线，并记录下线事件和快照。
-     *
-     * @return 本轮下线的分组数量
-     */
-    private int deactivateMissingGroups(AccountEntity account, String platformType,
-                                         Long collectionRunId,
-                                         Map<String, UpstreamGroupEntity> existing,
-                                         Set<String> activeExternalIds,
-                                         OffsetDateTime now) {
-        int removed = 0;
-        for (UpstreamGroupEntity group : existing.values()) {
-            if (activeExternalIds.contains(group.getExternalGroupId())) {
-                continue;
-            }
-            group.setIsActive(false);
-            group.setLastChangedAt(now);
-            groupRepository.save(group);
-            changeRecorder.recordGroupChange(account, platformType, collectionRunId, group, UpstreamChangeTypes.GROUP_REMOVED,
-                    "is_active", true, false, "渠道已下线: " + group.getGroupName());
-            saveGroupSnapshot(group, collectionRunId, group.getCurrentRatio(),
-                    group.getCurrentBaseRatio(), group.getStatus(), false, "{}");
-            removed++;
-        }
-        return removed;
-    }
-
-    /**
-     * 对比分组本轮数据与上一轮状态，逐字段写入变更事件。
-     *
-     * @return 是否至少发生一项变更
-     */
-    private boolean recordGroupChanges(AccountEntity account, String platformType,
-                                       Long collectionRunId, UpstreamGroupEntity entity,
-                                       String externalGroupId, BigDecimal ratio,
-                                       BigDecimal baseRatio, String status,
-                                       String groupName, String platform, String description) {
-        boolean changed = false;
-        if (CollectionValues.different(entity.getCurrentRatio(), ratio)) {
-            changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.RATE_CHANGED,
-                    "ratio", entity.getCurrentRatio(), ratio, "倍率变化: " + externalGroupId);
-            changed = true;
-        }
-        if (CollectionValues.different(entity.getCurrentBaseRatio(), baseRatio)) {
-            changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.BASE_RATE_CHANGED,
-                    "base_ratio", entity.getCurrentBaseRatio(), baseRatio,
-                    "基础倍率变化: " + externalGroupId);
-            changed = true;
-        }
-        if (!Objects.equals(entity.getStatus(), status)) {
-            changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.STATUS_CHANGED,
-                    "status", entity.getStatus(), status, "状态变化: " + externalGroupId);
-            changed = true;
-        }
-        if (!Objects.equals(entity.getGroupName(), groupName)) {
-            changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.GROUP_UPDATED,
-                    "name", entity.getGroupName(), groupName, "渠道名称变化: " + externalGroupId);
-            changed = true;
-        }
-        if (!Objects.equals(entity.getPlatform(), platform)) {
-            changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.GROUP_UPDATED,
-                    "platform", entity.getPlatform(), platform, "渠道平台变化: " + externalGroupId);
-            changed = true;
-        }
-        if (!Objects.equals(entity.getDescription(), description)) {
-            changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.GROUP_UPDATED,
-                    "description", entity.getDescription(), description, "渠道描述变化: " + externalGroupId);
-            changed = true;
-        }
-        return changed;
-    }
-    /**
-     * 保存一次分组状态快照，用于历史查询和变更追溯。
-     */
-    private void saveGroupSnapshot(UpstreamGroupEntity group, Long collectionRunId,
-                                   BigDecimal ratio, BigDecimal baseRatio, String status,
-                                   boolean active, String rawData) {
-        UpstreamGroupSnapshotEntity snapshot = new UpstreamGroupSnapshotEntity();
-        snapshot.setGroupId(group.getId());
-        snapshot.setCollectionRunId(collectionRunId);
-        snapshot.setRatio(ratio);
-        snapshot.setBaseRatio(baseRatio);
-        snapshot.setStatus(status);
-        snapshot.setIsActive(active);
-        snapshot.setRawData(rawData);
-        snapshot.setContentHash(Sha256Util.hex(rawData));
-        groupSnapshotRepository.save(snapshot);
-    }
 
     /**
      * 同步 New API 密钥：分页拉全量列表、按 id 获取完整明文并加密存储，最后做增量对比。
@@ -760,7 +544,7 @@ public class CollectionService {
             page++;
         }
 
-        Map<String, AccountApiKeyEntity> existing = activeApiKeyMap(account.getId());
+        Map<String, AccountApiKeyEntity> existing = apiKeySync.activeApiKeyMap(account.getId());
         Set<String> activeExternalIds = new HashSet<>();
         OffsetDateTime now = OffsetDateTime.now();
         int added = 0;
@@ -776,10 +560,10 @@ public class CollectionService {
             AccountApiKeyEntity entity = existing.get(externalKeyId);
             boolean isNew = entity == null;
             if (isNew) {
-                entity = newApiKey(account, platformType, externalKeyId, now);
+                entity = apiKeySync.newApiKey(account, platformType, externalKeyId, now);
             }
 
-            boolean rotated = applyFullKey(entity, isNew,
+            boolean rotated = apiKeySync.applyFullKey(entity, isNew,
                     fetchNewApiFullKey(baseUrl, username, password, item.id()));
 
             String status = normalizeNewApiTokenStatus(item.status());
@@ -787,7 +571,7 @@ public class CollectionService {
             BigDecimal usedQuota = CollectionValues.newApiUsd(item.usedQuota());
             boolean changed = isNew || rotated;
             if (!isNew) {
-                changed = recordApiKeyChanges(account, platformType, collectionRunId, entity,
+                changed = apiKeySync.recordApiKeyChanges(account, platformType, collectionRunId, entity,
                         item.name(), status, item.group()) || changed;
             }
 
@@ -813,26 +597,26 @@ public class CollectionService {
             if (changed) {
                 entity.setLastChangedAt(now);
             }
-            apiKeyRepository.save(entity);
+            apiKeySync.save(entity);
 
             if (isNew) {
                 added++;
                 changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.API_KEY_ADDED,
-                        null, null, entity.getRawData(), "密钥新增: " + displayKeyName(entity),
-                        isKeyInUse(entity.getStatus()));
+                        null, null, entity.getRawData(), "密钥新增: " + apiKeySync.displayKeyName(entity),
+                        apiKeySync.isKeyInUse(entity.getStatus()));
             } else if (rotated) {
                 updated++;
                 changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.API_KEY_ROTATED,
-                        "key", null, null, "密钥已轮换: " + displayKeyName(entity),
-                        isKeyInUse(entity.getStatus()));
+                        "key", null, null, "密钥已轮换: " + apiKeySync.displayKeyName(entity),
+                        apiKeySync.isKeyInUse(entity.getStatus()));
             } else if (changed) {
                 updated++;
             }
 
-            saveApiKeySnapshot(entity, collectionRunId, now);
+            apiKeySync.saveApiKeySnapshot(entity, collectionRunId, now);
         }
 
-        int removed = deactivateMissingApiKeys(account, platformType, collectionRunId, existing, activeExternalIds, now);
+        int removed = apiKeySync.deactivateMissingApiKeys(account, platformType, collectionRunId, existing, activeExternalIds, now);
         log.info("New API 密钥同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
                 account.getId(), items.size(), added, updated, removed);
     }
@@ -844,7 +628,7 @@ public class CollectionService {
                                     String baseUrl, String email, String password) {
         List<Sub2KeysResponse.KeyItem> items = sub2ApiAdapter.fetchAllKeys(baseUrl, email, password);
         Map<String, Sub2ApiKeysUsageResponse.Stat> usageStats = fetchSub2KeyUsage(baseUrl, email, password, items);
-        Map<String, AccountApiKeyEntity> existing = activeApiKeyMap(account.getId());
+        Map<String, AccountApiKeyEntity> existing = apiKeySync.activeApiKeyMap(account.getId());
         Set<String> activeExternalIds = new HashSet<>();
         OffsetDateTime now = OffsetDateTime.now();
         int added = 0;
@@ -860,17 +644,17 @@ public class CollectionService {
             AccountApiKeyEntity entity = existing.get(externalKeyId);
             boolean isNew = entity == null;
             if (isNew) {
-                entity = newApiKey(account, platformType, externalKeyId, now);
+                entity = apiKeySync.newApiKey(account, platformType, externalKeyId, now);
             }
 
             String fullKey = item.key();
-            boolean rotated = applyFullKey(entity, isNew,
+            boolean rotated = apiKeySync.applyFullKey(entity, isNew,
                     fullKey == null || fullKey.isBlank() || fullKey.contains("*") ? null : fullKey);
 
             String status = normalizeSub2KeyStatus(item.status());
             boolean changed = isNew || rotated;
             if (!isNew) {
-                changed = recordApiKeyChanges(account, platformType, collectionRunId, entity,
+                changed = apiKeySync.recordApiKeyChanges(account, platformType, collectionRunId, entity,
                         item.name(), status, item.group() == null ? null : item.group().name()) || changed;
             }
 
@@ -896,26 +680,26 @@ public class CollectionService {
             if (changed) {
                 entity.setLastChangedAt(now);
             }
-            apiKeyRepository.save(entity);
+            apiKeySync.save(entity);
 
             if (isNew) {
                 added++;
                 changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.API_KEY_ADDED,
-                        null, null, entity.getRawData(), "密钥新增: " + displayKeyName(entity),
-                        isKeyInUse(entity.getStatus()));
+                        null, null, entity.getRawData(), "密钥新增: " + apiKeySync.displayKeyName(entity),
+                        apiKeySync.isKeyInUse(entity.getStatus()));
             } else if (rotated) {
                 updated++;
                 changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.API_KEY_ROTATED,
-                        "key", null, null, "密钥已轮换: " + displayKeyName(entity),
-                        isKeyInUse(entity.getStatus()));
+                        "key", null, null, "密钥已轮换: " + apiKeySync.displayKeyName(entity),
+                        apiKeySync.isKeyInUse(entity.getStatus()));
             } else if (changed) {
                 updated++;
             }
 
-            saveApiKeySnapshot(entity, collectionRunId, now);
+            apiKeySync.saveApiKeySnapshot(entity, collectionRunId, now);
         }
 
-        int removed = deactivateMissingApiKeys(account, platformType, collectionRunId, existing, activeExternalIds, now);
+        int removed = apiKeySync.deactivateMissingApiKeys(account, platformType, collectionRunId, existing, activeExternalIds, now);
         log.info("Sub2API 密钥同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
                 account.getId(), items.size(), added, updated, removed);
     }
@@ -931,138 +715,6 @@ public class CollectionService {
                     baseUrl, tokenId, ex.getMessage());
             return null;
         }
-    }
-
-    /**
-     * 加密并写入完整密钥；哈希变化时判定为轮换。
-     *
-     * @return 密钥是否发生轮换
-     */
-    private boolean applyFullKey(AccountApiKeyEntity entity, boolean isNew, String fullKey) {
-        if (fullKey == null || fullKey.isBlank()) {
-            return false;
-        }
-        String hash = Sha256Util.hex(fullKey);
-        boolean rotated = !isNew && entity.getKeyHash() != null && !entity.getKeyHash().equals(hash);
-        if (isNew || rotated || entity.getKeyHash() == null) {
-            CredentialCipher.EncryptedCredential encrypted = credentialCipher.encrypt(fullKey);
-            entity.setKeyEncryptionAlgorithm(encrypted.algorithm());
-            entity.setKeyEncryptedPayload(encrypted.encryptedPayload());
-            entity.setKeyInitializationVector(encrypted.initializationVector());
-            entity.setKeyKeyVersion(encrypted.keyVersion());
-            entity.setKeyHash(hash);
-        }
-        return rotated;
-    }
-
-    /**
-     * 查询账号当前有效密钥，并以上游密钥 ID 建立索引，便于本轮采集做增量对比。
-     */
-    private Map<String, AccountApiKeyEntity> activeApiKeyMap(Integer accountId) {
-        Map<String, AccountApiKeyEntity> result = new HashMap<>();
-        for (AccountApiKeyEntity key : apiKeyRepository.findByAccount(accountId, true)) {
-            result.put(key.getExternalKeyId(), key);
-        }
-        return result;
-    }
-
-    /**
-     * 创建新发现的密钥实体，并初始化首次发现和最后可见时间。
-     */
-    private AccountApiKeyEntity newApiKey(AccountEntity account, String platformType,
-                                          String externalKeyId, OffsetDateTime now) {
-        AccountApiKeyEntity entity = new AccountApiKeyEntity();
-        entity.setAccountId(account.getId());
-        entity.setPlatformType(platformType);
-        entity.setExternalKeyId(externalKeyId);
-        entity.setIsActive(true);
-        entity.setFirstSeenAt(now);
-        entity.setLastSeenAt(now);
-        entity.setLastChangedAt(now);
-        return entity;
-    }
-
-    /**
-     * 对比密钥名称、状态和所属分组，逐字段写入变更事件；额度类指标不参与比较。
-     *
-     * @return 是否至少发生一项变更
-     */
-    private boolean recordApiKeyChanges(AccountEntity account, String platformType, Long collectionRunId,
-                                        AccountApiKeyEntity entity, String keyName, String status,
-                                        String groupName) {
-        // 变更前后任一时刻处于启用状态，都视为「正在使用的密钥」发生的变更。
-        boolean inUse = isKeyInUse(entity.getStatus()) || isKeyInUse(status);
-        boolean changed = false;
-        if (!Objects.equals(entity.getKeyName(), keyName)) {
-            // 名称本身就是变化项，用明确标注的上游 ID 定位密钥，避免旧名被误读成新名。
-            changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.API_KEY_UPDATED,
-                    "name", entity.getKeyName(), keyName,
-                    "密钥名称变化（密钥 ID " + entity.getExternalKeyId() + "）", inUse);
-            changed = true;
-        }
-        if (!Objects.equals(entity.getStatus(), status)) {
-            changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.API_KEY_UPDATED,
-                    "status", entity.getStatus(), status, "密钥状态变化: " + displayKeyName(entity), inUse);
-            changed = true;
-        }
-        if (!Objects.equals(entity.getGroupName(), groupName)) {
-            changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, entity, UpstreamChangeTypes.API_KEY_UPDATED,
-                    "group", entity.getGroupName(), groupName, "密钥所属分组变化: " + displayKeyName(entity), inUse);
-            changed = true;
-        }
-        return changed;
-    }
-
-    /** 密钥归一化状态是否为启用（正在使用）。 */
-    private boolean isKeyInUse(String status) {
-        return KEY_STATUS_ACTIVE.equalsIgnoreCase(status);
-    }
-
-    /**
-     * 将本轮上游未返回的密钥标记为失效，并记录事件与快照。
-     *
-     * @return 本轮失效的密钥数量
-     */
-    private int deactivateMissingApiKeys(AccountEntity account, String platformType, Long collectionRunId,
-                                         Map<String, AccountApiKeyEntity> existing,
-                                         Set<String> activeExternalIds, OffsetDateTime now) {
-        int removed = 0;
-        for (AccountApiKeyEntity key : existing.values()) {
-            if (activeExternalIds.contains(key.getExternalKeyId())) {
-                continue;
-            }
-            key.setIsActive(false);
-            key.setLastChangedAt(now);
-            apiKeyRepository.save(key);
-            changeRecorder.recordApiKeyChange(account, platformType, collectionRunId, key, UpstreamChangeTypes.API_KEY_REMOVED,
-                    "is_active", true, false, "密钥已失效: " + displayKeyName(key), isKeyInUse(key.getStatus()));
-            saveApiKeySnapshot(key, collectionRunId, now);
-            removed++;
-        }
-        return removed;
-    }
-
-    /**
-     * 保存一次密钥状态快照，用于历史查询。
-     */
-    private void saveApiKeySnapshot(AccountApiKeyEntity entity, Long collectionRunId, OffsetDateTime now) {
-        AccountApiKeySnapshotEntity snapshot = new AccountApiKeySnapshotEntity();
-        snapshot.setApiKeyId(entity.getId());
-        snapshot.setAccountId(entity.getAccountId());
-        snapshot.setCollectionRunId(collectionRunId);
-        snapshot.setPlatformType(entity.getPlatformType());
-        snapshot.setExternalKeyId(entity.getExternalKeyId());
-        snapshot.setKeyName(entity.getKeyName());
-        snapshot.setStatus(entity.getStatus());
-        snapshot.setGroupName(entity.getGroupName());
-        snapshot.setUnlimitedQuota(entity.getUnlimitedQuota());
-        snapshot.setRemainQuota(entity.getRemainQuota());
-        snapshot.setUsedQuota(entity.getUsedQuota());
-        snapshot.setQuotaUnit(entity.getQuotaUnit());
-        snapshot.setMetrics(entity.getMetrics());
-        snapshot.setRawData(entity.getRawData());
-        snapshot.setCollectedAt(now);
-        apiKeySnapshotRepository.save(snapshot);
     }
 
     /**
@@ -1127,23 +779,6 @@ public class CollectionService {
      */
     private String maskKey(String key) {
         return SecretMasker.mask(key);
-    }
-
-    /**
-     * 变更说明里的密钥标识：优先名称、其次脱敏值，并统一附上明确标注的上游 ID。
-     *
-     * <p>只写裸 ID 时无法判断这串数字代表什么，这里始终带上「密钥 ID」前缀，
-     * 保证变更记录自解释、无歧义。</p>
-     */
-    private String displayKeyName(AccountApiKeyEntity entity) {
-        String identity = "密钥 ID " + entity.getExternalKeyId();
-        if (StrUtil.isNotEmpty(entity.getKeyName())) {
-            return entity.getKeyName() + "（" + identity + "）";
-        }
-        if (StrUtil.isNotEmpty(entity.getKeyMasked())) {
-            return entity.getKeyMasked() + "（" + identity + "）";
-        }
-        return identity;
     }
 
     /**

@@ -60,6 +60,9 @@ class CollectionFailureReportingTest {
         newApiAdapter = mock(NewApiAdapter.class);
 
         Executor synchronousExecutor = Runnable::run;
+        CollectionJson json = new CollectionJson(new ObjectMapper());
+        UpstreamChangeRecorder changeRecorder =
+                new UpstreamChangeRecorder(mock(UpstreamChangeEventRepository.class), json);
         service = new CollectionService(
                 accountRepository,
                 platformRepository,
@@ -68,16 +71,21 @@ class CollectionFailureReportingTest {
                 new AccountSnapshotWriter(
                         mock(AccountMetricSnapshotRepository.class),
                         mock(AccountUsageDashboardSnapshotRepository.class),
-                        new CollectionJson(new ObjectMapper())),
-                mock(UpstreamGroupRepository.class),
-                mock(UpstreamGroupSnapshotRepository.class),
-                mock(AccountApiKeyRepository.class),
-                mock(AccountApiKeySnapshotRepository.class),
-                mock(CredentialCipher.class),
+                        json),
+                new UpstreamGroupSync(
+                        mock(UpstreamGroupRepository.class),
+                        mock(UpstreamGroupSnapshotRepository.class),
+                        changeRecorder,
+                        json),
+                new AccountApiKeySync(
+                        mock(AccountApiKeyRepository.class),
+                        mock(AccountApiKeySnapshotRepository.class),
+                        changeRecorder,
+                        mock(CredentialCipher.class)),
                 newApiAdapter,
                 mock(Sub2ApiAdapter.class),
-                new CollectionJson(new ObjectMapper()),
-                new UpstreamChangeRecorder(mock(UpstreamChangeEventRepository.class), new CollectionJson(new ObjectMapper())),
+                json,
+                changeRecorder,
                 synchronousExecutor);
 
         platform = new PlatformEntity();
