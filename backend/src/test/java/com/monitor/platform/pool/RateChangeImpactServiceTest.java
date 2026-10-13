@@ -65,6 +65,7 @@ class RateChangeImpactServiceTest {
         pool.setExternalAccountId(52064L);
         pool.setName("满血");
         pool.setBoundKeyId(100L);
+        pool.setSchedulable(true);
         when(poolAccountRepository.findDistinctPlatformIds()).thenReturn(List.of(1));
         when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(pool));
 
@@ -94,6 +95,20 @@ class RateChangeImpactServiceTest {
         event.setOldValue(before);
         event.setNewValue(after);
         return event;
+    }
+
+    @Test
+    void skipsAccountsThatAreNotSchedulable() {
+        PoolAccountEntity disabled = new PoolAccountEntity();
+        disabled.setId(2L);
+        disabled.setPlatformId(1);
+        disabled.setExternalAccountId(52065L);
+        disabled.setName("停用号");
+        disabled.setBoundKeyId(100L);
+        disabled.setSchedulable(false);
+        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(disabled));
+
+        assertThat(service.impactOf(rateEvent("0.30", "0.37"))).isEmpty();
     }
 
     @Test

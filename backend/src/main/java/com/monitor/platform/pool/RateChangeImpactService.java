@@ -292,12 +292,20 @@ public class RateChangeImpactService {
         }
     }
 
-    /** 本平台号池账号：keyId（account_api_keys.id）→ 账号。 */
+    /**
+     * 本平台号池账号：keyId（account_api_keys.id）→ 账号。
+     *
+     * <p>只收「允许调度」的账号：不可调度的号根本不接流量，
+     * 上游渠道涨价轮不到它，算进来只会污染影响范围。</p>
+     */
     private Map<Long, PoolAccountView> boundPoolAccounts() {
         Map<Long, PoolAccountView> result = new HashMap<>();
         for (Integer platformId : poolAccountRepository.findDistinctPlatformIds()) {
             for (PoolAccountEntity account : poolAccountRepository.findByPlatform(platformId)) {
                 if (account.getBoundKeyId() == null || account.getExternalAccountId() == null) {
+                    continue;
+                }
+                if (!Boolean.TRUE.equals(account.getSchedulable())) {
                     continue;
                 }
                 String name = account.getName() == null || account.getName().isBlank()
