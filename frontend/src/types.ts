@@ -83,7 +83,22 @@ export interface ChangeEvent {
   platformId: number
   platformName: string
   platformType: PlatformType
+  /** 变更实体类型：GROUP（渠道）/ API_KEY（密钥）。 */
+  entityType: string
+  /** 上游实体 ID（渠道 ID / 密钥 ID），名字取不到时兜底展示。 */
   entity: string
+  /** 变更对象的名字：渠道名 / 上游密钥名；取不到时与 entity 相同。 */
+  entityName: string
+  /** 变更所属账号 ID。 */
+  accountId: number
+  /** 变更所属账号名（上游账号）。 */
+  accountName: string
+  /** 受影响的「上游账号 Key」名字（多个用「、」连接）。 */
+  upstreamKeyNames: string
+  /** 对应的「本平台 Key」名字（号池账号名，多个用「、」连接）。 */
+  localKeyNames: string
+  /** 所在分组的当前倍率（渠道事件）。 */
+  groupRatio: number | null
   field: string
   oldValue: string
   newValue: string

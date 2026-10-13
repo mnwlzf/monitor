@@ -177,7 +177,7 @@ public class ChannelChangeAlertService {
         for (UpstreamChangeEventEntity event : events) {
             sb.append("- ").append(MailFormat.formatTime(event.getDetectedAt()))
                     .append(' ').append(accountNameResolver.accountName(event.getAccountId(), accountNames))
-                    .append(" 渠道=").append(channelName(event))
+                    .append(" 渠道/密钥=").append(channelName(event))
                     .append(' ').append(event.getMessage() == null ? event.getChangeType() : event.getMessage());
             String before = MailFormat.scalar(event.getOldValue());
             String after = MailFormat.scalar(event.getNewValue());
@@ -211,8 +211,10 @@ public class ChannelChangeAlertService {
         html.append("<tr style=\"background:#f5f5f5\">")
                 .append("<th align=\"left\">时间</th>")
                 .append("<th align=\"left\">平台</th>")
-                .append("<th align=\"left\">账号</th>")
-                .append("<th align=\"left\">渠道</th>")
+                .append("<th align=\"left\">上游账号</th>")
+                .append("<th align=\"left\">上游 Key</th>")
+                .append("<th align=\"left\">本平台 Key</th>")
+                .append("<th align=\"left\">分组（倍率）</th>")
                 .append("<th align=\"left\">级别</th>")
                 .append("<th align=\"left\">类型</th>")
                 .append("<th align=\"left\">变化</th>")
@@ -224,7 +226,9 @@ public class ChannelChangeAlertService {
                             accountNameResolver.platformName(event.getAccountId(), platformNames))).append("</td>")
                     .append("<td>").append(MailFormat.escape(
                             accountNameResolver.accountName(event.getAccountId(), accountNames))).append("</td>")
-                    .append("<td>").append(MailFormat.escape(channelName(event))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(upstreamKeyLabel(event))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(localKeyLabel(event))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(groupWithRatio(event))).append("</td>")
                     .append("<td>").append(MailFormat.escape(severityLabel(event.getSeverity()))).append("</td>")
                     .append("<td>").append(MailFormat.escape(changeLabel(event.getChangeType()))).append("</td>")
                     .append("<td>").append(changeDescription(event)).append("</td>")
@@ -235,8 +239,41 @@ public class ChannelChangeAlertService {
         return html.toString();
     }
 
-    /** 渠道名；GROUP 事件取 join 出来的名字，取不到退回上游 ID（至少还能查）。 */
+    /** 受影响的「上游账号 Key」名；取不到退回单个 key 名 / 上游 ID。 */
+    private String upstreamKeyLabel(UpstreamChangeEventEntity event) {
+        if (event.getUpstreamKeyNames() != null && !event.getUpstreamKeyNames().isBlank()) {
+            return event.getUpstreamKeyNames();
+        }
+        if (event.getKeyName() != null && !event.getKeyName().isBlank()) {
+            return event.getKeyName();
+        }
+        return event.getEntityKey() == null ? "-" : event.getEntityKey();
+    }
+
+    /** 对应的「本平台 Key」（号池账号名）；没绑定显示「-」。 */
+    private String localKeyLabel(UpstreamChangeEventEntity event) {
+        return event.getLocalKeyNames() == null || event.getLocalKeyNames().isBlank()
+                ? "-"
+                : event.getLocalKeyNames();
+    }
+
+    /** 分组名 + 当前倍率。 */
+    private String groupWithRatio(UpstreamChangeEventEntity event) {
+        String group = channelName(event);
+        if (event.getGroupRatio() == null) {
+            return group;
+        }
+        return group + "（倍率 " + event.getGroupRatio().stripTrailingZeros().toPlainString() + "）";
+    }
+
+    /**
+     * 变更对象的名字：渠道事件取渠道名，密钥事件取上游密钥名，取不到退回上游 ID（至少还能查）。
+     */
     private String channelName(UpstreamChangeEventEntity event) {
+        if ("API_KEY".equalsIgnoreCase(event.getEntityType())
+                && event.getKeyName() != null && !event.getKeyName().isBlank()) {
+            return event.getKeyName();
+        }
         if (event.getGroupName() != null && !event.getGroupName().isBlank()) {
             return event.getGroupName();
         }

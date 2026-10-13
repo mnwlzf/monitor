@@ -11,6 +11,11 @@
         <result column="entity_id" property="entityId"/>
         <result column="entity_key" property="entityKey"/>
         <result column="group_name" property="groupName"/>
+        <result column="account_name" property="accountName"/>
+        <result column="key_name" property="keyName"/>
+        <result column="upstream_key_names" property="upstreamKeyNames"/>
+        <result column="local_key_names" property="localKeyNames"/>
+        <result column="group_ratio" property="groupRatio"/>
         <result column="change_type" property="changeType"/>
         <result column="field_name" property="fieldName"/>
         <result column="old_value" property="oldValue" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
@@ -26,7 +31,31 @@
         e.id, e.account_id, e.platform_type, e.collection_run_id, e.entity_type, e.entity_id,
         e.entity_key, e.change_type, e.field_name, e.old_value, e.new_value, e.severity,
         e.message, e.detected_at, e.in_use, e.metadata,
-        g.group_name AS group_name
+        g.group_name AS group_name,
+        -- 管理员要看到的是「我自己的哪个 sub2api 账号」+「哪个上游 key」，只给 ID 没法对号入座
+        COALESCE(NULLIF(a.display_name, ''), a.username) AS account_name,
+        (SELECT k.key_name
+           FROM account_api_keys k
+          WHERE k.account_id = e.account_id
+            AND k.external_key_id = e.entity_key
+          ORDER BY k.id DESC
+          LIMIT 1) AS key_name,
+        g.current_ratio AS group_ratio,
+        -- 受影响的「上游账号 Key」：密钥事件按 key 匹配，渠道事件按同分组匹配
+        (SELECT string_agg(k.key_name, '、' ORDER BY k.id)
+           FROM account_api_keys k
+          WHERE k.account_id = e.account_id
+            AND ((e.entity_type = 'API_KEY' AND k.external_key_id = e.entity_key)
+              OR (e.entity_type = 'GROUP'
+                  AND (g.group_name IS NULL OR k.group_name = g.group_name)))) AS upstream_key_names,
+        -- 对应的「本平台 Key」：号池账号通过 bound_key_id 绑到上游 Key
+        (SELECT string_agg(pa.name, '、' ORDER BY pa.id)
+           FROM account_api_keys k
+           JOIN pool_accounts pa ON pa.bound_key_id = k.id
+          WHERE k.account_id = e.account_id
+            AND ((e.entity_type = 'API_KEY' AND k.external_key_id = e.entity_key)
+              OR (e.entity_type = 'GROUP'
+                  AND (g.group_name IS NULL OR k.group_name = g.group_name)))) AS local_key_names
     </sql>
 
     <!-- 变更事件要带出渠道名：页面和邮件上只有渠道名，光给 ID 运维没法对号入座 -->
@@ -35,6 +64,8 @@
         LEFT JOIN upstream_groups g
                ON g.account_id = e.account_id
               AND g.external_group_id = e.entity_key
+        LEFT JOIN accounts a
+               ON a.id = e.account_id
     </sql>
 
     <!--

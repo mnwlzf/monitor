@@ -283,8 +283,16 @@ interface GroupDto {
 
 interface ChangeEventDto {
   id: string | number
+  accountId?: number
+  accountName?: string
   changeType: string
+  entityType?: string
   entityKey?: string
+  groupName?: string
+  keyName?: string
+  upstreamKeyNames?: string
+  localKeyNames?: string
+  groupRatio?: string | number | null
   fieldName?: string
   oldValue?: string
   newValue?: string
@@ -318,7 +326,15 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
     platformId: platform.id,
     platformName: platform.name,
     platformType: platform.type,
+    entityType: row.entityType || '',
     entity: row.entityKey || '',
+    // 展示优先用名字：密钥事件取上游密钥名，渠道事件取渠道名，取不到退回上游 ID
+    entityName: row.keyName || row.groupName || row.entityKey || '',
+    accountId: Number(row.accountId ?? 0),
+    accountName: row.accountName || '',
+    upstreamKeyNames: row.upstreamKeyNames || '',
+    localKeyNames: row.localKeyNames || '',
+    groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
     field: row.fieldName || '',
     oldValue: row.oldValue || 'null',
     newValue: row.newValue || 'null',

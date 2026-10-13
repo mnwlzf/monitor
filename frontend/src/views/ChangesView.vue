@@ -11,7 +11,7 @@
 
     <el-card shadow="never" class="admin-card admin-toolbar-card">
       <div class="admin-toolbar">
-        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索渠道、说明或平台" />
+        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索账号、渠道 / 密钥、说明或平台" />
         <el-select v-model="platformFilter" clearable placeholder="全部平台" class="admin-toolbar-select">
           <el-option v-for="platform in platforms" :key="platform.id" :label="platform.name" :value="platform.id" />
         </el-select>
@@ -49,6 +49,18 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="本平台 Key" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ row.localKeyNames || '—' }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="上游 Key" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ row.upstreamKeyNames || '—' }}</span>
+          </template>
+        </el-table-column>
+
         <el-table-column label="类型" min-width="190">
           <template #default="{ row }">
             <el-tag :type="severityType(row.severity)" effect="light">{{ changeLabel(row.type) }}</el-tag>
@@ -56,10 +68,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="entity" label="渠道 / 密钥" min-width="200" show-overflow-tooltip>
+        <el-table-column label="渠道 / 密钥" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            <strong>{{ row.entity || '—' }}</strong>
-            <div v-if="row.field" class="admin-table-sub muted">{{ fieldLabel(asChange(row)) }}</div>
+            <strong>{{ row.entityName || row.entity || '—' }}</strong>
+            <el-tag v-if="row.groupRatio != null" size="small" type="warning" effect="plain" class="admin-change-ratio-tag">
+              倍率 {{ formatRatio(row.groupRatio) }}
+            </el-tag>
+            <div v-if="entitySubtitle(asChange(row))" class="admin-table-sub muted">{{ entitySubtitle(asChange(row)) }}</div>
           </template>
         </el-table-column>
 
@@ -100,6 +115,13 @@
           <el-tag size="small" effect="plain">{{ changeLabel(changeDetail.type) }}</el-tag>
           <span class="muted">{{ changeDetail.platformName || '未知平台' }} · {{ formatDate(changeDetail.detectedAt) }}</span>
         </div>
+        <p class="admin-change-detail-target">
+          本平台 Key：{{ changeDetail.localKeyNames || '—' }} ·
+          上游 Key：{{ changeDetail.upstreamKeyNames || '—' }} ·
+          上游账号：{{ changeDetail.accountName || '—' }} ·
+          分组：{{ changeDetail.entityName || changeDetail.entity || '—' }}
+          <template v-if="changeDetail.groupRatio != null"> · 分组倍率：{{ formatRatio(changeDetail.groupRatio) }}</template>
+        </p>
         <p class="admin-change-detail-message">{{ changeDetail.message || '—' }}</p>
         <div v-if="changeDetail.field" class="admin-change-detail-field">字段：{{ changeDetail.field }}</div>
         <div class="admin-change-detail-block">
@@ -162,7 +184,7 @@ const typeOptions = [
 ]
 
 const filteredChanges = computed(() => props.changes.filter(change => {
-  const text = `${change.entity} ${change.field} ${change.message} ${change.type} ${change.platformName}`.toLowerCase()
+  const text = `${change.accountName} ${change.upstreamKeyNames} ${change.localKeyNames} ${change.entityName} ${change.entity} ${change.field} ${change.message} ${change.type} ${change.platformName}`.toLowerCase()
   const keywordMatched = !keyword.value || text.includes(keyword.value.trim().toLowerCase())
   const platformMatched = !platformFilter.value || change.platformId === platformFilter.value
   const typeMatched = !typeFilter.value || change.type === typeFilter.value
@@ -227,6 +249,18 @@ const apiKeyFieldLabels: Record<string, string> = {
   group: '所属分组',
   key: '密钥明文',
   is_active: '启用状态',
+}
+
+/**
+ * 表格副标题：字段中文名 + 上游 ID。
+ * 名字已经显示在主行；这里保留 ID 便于和上游后台对号入座。
+ */
+function entitySubtitle(change: ChangeEvent) {
+  const parts: string[] = []
+  const field = fieldLabel(change)
+  if (field) parts.push(field)
+  if (change.entity && change.entity !== change.entityName) parts.push(`ID ${change.entity}`)
+  return parts.join(' · ')
 }
 
 function fieldLabel(change: ChangeEvent) {
@@ -326,6 +360,11 @@ function severityType(severity: ChangeEvent['severity']) {
   return 'success'
 }
 
+/** 倍率去掉无意义的尾零：1.50000000 → 1.5。 */
+function formatRatio(value: number | null) {
+  return value == null ? '' : String(Number(value))
+}
+
 function formatDate(value: string) {
   return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
@@ -334,6 +373,17 @@ function formatDate(value: string) {
 <style scoped>
 .admin-change-inuse-tag {
   margin-left: 6px;
+}
+
+.admin-change-ratio-tag {
+  margin-left: 6px;
+}
+
+/* 详情弹窗顶部的「本平台 Key · 上游 Key · 分组」一行 */
+.admin-change-detail-target {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #303133;
 }
 
 /* 正在使用密钥的变更整行高亮（覆盖 stripe 交替底色） */

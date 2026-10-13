@@ -261,7 +261,9 @@ public class MonitorChatTools {
                     ReportFormats.time(item.event().detectedAt()),
                     warning(item.event()) ? "⚠ 警告" : "信息",
                     item.platform(),
-                    channelName(item.event()),
+                    localKeyNames(item.event()),
+                    upstreamKeyNames(item.event()),
+                    groupWithRatio(item.event()),
                     inUse(item.event()) ? "使用中" : "—",
                     changeText(item.event())));
         }
@@ -271,7 +273,9 @@ public class MonitorChatTools {
                 BotReport.Col.left("时间"),
                 BotReport.Col.left("级别"),
                 BotReport.Col.left("平台"),
-                BotReport.Col.left("渠道"),
+                BotReport.Col.left("本平台 Key"),
+                BotReport.Col.left("上游 Key"),
+                BotReport.Col.left("分组（倍率）"),
                 BotReport.Col.left("使用中"),
                 BotReport.Col.left("内容")), rows, null);
 
@@ -293,16 +297,57 @@ public class MonitorChatTools {
     }
 
     /**
-     * 渠道名。
+     * 本平台 Key（自己 Sub2API 里的号池账号名）。
      *
-     * <p>变更事件里存的是上游渠道 ID，而页面上只有渠道名 —— 只给 ID 等于让人自己去猜是哪个渠道。
-     * 名字由查询 join upstream_groups 带出来；取不到时退回 ID（至少还能查）。</p>
+     * <p>绑定链路：号池账号 {@code pool_accounts.bound_key_id} → 上游 Key
+     * {@code account_api_keys.id}；名字由查询带出来，没绑定就是「—」。</p>
      */
-    private static String channelName(UpstreamChangeEventResponse event) {
+    private static String localKeyNames(UpstreamChangeEventResponse event) {
+        return event.localKeyNames() == null || event.localKeyNames().isBlank()
+                ? "—"
+                : event.localKeyNames();
+    }
+
+    /**
+     * 受影响的<strong>上游账号 Key 名</strong>：渠道事件按同分组匹配，密钥事件就是它本身。
+     */
+    private static String upstreamKeyNames(UpstreamChangeEventResponse event) {
+        if (event.upstreamKeyNames() != null && !event.upstreamKeyNames().isBlank()) {
+            return event.upstreamKeyNames();
+        }
+        if ("API_KEY".equalsIgnoreCase(event.entityType())) {
+            return entityName(event);
+        }
+        return "—";
+    }
+
+    /** 分组名 + 该分组的当前倍率（渠道倍率变化时一眼看出涨到多少）。 */
+    private static String groupWithRatio(UpstreamChangeEventResponse event) {
+        if (event.groupName() == null || event.groupName().isBlank()) {
+            return entityName(event);
+        }
+        if (event.groupRatio() == null) {
+            return event.groupName();
+        }
+        return event.groupName() + "（倍率 "
+                + event.groupRatio().stripTrailingZeros().toPlainString() + "）";
+    }
+
+    /**
+     * 变更对象的名字：渠道事件取渠道名，密钥事件取<strong>上游密钥名</strong>。
+     *
+     * <p>事件里存的是上游 ID（渠道 ID / 密钥 ID），而页面上只有名字 ——
+     * 只给 ID 等于让人自己去猜是哪个。名字都是查询时带出来的；取不到时退回 ID。</p>
+     */
+    private static String entityName(UpstreamChangeEventResponse event) {
+        if ("API_KEY".equalsIgnoreCase(event.entityType())
+                && event.keyName() != null && !event.keyName().isBlank()) {
+            return event.keyName();
+        }
         if (event.groupName() != null && !event.groupName().isBlank()) {
             return event.groupName();
         }
-        return event.entityKey() == null ? "—" : event.entityKey();
+        return event.entityKey() == null || event.entityKey().isBlank() ? "—" : event.entityKey();
     }    /** 变更是否发生在「使用中」的渠道/密钥上（由采集侧按状态判定，见 V14 迁移）。 */
     private static boolean inUse(UpstreamChangeEventResponse event) {
         return Boolean.TRUE.equals(event.inUse());
@@ -325,6 +370,11 @@ public class MonitorChatTools {
                 String.valueOf(event.changeType()),
                 String.valueOf(event.fieldName()),
                 String.valueOf(event.entityKey()),
+                String.valueOf(event.groupName()),
+                String.valueOf(event.keyName()),
+                String.valueOf(event.accountName()),
+                String.valueOf(event.upstreamKeyNames()),
+                String.valueOf(event.localKeyNames()),
                 String.valueOf(event.oldValue()),
                 String.valueOf(event.newValue())).toLowerCase(Locale.ROOT);
         return haystack.contains(keyword);
