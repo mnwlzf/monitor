@@ -115,12 +115,21 @@
         LIMIT #{limit}
     </select>
 
+    <!--
+        正在使用密钥的变更：密钥提醒邮件的数据源。
+
+        和渠道邮件一样排除「号池监控源」平台（我自己的平台），它的 Key 变更不用发信；
+        页面的变更记录不受影响。
+    -->
     <select id="selectInUseKeyEventsSince" resultMap="UpstreamChangeEventResultMap">
         SELECT <include refid="UpstreamChangeEventColumns"/>
         <include refid="UpstreamChangeEventJoin"/>
         WHERE e.in_use = TRUE
           AND e.entity_type = 'API_KEY'
           AND e.detected_at &gt;= #{since}
+          AND NOT EXISTS (SELECT 1 FROM platforms p
+                           WHERE p.id = a.platform_id
+                             AND p.pool_monitoring_enabled = TRUE)
         ORDER BY e.detected_at DESC
         LIMIT #{limit}
     </select>
