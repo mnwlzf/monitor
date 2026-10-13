@@ -79,8 +79,18 @@ class QqBotWebhookIntegrationTest {
         BotImageFetcher imageFetcher = mock(BotImageFetcher.class);
         BotVisionProperties visionProperties = new BotVisionProperties();
 
+        BotChannelStatusService channelStatusService = mock(BotChannelStatusService.class);
+        BotOrderTools orderTools = mock(BotOrderTools.class);
+        BotUsageTools usageTools = mock(BotUsageTools.class);
+        Sub2ApiUserCache userCache = mock(Sub2ApiUserCache.class);
+        BotUserService botUserService = mock(BotUserService.class);
+        ImageGenService imageGenService = mock(ImageGenService.class);
+        BotChatClientFactory chatClients = new BotChatClientFactory(tools, orderTools, usageTools, weatherTools, provider);
+        BotCommandRouter commandRouter = new BotCommandRouter(
+                tools, orderTools, usageTools, channelStatusService, botUserService, weatherTools, bindings, userCache, imageGenService);
+
         BotMessageService service = new BotMessageService(
-                settingsService, client, tools, mock(BotOrderTools.class), mock(BotUsageTools.class), mock(BotChannelStatusService.class), mock(Sub2ApiUserCache.class), mock(ImageGenService.class), mock(BotRuntimeStatus.class), mock(BotUserService.class), weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, imageGenService, mock(BotRuntimeStatus.class), botUserService, archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

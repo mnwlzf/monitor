@@ -101,8 +101,11 @@ class BotMessageServiceTest {
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
+        BotChatClientFactory chatClients = new BotChatClientFactory(tools, orderTools, usageTools, weatherTools, provider);
+        BotCommandRouter commandRouter = new BotCommandRouter(
+                tools, orderTools, usageTools, channelStatusService, botUserService, weatherTools, bindings, userCache, imageGenService);
         service = new BotMessageService(
-                settingsService, client, tools, orderTools, usageTools, channelStatusService, userCache, imageGenService, runtimeStatus, botUserService, weatherTools, archive, imageFetcher, visionProperties, identityResolver, bindings, reportRenderer, provider);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, imageGenService, runtimeStatus, botUserService, archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
     }
 
     private OneBotEvent event(String json) throws Exception {

@@ -60,22 +60,32 @@ class CollectionFailureReportingTest {
         newApiAdapter = mock(NewApiAdapter.class);
 
         Executor synchronousExecutor = Runnable::run;
+        CollectionJson json = new CollectionJson(new ObjectMapper());
+        UpstreamChangeRecorder changeRecorder =
+                new UpstreamChangeRecorder(mock(UpstreamChangeEventRepository.class), json);
+        AccountSnapshotWriter snapshots = new AccountSnapshotWriter(
+                mock(AccountMetricSnapshotRepository.class),
+                mock(AccountUsageDashboardSnapshotRepository.class),
+                json);
+        UpstreamGroupSync groupSync = new UpstreamGroupSync(
+                mock(UpstreamGroupRepository.class),
+                mock(UpstreamGroupSnapshotRepository.class),
+                changeRecorder,
+                json);
+        AccountApiKeySync apiKeySync = new AccountApiKeySync(
+                mock(AccountApiKeyRepository.class),
+                mock(AccountApiKeySnapshotRepository.class),
+                changeRecorder,
+                mock(CredentialCipher.class));
         service = new CollectionService(
                 accountRepository,
                 platformRepository,
-                credentialService,
                 collectionRunRepository,
-                mock(AccountMetricSnapshotRepository.class),
-                mock(AccountUsageDashboardSnapshotRepository.class),
-                mock(UpstreamGroupRepository.class),
-                mock(UpstreamGroupSnapshotRepository.class),
-                mock(UpstreamChangeEventRepository.class),
-                mock(AccountApiKeyRepository.class),
-                mock(AccountApiKeySnapshotRepository.class),
-                mock(CredentialCipher.class),
-                newApiAdapter,
-                mock(Sub2ApiAdapter.class),
-                new ObjectMapper(),
+                List.of(
+                        new NewApiAccountCollector(
+                                credentialService, snapshots, groupSync, apiKeySync, newApiAdapter, json),
+                        new Sub2ApiAccountCollector(
+                                credentialService, snapshots, groupSync, apiKeySync, mock(Sub2ApiAdapter.class), json)),
                 synchronousExecutor);
 
         platform = new PlatformEntity();

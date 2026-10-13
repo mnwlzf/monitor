@@ -36,8 +36,7 @@ class ApiKeyChangeAlertServiceTest {
     void setUp() {
         service = new ApiKeyChangeAlertService(
                 changeEventRepository,
-                mock(AccountRepository.class),
-                mock(PlatformRepository.class),
+                new AccountNameResolver(mock(AccountRepository.class), mock(PlatformRepository.class)),
                 mailRecipientRepository,
                 smtpConfigProvider,
                 mailService);

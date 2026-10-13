@@ -12,6 +12,7 @@ import com.monitor.platform.pool.ingest.PoolIngestProperties;
 import com.monitor.platform.pool.ingest.Sub2ApiIngestCursorRepository;
 import com.monitor.platform.pool.repository.PoolAccountRepository;
 import com.monitor.platform.pool.repository.PoolSampleRepository;
+import com.monitor.platform.common.time.BusinessTime;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -41,7 +42,7 @@ public class PoolQueryService {
 
     private static final int CACHE_RATE_SCALE = 4;
     /** 业务时区：与 Mapper 里的 date_trunc 口径保持一致。 */
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
 
     private final PoolAccountRepository poolAccountRepository;
     private final PoolSampleRepository poolSampleRepository;

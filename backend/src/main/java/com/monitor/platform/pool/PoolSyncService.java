@@ -9,6 +9,7 @@ import com.monitor.platform.pool.client.Sub2AdminClient;
 import com.monitor.platform.pool.client.Sub2UsageLog;
 import com.monitor.platform.pool.repository.PoolAccountRepository;
 import com.monitor.platform.pool.repository.PoolSampleRepository;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -34,7 +35,7 @@ public class PoolSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(PoolSyncService.class);
 
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
     /** 号池账号列表每页条数。 */
     private static final int ACCOUNT_PAGE_SIZE = 100;
     /** 号池账号列表最大翻页数，避免上游分页异常导致死循环。 */

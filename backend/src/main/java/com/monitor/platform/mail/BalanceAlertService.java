@@ -8,7 +8,6 @@ import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.util.HtmlUtils;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -133,19 +132,9 @@ public class BalanceAlertService {
             }
             hasBalance = true;
             total = total.add(balance);
-            accounts.add(new AccountBalance(displayName(account), balance));
+            accounts.add(new AccountBalance(MailFormat.displayName(account), balance));
         }
         return hasBalance ? new PlatformBalance(platform, total, accounts) : null;
-    }
-
-    private String displayName(AccountEntity account) {
-        if (account.getDisplayName() != null && !account.getDisplayName().isBlank()) {
-            return account.getDisplayName();
-        }
-        if (account.getUsername() != null && !account.getUsername().isBlank()) {
-            return account.getUsername();
-        }
-        return "账号 " + account.getId();
     }
 
     private String buildSubject(int platformCount) {
@@ -167,8 +156,8 @@ public class BalanceAlertService {
                 .append("</tr>");
         for (PlatformBalance item : lowPlatforms) {
             html.append("<tr>")
-                    .append("<td>").append(escape(item.platform().getPlatformName())).append("</td>")
-                    .append("<td>").append(escape(item.platform().getPlatformType())).append("</td>")
+                    .append("<td>").append(MailFormat.escape(item.platform().getPlatformName())).append("</td>")
+                    .append("<td>").append(MailFormat.escape(item.platform().getPlatformType())).append("</td>")
                     .append("<td align=\"right\">$").append(item.total().stripTrailingZeros().toPlainString()).append("</td>")
                     .append("<td>").append(accountBreakdown(item.accounts())).append("</td>")
                     .append("</tr>");
@@ -183,12 +172,8 @@ public class BalanceAlertService {
             return "—";
         }
         return accounts.stream()
-                .map(account -> escape(account.name()) + "：$" + account.balance().stripTrailingZeros().toPlainString())
+                .map(account -> MailFormat.escape(account.name()) + "：$" + account.balance().stripTrailingZeros().toPlainString())
                 .collect(Collectors.joining("<br/>"));
-    }
-
-    private String escape(String value) {
-        return value == null ? "" : HtmlUtils.htmlEscape(value);
     }
 
     /** 账号余额明细。 */

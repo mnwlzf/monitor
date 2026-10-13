@@ -1,23 +1,12 @@
 package com.monitor.platform.bot.order;
 
-import com.monitor.platform.pool.ingest.PoolIngestProperties;
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
-import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.monitor.platform.pool.ingest.Sub2JdbcValues;
+import com.monitor.platform.pool.ingest.Sub2ReadOnlyJdbc;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -29,23 +18,15 @@ import java.util.List;
  * {@code idx_payment_orders_user_id} 与 {@code idx_payment_orders_created_at}，
  * 直连库按 {@code user_id + created_at} 过滤才走得上索引。</p>
  *
- * <p>复用 {@link PoolIngestProperties} 里已经配好的只读连接信息（与号池增量采集同一个库），
- * 但不依赖 {@code enabled} 开关：关掉增量采集时，订单查询仍然可用。</p>
- *
- * <p><strong>刻意不暴露 DataSource Bean</strong>：应用里已有主数据源，再注册一个 DataSource Bean
- * 会被 Flyway 等自动配置按类型注入，导致主库迁移跑到这个只读库上。因此这里自己持有连接池，
- * 并做懒初始化（首次查询时才建池）。</p>
+ * <p>复用 {@code monitor.pool.ingest.*} 里已经配好的只读连接信息（与号池增量采集同一个库），
+ * 但不依赖 {@code enabled} 开关：关掉增量采集时，订单查询仍然可用。
+ * 连接池统一由 {@link Sub2ReadOnlyJdbc} 提供，这里只负责取数。</p>
  *
  * <p>需要上游给只读账号授权，否则查询会以权限不足失败：
  * {@code GRANT SELECT ON public.payment_orders TO monitor_ro;}（{@code public.users} 同理由身份识别使用）。</p>
  */
 @Component
 public class Sub2PaymentOrderReader {
-
-    private static final Logger log = LoggerFactory.getLogger(Sub2PaymentOrderReader.class);
-
-    /** 业务时区：无时区的 timestamp 按此时区解释。 */
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     /**
      * 按邮箱 / 用户名 / 数字 id 解析平台用户。
@@ -119,30 +100,27 @@ public class Sub2PaymentOrderReader {
             rs.getString("payment_type"),
             rs.getString("status"),
             rs.getBigDecimal("refund_amount"),
-            offsetDateTimeOrNull(rs, "created_at"),
-            offsetDateTimeOrNull(rs, "paid_at"),
-            offsetDateTimeOrNull(rs, "completed_at"),
-            offsetDateTimeOrNull(rs, "failed_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "created_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "paid_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "completed_at"),
+            Sub2JdbcValues.offsetDateTimeOrNull(rs, "failed_at"),
             rs.getString("failed_reason")
     );
 
-    private final PoolIngestProperties properties;
+    private final Sub2ReadOnlyJdbc jdbc;
 
-    /** 只读连接池，懒初始化。 */
-    private volatile HikariDataSource dataSource;
-
-    public Sub2PaymentOrderReader(PoolIngestProperties properties) {
-        this.properties = properties;
+    public Sub2PaymentOrderReader(Sub2ReadOnlyJdbc jdbc) {
+        this.jdbc = jdbc;
     }
 
     /** 是否配置了可用的只读库连接（不看增量采集开关）。 */
     public boolean isAvailable() {
-        return properties.hasConnection();
+        return jdbc.hasConnection();
     }
 
     /** 按邮箱 / 用户名 / 数字 id 解析平台用户，最多 5 个候选，命中优先级高的排前面。 */
     public List<BillingUser> findUsers(String account) {
-        return template().query(connection -> {
+        return jdbc.template().query(connection -> {
             var statement = connection.prepareStatement(SELECT_USER);
             for (int index = 1; index <= 5; index++) {
                 statement.setString(index, account);
@@ -153,7 +131,7 @@ public class Sub2PaymentOrderReader {
 
     /** 指定用户、指定时间窗的订单（按创建时间倒序，最多 {@code limit} 条）。 */
     public List<Sub2PaymentOrder> listOrders(long userId, OffsetDateTime from, OffsetDateTime to, int limit) {
-        return template().query(connection -> {
+        return jdbc.template().query(connection -> {
             var statement = connection.prepareStatement(SELECT_ORDERS);
             statement.setLong(1, userId);
             statement.setObject(2, from);
@@ -165,7 +143,7 @@ public class Sub2PaymentOrderReader {
 
     /** 指定用户、指定时间窗的订单汇总（不受明细条数上限影响）。 */
     public OrderSummary summarise(long userId, OffsetDateTime from, OffsetDateTime to) {
-        List<OrderSummary> rows = template().query(connection -> {
+        List<OrderSummary> rows = jdbc.template().query(connection -> {
             var statement = connection.prepareStatement(SELECT_SUMMARY);
             statement.setLong(1, userId);
             statement.setObject(2, from);
@@ -180,82 +158,6 @@ public class Sub2PaymentOrderReader {
         return rows.isEmpty()
                 ? new OrderSummary(0L, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO)
                 : rows.get(0);
-    }
-
-    /**
-     * {@code created_at} 可能是 timestamptz 也可能是 timestamp，两种都收。
-     *
-     * <p>与 {@code Sub2ApiUsageLogReader} 同样的取舍：先试 {@code getObject(.., OffsetDateTime.class)}，
-     * 无时区的列走不通再按业务时区解释。</p>
-     */
-    private static OffsetDateTime offsetDateTimeOrNull(ResultSet rs, String column) throws SQLException {
-        try {
-            return rs.getObject(column, OffsetDateTime.class);
-        } catch (SQLException ignored) {
-            // 无时区的 timestamp 走不通上面的转换，退回按业务时区解释
-        }
-        Object value = rs.getObject(column);
-        if (value instanceof OffsetDateTime odt) {
-            return odt;
-        }
-        if (value instanceof LocalDateTime ldt) {
-            return ldt.atZone(ZONE).toOffsetDateTime();
-        }
-        if (value instanceof Timestamp ts) {
-            return ts.toLocalDateTime().atZone(ZONE).toOffsetDateTime();
-        }
-        if (value instanceof Instant instant) {
-            return instant.atZone(ZONE).toOffsetDateTime();
-        }
-        return null;
-    }
-
-    /**
-     * 懒创建只读连接池。
-     *
-     * <p>池化失败不 fail-fast：上游库临时不可达时只在查询处报错，不影响 monitor 启动。</p>
-     */
-    private JdbcTemplate template() {
-        HikariDataSource current = dataSource;
-        if (current == null) {
-            synchronized (this) {
-                current = dataSource;
-                if (current == null) {
-                    current = createDataSource();
-                    dataSource = current;
-                }
-            }
-        }
-        JdbcTemplate jdbcTemplate = new JdbcTemplate(current);
-        jdbcTemplate.setQueryTimeout(Math.max(1, (int) properties.getQueryTimeout().toSeconds()));
-        return jdbcTemplate;
-    }
-
-    private HikariDataSource createDataSource() {
-        HikariConfig config = new HikariConfig();
-        config.setPoolName("sub2api-orders-ro");
-        config.setJdbcUrl(properties.getUrl());
-        config.setUsername(properties.getUsername());
-        config.setPassword(properties.getPassword());
-        config.setMaximumPoolSize(2);
-        config.setMinimumIdle(1);
-        // 只读双保险：连接池 readOnly + 上游给只读角色
-        config.setReadOnly(true);
-        config.setAutoCommit(true);
-        config.setConnectionTimeout(properties.getConnectTimeout().toMillis());
-        config.setInitializationFailTimeout(-1);
-        log.info("初始化 Sub2API 订单只读数据源: url={}", properties.getUrl());
-        return new HikariDataSource(config);
-    }
-
-    @PreDestroy
-    public void close() {
-        HikariDataSource current = dataSource;
-        if (current != null) {
-            current.close();
-            dataSource = null;
-            log.info("已关闭 Sub2API 订单只读数据源");
-        }
     }
 
     /**

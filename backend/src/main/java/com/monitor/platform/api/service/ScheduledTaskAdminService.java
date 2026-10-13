@@ -9,6 +9,7 @@ import com.monitor.platform.scheduler.DynamicScheduledTaskManager;
 import com.monitor.platform.scheduler.ScheduledTaskEntity;
 import com.monitor.platform.common.schedule.ScheduledTaskHandler;
 import com.monitor.platform.scheduler.ScheduledTaskRepository;
+import com.monitor.platform.common.time.BusinessTime;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -140,7 +141,7 @@ public class ScheduledTaskAdminService {
     }
 
     private String normalizeTimezone(String timezone) {
-        return timezone == null || timezone.isBlank() ? "Asia/Shanghai" : timezone;
+        return timezone == null || timezone.isBlank() ? BusinessTime.ZONE_ID : timezone;
     }
 
     private Map<String, ScheduledTaskHandler> handlerMap() {

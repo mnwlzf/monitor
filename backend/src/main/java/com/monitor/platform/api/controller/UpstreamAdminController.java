@@ -12,6 +12,7 @@ import com.monitor.platform.api.dto.UpstreamGroupResponse;
 import com.monitor.platform.api.dto.UpdateAccountRequest;
 import com.monitor.platform.api.dto.UpdatePlatformRequest;
 import com.monitor.platform.api.service.UpstreamAdminService;
+import com.monitor.platform.api.service.UpstreamUsageService;
 import com.monitor.platform.collector.application.CollectionService;
 import com.monitor.platform.common.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -36,11 +37,14 @@ import java.util.List;
 public class UpstreamAdminController {
 
     private final UpstreamAdminService upstreamAdminService;
+    private final UpstreamUsageService upstreamUsageService;
     private final CollectionService collectionService;
 
     public UpstreamAdminController(UpstreamAdminService upstreamAdminService,
+                                   UpstreamUsageService upstreamUsageService,
                                    CollectionService collectionService) {
         this.upstreamAdminService = upstreamAdminService;
+        this.upstreamUsageService = upstreamUsageService;
         this.collectionService = collectionService;
     }
 
@@ -191,7 +195,7 @@ public class UpstreamAdminController {
     @GetMapping("/instances/{instanceId}/usage-dashboard")
     public ApiResponse<List<AccountUsageDashboardResponse>> listUsageDashboard(
             @PathVariable Integer instanceId) {
-        return ApiResponse.of(upstreamAdminService.listUsageDashboard(instanceId), null);
+        return ApiResponse.of(upstreamUsageService.listUsageDashboard(instanceId), null);
     }
 
     /**
@@ -204,7 +208,7 @@ public class UpstreamAdminController {
     @GetMapping("/instances/{instanceId}/changes")
     public ApiResponse<List<UpstreamChangeEventResponse>> listChanges(@PathVariable Integer instanceId,
                                                                        @RequestParam(defaultValue = "100") int limit) {
-        return ApiResponse.of(upstreamAdminService.listChanges(instanceId, limit), null);
+        return ApiResponse.of(upstreamUsageService.listChanges(instanceId, limit), null);
     }
 
     /**
@@ -225,7 +229,7 @@ public class UpstreamAdminController {
             @PathVariable Integer instanceId,
             @PathVariable Integer accountId,
             @RequestParam(defaultValue = "7d") String range) {
-        return ApiResponse.of(upstreamAdminService.listAccountMetrics(instanceId, accountId, range), null);
+        return ApiResponse.of(upstreamUsageService.listAccountMetrics(instanceId, accountId, range), null);
     }
 
     @GetMapping("/instances/{instanceId}/accounts")

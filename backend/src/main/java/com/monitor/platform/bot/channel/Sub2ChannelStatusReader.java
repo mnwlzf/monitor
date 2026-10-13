@@ -1,12 +1,6 @@
 package com.monitor.platform.bot.channel;
 
-import com.monitor.platform.pool.ingest.PoolIngestProperties;
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
-import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.monitor.platform.pool.ingest.Sub2ReadOnlyJdbc;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
@@ -34,16 +28,14 @@ import java.util.List;
  * <p>这张表已经是「平台 × 分组 × 模型 × 分钟」的聚合结果，<strong>不含任何用户身份</strong>，
  * 所以适合对外展示；而 {@code channel_monitor_v2_user_metrics_1m}（带 user_id）一律不碰。</p>
  *
- * <p>复用 {@link PoolIngestProperties} 里已经配好的只读连接信息，但<strong>不依赖 {@code enabled} 开关</strong>；
- * 自持一个只读连接池，与其它只读功能各自独立。</p>
+ * <p>复用 {@code monitor.pool.ingest.*} 里已经配好的只读连接信息，但<strong>不依赖 {@code enabled} 开关</strong>；
+ * 连接池统一由 {@link Sub2ReadOnlyJdbc} 提供，这里只负责取数。</p>
  *
  * <p>需要上游给只读账号授权：{@code channel_monitor_v2_metrics_1m}、
  * {@code groups}、{@code user_subscriptions}、{@code user_allowed_groups}（只读）。</p>
  */
 @Component
 public class Sub2ChannelStatusReader {
-
-    private static final Logger log = LoggerFactory.getLogger(Sub2ChannelStatusReader.class);
 
     /** 分组状态枚举值，见 Sub2API 的 {@code service.StatusActive}。 */
     private static final String GROUP_ACTIVE = "active";
@@ -140,23 +132,20 @@ public class Sub2ChannelStatusReader {
             rs.getLong("ttft_count")
     );
 
-    private final PoolIngestProperties properties;
+    private final Sub2ReadOnlyJdbc jdbc;
 
-    /** 只读连接池，懒初始化。 */
-    private volatile HikariDataSource dataSource;
-
-    public Sub2ChannelStatusReader(PoolIngestProperties properties) {
-        this.properties = properties;
+    public Sub2ChannelStatusReader(Sub2ReadOnlyJdbc jdbc) {
+        this.jdbc = jdbc;
     }
 
     /** 是否配置了可用的只读库连接（不看增量采集开关）。 */
     public boolean isAvailable() {
-        return properties.hasConnection();
+        return jdbc.hasConnection();
     }
 
     /** 普通用户可见的分组 ID。 */
     public List<Long> visibleGroupIds(long userId) {
-        return template().query(connection -> {
+        return jdbc.template().query(connection -> {
             var statement = connection.prepareStatement(SELECT_VISIBLE_GROUPS);
             statement.setLong(1, userId);
             statement.setString(2, GROUP_ACTIVE);
@@ -168,7 +157,7 @@ public class Sub2ChannelStatusReader {
 
     /** 管理员视角：指定时间窗内按「平台 + 分组」聚合的渠道指标。 */
     public List<ChannelStatusRow> byPlatformGroup(OffsetDateTime from, OffsetDateTime to) {
-        return template().query(connection -> {
+        return jdbc.template().query(connection -> {
             var statement = connection.prepareStatement(SELECT_BY_PLATFORM_GROUP);
             statement.setObject(1, from);
             statement.setObject(2, to);
@@ -182,61 +171,13 @@ public class Sub2ChannelStatusReader {
             return List.of();
         }
         Long[] ids = groupIds.toArray(Long[]::new);
-        return template().query(connection -> {
+        return jdbc.template().query(connection -> {
             var statement = connection.prepareStatement(SELECT_BY_PLATFORM_GROUP_SCOPED);
             statement.setObject(1, from);
             statement.setObject(2, to);
             statement.setArray(3, connection.createArrayOf("bigint", ids));
             return statement;
         }, ROW_MAPPER);
-    }
-
-    /**
-     * 懒创建只读连接池。
-     *
-     * <p>池化失败不 fail-fast：上游库临时不可达时只在查询处报错，不影响 monitor 启动。</p>
-     */
-    private JdbcTemplate template() {
-        HikariDataSource current = dataSource;
-        if (current == null) {
-            synchronized (this) {
-                current = dataSource;
-                if (current == null) {
-                    current = createDataSource();
-                    dataSource = current;
-                }
-            }
-        }
-        JdbcTemplate jdbcTemplate = new JdbcTemplate(current);
-        jdbcTemplate.setQueryTimeout(Math.max(1, (int) properties.getQueryTimeout().toSeconds()));
-        return jdbcTemplate;
-    }
-
-    private HikariDataSource createDataSource() {
-        HikariConfig config = new HikariConfig();
-        config.setPoolName("sub2api-channel-ro");
-        config.setJdbcUrl(properties.getUrl());
-        config.setUsername(properties.getUsername());
-        config.setPassword(properties.getPassword());
-        config.setMaximumPoolSize(2);
-        config.setMinimumIdle(1);
-        // 只读双保险：连接池 readOnly + 上游给只读角色
-        config.setReadOnly(true);
-        config.setAutoCommit(true);
-        config.setConnectionTimeout(properties.getConnectTimeout().toMillis());
-        config.setInitializationFailTimeout(-1);
-        log.info("初始化 Sub2API 渠道状态只读数据源: url={}", properties.getUrl());
-        return new HikariDataSource(config);
-    }
-
-    @PreDestroy
-    public void close() {
-        HikariDataSource current = dataSource;
-        if (current != null) {
-            current.close();
-            dataSource = null;
-            log.info("已关闭 Sub2API 渠道状态只读数据源");
-        }
     }
 
     /** 一个「平台 + 分组」的原始聚合值。 */

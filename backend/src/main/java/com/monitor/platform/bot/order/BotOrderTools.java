@@ -1,6 +1,7 @@
 package com.monitor.platform.bot.order;
 
 import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
@@ -32,7 +33,7 @@ public class BotOrderTools {
     private static final Logger log = LoggerFactory.getLogger(BotOrderTools.class);
 
     /** 业务时区，与只读库读取侧保持一致。 */
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE = BusinessTime.ZONE;
 
     /** 默认时间窗：近 30 天。 */
     private static final int DEFAULT_DAYS = 30;

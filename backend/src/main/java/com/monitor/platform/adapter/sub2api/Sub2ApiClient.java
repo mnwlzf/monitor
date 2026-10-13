@@ -9,6 +9,7 @@ import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
+import com.monitor.platform.common.time.BusinessTime;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -36,7 +37,6 @@ public class Sub2ApiClient {
     private static final String KEYS_USAGE_PATH = "/api/v1/usage/dashboard/api-keys-usage";
     private static final String AVAILABLE_GROUPS_PATH = "/api/v1/groups/available";
     private static final String USAGE_DASHBOARD_STATS_PATH = "/api/v1/usage/dashboard/stats";
-    private static final String TIME_ZONE = "Asia/Shanghai";
     private static final int DEFAULT_KEY_PAGE_SIZE = 100;
 
     private final RestClient restClient;
@@ -75,7 +75,7 @@ public class Sub2ApiClient {
      */
     public Sub2ProfileResponse fetchProfile(String baseUrl, String accessToken) {
         return restClient.get()
-                .uri(baseUrl + PROFILE_PATH + "?timezone={tz}", TIME_ZONE)
+                .uri(baseUrl + PROFILE_PATH + "?timezone={tz}", BusinessTime.ZONE_ID)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(Sub2ProfileResponse.class);
@@ -101,7 +101,7 @@ public class Sub2ApiClient {
         return restClient.get()
                 .uri(baseUrl + KEYS_PATH
                                 + "?page={page}&page_size={size}&sort_by={sortBy}&sort_order={order}&timezone={tz}",
-                        page, pageSize, "created_at", "desc", TIME_ZONE)
+                        page, pageSize, "created_at", "desc", BusinessTime.ZONE_ID)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(Sub2KeysResponse.class);
@@ -132,7 +132,7 @@ public class Sub2ApiClient {
      */
     public Sub2GroupsResponse fetchAvailableGroups(String baseUrl, String accessToken) {
         return restClient.get()
-                .uri(baseUrl + AVAILABLE_GROUPS_PATH + "?timezone={tz}", TIME_ZONE)
+                .uri(baseUrl + AVAILABLE_GROUPS_PATH + "?timezone={tz}", BusinessTime.ZONE_ID)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(Sub2GroupsResponse.class);
@@ -143,7 +143,7 @@ public class Sub2ApiClient {
      */
     public Sub2UsageDashboardResponse fetchUsageDashboardStats(String baseUrl, String accessToken) {
         return restClient.get()
-                .uri(baseUrl + USAGE_DASHBOARD_STATS_PATH + "?timezone={tz}", TIME_ZONE)
+                .uri(baseUrl + USAGE_DASHBOARD_STATS_PATH + "?timezone={tz}", BusinessTime.ZONE_ID)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(Sub2UsageDashboardResponse.class);
