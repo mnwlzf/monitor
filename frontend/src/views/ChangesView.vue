@@ -83,13 +83,13 @@
             <span v-if="!row.impacts?.length" class="muted">—</span>
             <el-tag
               v-for="impact in row.impacts"
-              :key="`${impact.accountId}-${impact.groupName}`"
+              :key="`${impact.externalAccountId}-${impact.groupName}`"
               size="small"
               :type="impact.affected ? 'danger' : 'info'"
               effect="plain"
               class="admin-change-impact-tag"
             >
-              {{ impact.groupName }}（倍率 {{ formatRatio(impact.groupRatio) }}）{{ impact.affected ? ' 倒挂' : '' }}
+              {{ impact.groupName }}（结算 {{ formatRatio(impact.effectiveRatio) }}）{{ impact.affected ? ' 倒挂' : '' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -147,6 +147,8 @@
                 <th>本平台账号</th>
                 <th>所属分组</th>
                 <th>分组倍率</th>
+                <th>账号倍率</th>
+                <th>结算倍率</th>
                 <th>上游倍率（原 → 新）</th>
                 <th>涨价幅度</th>
                 <th>是否受影响</th>
@@ -154,10 +156,12 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="impact in changeDetail.impacts" :key="`${impact.accountId}-${impact.groupName}`" :class="{ 'is-affected': impact.affected }">
+              <tr v-for="impact in changeDetail.impacts" :key="`${impact.externalAccountId}-${impact.groupName}`" :class="{ 'is-affected': impact.affected }">
                 <td>{{ impact.accountName || '—' }}</td>
                 <td>{{ impact.groupName || '—' }}</td>
                 <td>{{ formatRatio(impact.groupRatio) }}</td>
+                <td>{{ formatRatio(impact.accountRatio) }}</td>
+                <td>{{ formatRatio(impact.effectiveRatio) }}</td>
                 <td>{{ formatRatio(impact.oldRatio) }} → {{ formatRatio(impact.newRatio) }}</td>
                 <td>{{ impact.increasePercent == null ? '—' : `${formatRatio(impact.increasePercent)}%` }}</td>
                 <td>{{ impact.affected ? '是（倒挂）' : '否' }}</td>

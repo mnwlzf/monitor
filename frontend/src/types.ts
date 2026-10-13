@@ -123,9 +123,12 @@ export interface ChangeEvent {
  */
 export interface ChangeImpact {
   accountName: string
-  accountId: number | null
+  externalAccountId: number | null
   groupName: string
   groupRatio: number | null
+  accountRatio: number | null
+  /** 结算倍率 = 分组倍率 × 账号倍率（Sub2API 的实际计费倍率）。 */
+  effectiveRatio: number | null
   oldRatio: number | null
   newRatio: number | null
   increasePercent: number | null

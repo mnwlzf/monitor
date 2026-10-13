@@ -266,9 +266,11 @@ function normalizeCredentialStatus(status?: string): Account['credentialStatus']
 function toChangeImpact(row: ChangeImpactDto): ChangeImpact {
   return {
     accountName: row.accountName || '',
-    accountId: row.accountId ?? null,
+    externalAccountId: row.externalAccountId ?? null,
     groupName: row.groupName || '',
     groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
+    accountRatio: row.accountRatio == null ? null : Number(row.accountRatio),
+    effectiveRatio: row.effectiveRatio == null ? null : Number(row.effectiveRatio),
     oldRatio: row.oldRatio == null ? null : Number(row.oldRatio),
     newRatio: row.newRatio == null ? null : Number(row.newRatio),
     increasePercent: row.increasePercent == null ? null : Number(row.increasePercent),
@@ -363,9 +365,11 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
 }
 interface ChangeImpactDto {
   accountName?: string
-  accountId?: number | null
+  externalAccountId?: number | null
   groupName?: string
   groupRatio?: string | number | null
+  accountRatio?: string | number | null
+  effectiveRatio?: string | number | null
   oldRatio?: string | number | null
   newRatio?: string | number | null
   increasePercent?: string | number | null

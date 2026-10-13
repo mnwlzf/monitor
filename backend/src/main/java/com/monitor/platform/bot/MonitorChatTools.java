@@ -341,7 +341,7 @@ public class MonitorChatTools {
             sb.append(impact.groupName() == null || impact.groupName().isBlank()
                             ? "未知分组"
                             : impact.groupName())
-                    .append('(').append(ReportFormats.decimal(impact.groupRatio())).append(')');
+                    .append('(').append(ReportFormats.decimal(impact.effectiveRatio())).append(')');
             if (impact.affected()) {
                 sb.append("⚠倒挂");
             }
