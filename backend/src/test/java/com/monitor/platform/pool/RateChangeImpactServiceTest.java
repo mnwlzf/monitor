@@ -57,6 +57,7 @@ class RateChangeImpactServiceTest {
         key.setId(100L);
         key.setAccountId(10);
         key.setGroupName("渠道A");
+        key.setKeyName("star-key-企业级");
         when(apiKeyRepository.findByAccount(anyInt(), anyBoolean())).thenReturn(List.of(key));
 
         PoolAccountEntity pool = new PoolAccountEntity();
@@ -98,6 +99,12 @@ class RateChangeImpactServiceTest {
     }
 
     @Test
+    void returnsEmptyWhenNoKeyBelongsToTheChangedChannel() {
+        // 变更发生在一个「该账号下没有采集到 Key」的渠道上：无法判断影响谁，就不猜
+        assertThat(service.impactOf(event("RATE_CHANGED", "官Key-企业级（可蒸馏）", "0.70", "0.35"))).isEmpty();
+    }
+
+    @Test
     void skipsAccountsThatAreNotSchedulable() {
         PoolAccountEntity disabled = new PoolAccountEntity();
         disabled.setId(2L);
@@ -127,6 +134,7 @@ class RateChangeImpactServiceTest {
         assertThat(rows).hasSize(2);
         RateChangeImpactService.ImpactRow first = rows.get(0);
         assertThat(first.accountName()).isEqualTo("满血");
+        assertThat(first.upstreamKeyName()).isEqualTo("star-key-企业级");
         assertThat(first.groupName()).isEqualTo("ClaudeCode MAX20");
         assertThat(first.groupRatio()).isEqualByComparingTo("1.25");
         assertThat(first.newRatio()).isEqualByComparingTo("1.50");

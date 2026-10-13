@@ -63,8 +63,9 @@ public class RateChangeImpactService {
     /**
      * 一行 = 一个（本平台号池账号 × 所属分组）。
      *
-     * @param accountName       本平台号池账号名
+     * @param accountName       本平台号池账号名（= 我自己平台的 Key 名）
      * @param externalAccountId 本平台号池账号 ID（Sub2API account id）
+     * @param upstreamKeyName   上游 Key 名（account_api_keys.key_name，绑定关系匹配到的那把）
      * @param groupName         所属分组名
      * @param groupRatio        分组倍率
      * @param upstreamChannel   发生变化的那个上游渠道名
@@ -74,7 +75,8 @@ public class RateChangeImpactService {
      * @param affected          上游新倍率是否已超过该分组的结算倍率
      * @param level             提醒级别：INFO / WARNING / CRITICAL
      */
-    public record ImpactRow(String accountName, Long externalAccountId, String groupName, BigDecimal groupRatio,
+    public record ImpactRow(String accountName, Long externalAccountId, String upstreamKeyName,
+                            String groupName, BigDecimal groupRatio,
                             String upstreamChannel,
                             BigDecimal oldRatio, BigDecimal newRatio, BigDecimal increasePercent,
                             boolean affected, String level) {
@@ -134,6 +136,17 @@ public class RateChangeImpactService {
         return result;
     }
 
+    /** 上游 Key 名；没采集到名字时退回脱敏值 / 上游 key ID，至少能对上号。 */
+    private static String keyName(AccountApiKeyEntity key) {
+        if (key.getKeyName() != null && !key.getKeyName().isBlank()) {
+            return key.getKeyName();
+        }
+        if (key.getKeyMasked() != null && !key.getKeyMasked().isBlank()) {
+            return key.getKeyMasked();
+        }
+        return key.getExternalKeyId() == null ? "—" : key.getExternalKeyId();
+    }
+
     private static boolean isRateChange(UpstreamChangeEventEntity event) {
         if (event == null || !"GROUP".equalsIgnoreCase(event.getEntityType()) || event.getChangeType() == null) {
             return false;
@@ -174,15 +187,23 @@ public class RateChangeImpactService {
                 : event.getGroupName();
     }
 
-    /** 优先只取「发生变化的那个分组」下的 Key；分组名对不上时退回该账号全部 Key。 */
+    /**
+     * 只取「发生变化的那个渠道」下的 Key —— 靠 Key 本身匹配，不做任何猜测。
+     *
+     * <p>上游渠道和我平台的号池账号是靠<strong>Key 明文哈希</strong>绑定的
+     * （见 {@code PoolAccountBindService}）：Key 在哪个渠道，这个渠道的倍率变化才影响它。
+     * 该渠道下没有采集到 Key 时返回空，此时如实「无法判断影响谁」，
+     * 绝不退回「该账号的全部 Key」——那样会把别的渠道的账号也算进来（线上踩过）。</p>
+     */
     private static List<AccountApiKeyEntity> scopeKeys(List<AccountApiKeyEntity> keys, String channel) {
-        if (keys == null || keys.isEmpty()) {
+        if (keys == null || keys.isEmpty() || channel == null || channel.isBlank()) {
             return List.of();
         }
-        List<AccountApiKeyEntity> scoped = keys.stream()
-                .filter(key -> channel == null || channel.equals(key.getGroupName()))
+        String needle = channel.trim();
+        return keys.stream()
+                .filter(key -> key.getGroupName() != null
+                        && needle.equalsIgnoreCase(key.getGroupName().trim()))
                 .toList();
-        return scoped.isEmpty() ? keys : scoped;
     }
 
     private List<ImpactRow> buildRows(UpstreamChangeEventEntity event, List<AccountApiKeyEntity> scoped,
@@ -221,6 +242,7 @@ public class RateChangeImpactService {
                 rows.add(new ImpactRow(
                         pool.name(),
                         pool.externalAccountId(),
+                        keyName(key),
                         group.groupName(),
                         groupRatio,
                         upstreamChannel,

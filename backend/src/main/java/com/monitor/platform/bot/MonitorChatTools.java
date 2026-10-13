@@ -268,6 +268,7 @@ public class MonitorChatTools {
                         "—",
                         "—",
                         "—",
+                        "—",
                         entityName(event),
                         "—",
                         changeText(event)));
@@ -279,6 +280,7 @@ public class MonitorChatTools {
                         levelText(event),
                         item.platform(),
                         blankToDash(impact.accountName()),
+                        blankToDash(impact.upstreamKeyName()),
                         blankToDash(impact.groupName()),
                         ReportFormats.decimal(impact.groupRatio()),
                         entityName(event) + "（" + ReportFormats.decimal(impact.oldRatio())
@@ -293,7 +295,8 @@ public class MonitorChatTools {
                 BotReport.Col.left("时间"),
                 BotReport.Col.left("级别"),
                 BotReport.Col.left("平台"),
-                BotReport.Col.left("本平台账号"),
+                BotReport.Col.left("本平台 Key"),
+                BotReport.Col.left("上游 Key"),
                 BotReport.Col.left("所属分组"),
                 BotReport.Col.right("分组倍率"),
                 BotReport.Col.left("上游渠道（原 → 新）"),
@@ -325,7 +328,8 @@ public class MonitorChatTools {
         }
         StringBuilder sb = new StringBuilder();
         for (UpstreamChangeEventResponse.ChangeImpact impact : impacts) {
-            sb.append(' ').append(impact.accountName()).append(' ').append(impact.groupName());
+            sb.append(' ').append(impact.accountName()).append(' ')
+                    .append(impact.upstreamKeyName()).append(' ').append(impact.groupName());
         }
         return sb.toString();
     }

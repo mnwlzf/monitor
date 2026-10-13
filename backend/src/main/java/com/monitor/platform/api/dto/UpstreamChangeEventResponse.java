@@ -54,8 +54,9 @@ public record UpstreamChangeEventResponse(
     /**
      * 渠道倍率变化对「我自己的 Sub2API」的影响。
      *
-     * @param accountName       本平台号池账号名
+     * @param accountName       本平台号池账号名（= 我自己平台的 Key 名）
      * @param externalAccountId 本平台号池账号 ID
+     * @param upstreamKeyName   上游 Key 名（account_api_keys.key_name）
      * @param groupName         所属分组名
      * @param groupRatio        分组倍率
      * @param oldRatio          上游原倍率
@@ -67,6 +68,7 @@ public record UpstreamChangeEventResponse(
     public record ChangeImpact(
             String accountName,
             Long externalAccountId,
+            String upstreamKeyName,
             String groupName,
             BigDecimal groupRatio,
             BigDecimal oldRatio,

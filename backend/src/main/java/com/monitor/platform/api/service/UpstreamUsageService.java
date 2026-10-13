@@ -305,6 +305,7 @@ public class UpstreamUsageService {
         return new UpstreamChangeEventResponse.ChangeImpact(
                 row.accountName(),
                 row.externalAccountId(),
+                row.upstreamKeyName(),
                 row.groupName(),
                 row.groupRatio(),
                 row.oldRatio(),

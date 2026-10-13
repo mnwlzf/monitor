@@ -291,7 +291,8 @@ public class ChannelChangeAlertService {
                 .append("<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" ")
                 .append("style=\"border-collapse:collapse;font-size:13px;margin-top:8px\">")
                 .append("<tr style=\"background:#f5f5f5\">")
-                .append("<th align=\"left\">本平台账号</th>")
+                .append("<th align=\"left\">本平台 Key</th>")
+                .append("<th align=\"left\">上游 Key</th>")
                 .append("<th align=\"left\">所属分组</th>")
                 .append("<th align=\"right\">分组倍率</th>")
                 .append("<th align=\"left\">上游渠道</th>")
@@ -303,6 +304,7 @@ public class ChannelChangeAlertService {
         for (RateChangeImpactService.ImpactRow row : impacts) {
             html.append(row.affected() ? "<tr style=\"background:#fff1f0\">" : "<tr>")
                     .append("<td>").append(MailFormat.escape(row.accountName())).append("</td>")
+                    .append("<td>").append(MailFormat.escape(row.upstreamKeyName())).append("</td>")
                     .append("<td>").append(MailFormat.escape(row.groupName())).append("</td>")
                     .append("<td align=\"right\">").append(decimal(row.groupRatio())).append("</td>")
                     .append("<td>").append(MailFormat.escape(row.upstreamChannel())).append("</td>")
@@ -328,6 +330,7 @@ public class ChannelChangeAlertService {
                 continue;
             }
             sb.append("；影响=").append(row.accountName())
+                    .append("（上游 Key ").append(row.upstreamKeyName()).append("）")
                     .append('/').append(row.groupName())
                     .append("(分组倍率 ").append(decimal(row.groupRatio()))
                     .append(row.affected() ? "，已倒挂)" : "，未倒挂)");

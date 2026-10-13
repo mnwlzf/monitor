@@ -122,8 +122,11 @@ export interface ChangeEvent {
  * `affected` = 上游新倍率已超过该分组倍率（倒挂，按这个分组卖会亏）。
  */
 export interface ChangeImpact {
+  /** 本平台号池账号名（= 我自己平台的 Key 名）。 */
   accountName: string
   externalAccountId: number | null
+  /** 上游 Key 名（account_api_keys.key_name，绑定关系匹配到的那把）。 */
+  upstreamKeyName: string
   groupName: string
   groupRatio: number | null
   oldRatio: number | null

@@ -58,8 +58,12 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="本平台账号" min-width="140" show-overflow-tooltip>
+        <el-table-column label="本平台 Key" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.impact?.accountName || '—' }}</template>
+        </el-table-column>
+
+        <el-table-column label="上游 Key" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.impact?.upstreamKeyName || '—' }}</template>
         </el-table-column>
 
         <el-table-column label="所属分组" min-width="150" show-overflow-tooltip>
@@ -160,7 +164,8 @@
           <table class="admin-change-impact-table">
             <thead>
               <tr>
-                <th>本平台账号</th>
+                <th>本平台 Key</th>
+                <th>上游 Key</th>
                 <th>所属分组</th>
                 <th>分组倍率</th>
                 <th>上游倍率（原 → 新）</th>
@@ -172,6 +177,7 @@
             <tbody>
               <tr v-for="impact in changeDetail.impacts" :key="`${impact.externalAccountId}-${impact.groupName}`" :class="{ 'is-affected': impact.affected }">
                 <td>{{ impact.accountName || '—' }}</td>
+                <td>{{ impact.upstreamKeyName || '—' }}</td>
                 <td>{{ impact.groupName || '—' }}</td>
                 <td>{{ formatRatio(impact.groupRatio) }}</td>
                 <td>{{ formatRatio(impact.oldRatio) }} → {{ formatRatio(impact.newRatio) }}</td>

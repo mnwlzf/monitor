@@ -267,6 +267,7 @@ function toChangeImpact(row: ChangeImpactDto): ChangeImpact {
   return {
     accountName: row.accountName || '',
     externalAccountId: row.externalAccountId ?? null,
+    upstreamKeyName: row.upstreamKeyName || '',
     groupName: row.groupName || '',
     groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
     oldRatio: row.oldRatio == null ? null : Number(row.oldRatio),
@@ -364,6 +365,7 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
 interface ChangeImpactDto {
   accountName?: string
   externalAccountId?: number | null
+  upstreamKeyName?: string
   groupName?: string
   groupRatio?: string | number | null
   oldRatio?: string | number | null
