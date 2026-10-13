@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
@@ -7,6 +8,8 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * OneBot 消息解析。
@@ -63,5 +66,64 @@ class BotMessageParserTest {
     void truncatesLongRepliesOnly() {
         assertThat(parser.truncate("x".repeat(2000), 100)).endsWith("…（已截断）");
         assertThat(parser.truncate("短", 100)).isEqualTo("短");
+    }
+    @Test
+    void readsQuotedImageMessageWithImageRefs() throws Exception {
+        OneBotClient client = mock(OneBotClient.class);
+        JsonNode quotedMessage = mapper.readTree("""
+                [{"type":"image","data":{"file":"a.jpg","url":"https://example.com/a.png"}}]
+                """);
+        when(client.fetchMessage("123")).thenReturn(quotedMessage);
+        BotMessageParser parser = new BotMessageParser(client);
+
+        BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event("""
+                {"post_type":"message","message_type":"group","self_id":1,"user_id":2,
+                 "message":[{"type":"reply","data":{"id":"123"}},
+                            {"type":"text","data":{"text":"总结图片内容"}}]}
+                """));
+
+        // 文字段用 [图片] 占位，真正的图片以引用形式交给调用方下载
+        assertThat(quoted.text()).isEqualTo("[图片]");
+        assertThat(quoted.images()).hasSize(1);
+        assertThat(quoted.images().get(0).url()).isEqualTo("https://example.com/a.png");
+    }
+
+    @Test
+    void keepsInlineQuotedTextWithoutCallingOneBot() throws Exception {
+        OneBotClient client = mock(OneBotClient.class);
+        BotMessageParser parser = new BotMessageParser(client);
+
+        BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event("""
+                {"post_type":"message","message_type":"group","self_id":1,"user_id":2,
+                 "message":[{"type":"reply","data":{"text":"被引用的原文"}}]}
+                """));
+
+        assertThat(quoted.text()).isEqualTo("被引用的原文");
+        assertThat(quoted.images()).isEmpty();
+        verifyNoInteractions(client);
+    }
+
+    @Test
+    void returnsEmptyQuotedMessageWhenFetchFails() throws Exception {
+        OneBotClient client = mock(OneBotClient.class);
+        when(client.fetchMessage("404")).thenReturn(null);
+        BotMessageParser parser = new BotMessageParser(client);
+
+        BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event("""
+                {"post_type":"message","message_type":"group","self_id":1,"user_id":2,
+                 "message":[{"type":"reply","data":{"id":"404"}}]}
+                """));
+
+        assertThat(quoted.isEmpty()).isTrue();
+    }
+
+    @Test
+    void promptTellsModelThatQuotedImagesAreAttached() {
+        assertThat(BotMessageParser.buildPrompt("总结图片内容", "[图片]", true, true))
+                .contains("被引用消息里的图片已作为附件发给你")
+                .contains("总结图片内容");
+        // 只引用图片、没打字时也要说清楚「看的是引用的图」
+        assertThat(BotMessageParser.buildPrompt("", "[图片]", true, true))
+                .contains("请直接看引用的图片并回应");
     }
 }

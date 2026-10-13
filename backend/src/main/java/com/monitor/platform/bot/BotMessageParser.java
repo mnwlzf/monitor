@@ -3,7 +3,10 @@ package com.monitor.platform.bot;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
+import com.monitor.platform.bot.vision.BotImageFetcher;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 /**
  * OneBot 消息解析。
@@ -30,7 +33,22 @@ public class BotMessageParser {
     }
 
     /**
-     * 引用（回复）消息的原文。
+     * 被引用消息的内容：文字 + 其中的图片。
+     *
+     * @param text   拼好的纯文本（图片段用 {@code [图片]} 占位）
+     * @param images 消息里的图片引用，交给调用方下载后作为多模态附件送给模型
+     */
+    public record QuotedMessage(String text, List<BotImageFetcher.ImageRef> images) {
+
+        public static final QuotedMessage EMPTY = new QuotedMessage("", List.of());
+
+        public boolean isEmpty() {
+            return text.isBlank() && images.isEmpty();
+        }
+    }
+
+    /**
+     * 引用（回复）消息的内容。
      *
      * <p>QQ 的引用在消息段里只有一个 {@code reply} 段，<strong>通常只带消息 id、不带正文</strong>，
      * 所以用户引用一条消息再问「这个是什么」时模型完全是瞎的。这里按两步取：</p>
@@ -39,12 +57,16 @@ public class BotMessageParser {
      *     <li>否则拿 id 调 OneBot 的 {@code get_msg} 把原文取回来。</li>
      * </ol>
      *
-     * <p>取不到就返回空串 —— 少一段上下文不该让整条回复失败。</p>
+     * <p><strong>被引用的消息可能是图片</strong>（「引用这张图，总结一下」）。所以取回来的是整个
+     * message 节点：文字照旧当上下文，图片交给调用方下载后送给模型 ——
+     * 只给模型一句「[图片]」它是看不到内容的。</p>
+     *
+     * <p>取不到就返回 {@link QuotedMessage#EMPTY} —— 少一段上下文不该让整条回复失败。</p>
      */
-    public String quotedText(OneBotEvent event) {
+    public QuotedMessage quotedMessage(OneBotEvent event) {
         JsonNode message = event.message();
         if (message == null || !message.isArray()) {
-            return "";
+            return QuotedMessage.EMPTY;
         }
         for (JsonNode segment : message) {
             if (!"reply".equals(segment.path("type").asText())) {
@@ -56,14 +78,23 @@ public class BotMessageParser {
                 inline = data.path("content").asText("");
             }
             if (!inline.isBlank()) {
-                return clip(inline);
+                return new QuotedMessage(clip(inline), List.of());
             }
             String id = data.path("id").asText("");
             if (!id.isBlank()) {
-                return clip(client.fetchMessageText(id));
+                JsonNode quoted = client.fetchMessage(id);
+                if (quoted == null || quoted.isMissingNode() || quoted.isNull()) {
+                    return QuotedMessage.EMPTY;
+                }
+                return new QuotedMessage(clip(OneBotClient.textOf(quoted)), BotImageFetcher.extract(quoted));
             }
         }
-        return "";
+        return QuotedMessage.EMPTY;
+    }
+
+    /** 只要被引用消息的文字（不需要图片时的简写）。 */
+    public String quotedText(OneBotEvent event) {
+        return quotedMessage(event).text();
     }
 
     private static String clip(String text) {
@@ -82,12 +113,32 @@ public class BotMessageParser {
      * <p>只引用、没打字时也要有话说 —— 以前这种情况会被判成「空消息」直接丢掉。</p>
      */
     public static String buildPrompt(String text, String quoted, boolean hasImages) {
+        return buildPrompt(text, quoted, hasImages, false);
+    }
+
+    /**
+     * 组装提示词。
+     *
+     * @param hasImages       本次请求是否带了图片附件（自己发的 + 引用的）
+     * @param quotedHasImages 引用的那条消息里的图片是否已经作为附件带上
+     */
+    public static String buildPrompt(String text, String quoted, boolean hasImages, boolean quotedHasImages) {
         StringBuilder sb = new StringBuilder();
         if (!quoted.isBlank()) {
-            sb.append("（用户引用了这条消息：").append(quoted).append("）").append('\n');
+            sb.append("（用户引用了这条消息：").append(quoted);
+            if (quotedHasImages) {
+                sb.append("；被引用消息里的图片已作为附件发给你");
+            }
+            sb.append("）").append('\n');
+        } else if (quotedHasImages) {
+            sb.append("（用户引用了上面这条消息，其中的图片已作为附件发给你）").append('\n');
         }
         if (text.isBlank()) {
-            sb.append(hasImages ? IMAGE_ONLY_PROMPT : "用户只引用了上面这条消息，没有额外文字，请自然地回应。");
+            if (quotedHasImages) {
+                sb.append("请直接看引用的图片并回应。");
+            } else {
+                sb.append(hasImages ? IMAGE_ONLY_PROMPT : "用户只引用了上面这条消息，没有额外文字，请自然地回应。");
+            }
         } else {
             sb.append(text);
         }

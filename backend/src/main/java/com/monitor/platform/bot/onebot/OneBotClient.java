@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * OneBot v11 HTTP API 客户端（只用来发消息）。
+ * OneBot v11 HTTP API 客户端（发消息 + 取引用消息原文）。
  *
  * <p>发送失败只记日志：机器人答不出来不应该把回调链路也拖垮。
  * 但发图片时会把失败结果返回给调用方，好让它退回文本 —— 图片发不出去时不能什么都不发。</p>
@@ -64,21 +64,23 @@ public class OneBotClient {
     }
 
     /**
-     * 取回被引用消息的文字内容（OneBot 的 /get_msg）。
+     * 取回被引用消息的原始 message 段（OneBot 的 /get_msg）。
      *
      * <p>QQ 的引用（回复）在消息段里只有一个 {@code reply} 段，通常<strong>只带消息 id</strong>，
-     * 不带被引用消息的正文。所以用户引用一条消息再问「这个是什么」时，模型看不到那条消息。
-     * 这里用 id 把原文取回来，供上下文使用。</p>
+     * 不带被引用消息的正文。所以用户引用一条消息再问「这个是什么」时，模型看不到那条消息。</p>
      *
-     * <p>取不到（消息被撤回、实现不支持、权限不足）时返回空串，绝不抛异常 ——
+     * <p>返回整个 message 节点而不是纯文本：被引用的消息本身可能就是<strong>图片</strong>
+     * （「引用这张图，总结一下」），文字和图片要一起取回去。</p>
+     *
+     * <p>取不到（消息被撤回、实现不支持、权限不足）时返回 {@code null}，绝不抛异常 ——
      * 少一段上下文不该让整条回复失败。</p>
      *
      * @param messageId 被引用消息的 id
-     * @return 拼好的纯文本（图片等非文本段用占位符表示）；取不到时空串
+     * @return OneBot 的 message 节点（消息段数组或字符串）；取不到时 null
      */
-    public String fetchMessageText(String messageId) {
+    public JsonNode fetchMessage(String messageId) {
         if (!properties.isConfigured() || messageId == null || messageId.isBlank()) {
-            return "";
+            return null;
         }
         Map<String, Object> body = new LinkedHashMap<>();
         try {
@@ -89,14 +91,20 @@ public class OneBotClient {
         }
         try {
             JsonNode data = postData("/get_msg", body);
-            if (data == null) {
-                return "";
-            }
-            return textOf(data.path("message"));
+            return data == null ? null : data.path("message");
         } catch (RuntimeException ex) {
             log.debug("取引用消息失败: id={}, err={}", messageId, ex.getMessage());
-            return "";
+            return null;
         }
+    }
+
+    /**
+     * 取回被引用消息的文字内容；取不到时空串。
+     *
+     * @see #fetchMessage(String)
+     */
+    public String fetchMessageText(String messageId) {
+        return textOf(fetchMessage(messageId));
     }
 
     /**
@@ -104,7 +112,7 @@ public class OneBotClient {
      *
      * <p>{@code message} 可能是消息段数组，也可能是字符串（{@code post_format=string}），两种都收。</p>
      */
-    static String textOf(JsonNode message) {
+    public static String textOf(JsonNode message) {
         if (message == null || message.isMissingNode() || message.isNull()) {
             return "";
         }

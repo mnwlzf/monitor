@@ -147,7 +147,9 @@ class BotMessageServiceTest {
                 {"post_type":"message","message_type":"private","sub_type":"group","group_id":%d,"user_id":%d,
                  "self_id":1,"raw_message":"%s","message":[{"type":"text","data":{"text":"%s"}}]}
                 """.formatted(groupId, userId, text, text);
-    }    private static String tempSessionCommand(Long groupId, String text) {
+    }
+
+    private static String tempSessionCommand(Long groupId, String text) {
         return """
                 {"post_type":"message","message_type":"private","sub_type":"group","group_id":%d,"user_id":999,
                  "self_id":1,"raw_message":"%s","message":[{"type":"text","data":{"text":"%s"}}]}
@@ -871,5 +873,28 @@ class BotMessageServiceTest {
         service.onEvent(event(privateCommand("/我的余额")));
 
         verify(botUserService, timeout(3000)).balanceReport("admin@qq.com");
+    }
+    /** 用户引用一条图片消息再问「总结图片内容」：图片必须被下载下来送给模型。 */
+    @Test
+    void shouldFetchImagesFromQuotedMessage() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(client.fetchMessage("123")).thenReturn(mapper.readTree("""
+                [{"type":"image","data":{"file":"a.jpg","url":"https://example.com/a.png"}}]
+                """));
+        when(imageFetcher.fetch(any())).thenReturn(List.of());
+
+        service.onEvent(event("""
+                {"post_type":"message","message_type":"private","user_id":999,"self_id":1,
+                 "message":[{"type":"reply","data":{"id":"123"}},
+                            {"type":"text","data":{"text":"总结图片内容"}}]}
+                """));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<BotImageFetcher.ImageRef>> captor = ArgumentCaptor.forClass(List.class);
+        verify(imageFetcher, timeout(3000).atLeastOnce()).fetch(captor.capture());
+        assertTrue(captor.getAllValues().stream()
+                        .flatMap(refs -> refs.stream())
+                        .anyMatch(ref -> "https://example.com/a.png".equals(ref.url())),
+                "被引用消息里的图片应该被下载后送给模型");
     }
 }

@@ -161,13 +161,17 @@ public class BotMessageService {
             return;
         }
         String text = parser.extractText(event);
-        // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见
-        String quoted = parser.quotedText(event);
+        // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见；
+        // 被引用的消息本身可能就是图片（「引用这张图，总结一下」），所以连图片一起取回来
+        BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event);
         // 图片段单独抽出来：之前只认文本段，导致「只发图片」的消息被当成空消息直接丢掉
-        List<BotImageFetcher.ImageRef> imageRefs = visionProperties.isEnabled()
+        List<BotImageFetcher.ImageRef> ownImageRefs = visionProperties.isEnabled()
                 ? BotImageFetcher.extract(event.message())
                 : List.of();
-        if (text.isBlank() && quoted.isBlank() && imageRefs.isEmpty()) {
+        List<BotImageFetcher.ImageRef> quotedImageRefs = visionProperties.isEnabled()
+                ? quoted.images()
+                : List.of();
+        if (text.isBlank() && quoted.text().isBlank() && ownImageRefs.isEmpty() && quotedImageRefs.isEmpty()) {
             // 既没文字、没引用也没图片（表情、语音等），目前不支持
             runtimeStatus.dropped(channel, event.groupId(), event.userId(), "空消息（表情/语音等暂不支持）");
             return;
@@ -175,7 +179,7 @@ public class BotMessageService {
         runtimeStatus.inbound();
         // 「机器人状态」页要能看到正在和谁对话、说的什么；只引用一条消息时把引用内容当内容
         String turnId = runtimeStatus.beginTurn(channel, event.groupId(), event.userId(),
-                !text.isBlank() ? text : (quoted.isBlank() ? "" : "（引用了：" + quoted + "）"));
+                !text.isBlank() ? text : (quoted.text().isBlank() ? "" : "（引用了：" + quoted.text() + "）"));
         executor.submit(() -> {
             try {
                 BotIdentity identity = identityResolver.resolve(event.userId());
@@ -187,18 +191,22 @@ public class BotMessageService {
                     log.info("收到群临时会话: user={}, 发起群={}, 触发平台功能={}",
                             event.userId(), event.groupId(), platformFeature);
                 }
-                // 下载图片放在后台线程里做，不占用回调线程
-                List<BotImageFetcher.FetchedImage> images = imageFetcher.fetch(imageRefs);
+                // 下载图片放在后台线程里做，不占用回调线程；自己发的与被引用的分开下，存档时能说清来源
+                List<BotImageFetcher.FetchedImage> ownImages = imageFetcher.fetch(ownImageRefs);
+                List<BotImageFetcher.FetchedImage> quotedImages = imageFetcher.fetch(quotedImageRefs);
+                List<BotImageFetcher.FetchedImage> images = new ArrayList<>(ownImages);
+                images.addAll(quotedImages);
 
                 // 先存档用户消息：即使后面回答失败，也能查证「他说了什么、发了什么图」
                 String correlationId = archive.recordInbound(event,
-                        describeIncoming(text, imageRefs.size(), images.size()),
-                        kindOf(text, settings, !imageRefs.isEmpty()), identity);
+                        describeIncoming(text, ownImageRefs.size(), ownImages.size(),
+                                quotedImageRefs.size(), quotedImages.size()),
+                        kindOf(text, settings, !ownImageRefs.isEmpty() || !quotedImageRefs.isEmpty()), identity);
 
                 GeneratedImages generated = new GeneratedImages();
                 BotReport report;
                 try {
-                    report = answer(event, text, quoted, settings, identity, platformFeature, channel, images, generated);
+                    report = answer(event, text, quoted, !quotedImages.isEmpty(), settings, identity, platformFeature, channel, images, generated);
                 } catch (Exception ex) {
                     log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                             event.userId(), identity.platformUser(), ex.getMessage());
@@ -259,7 +267,8 @@ public class BotMessageService {
         };
     }
 
-    private BotReport answer(OneBotEvent event, String text, String quoted, BotSettings settings, BotIdentity identity,
+    private BotReport answer(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
+                             boolean quotedHasImages, BotSettings settings, BotIdentity identity,
                              boolean platformFeature, BotChannel channel,
                              List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         String prefix = settings.commandPrefix();
@@ -268,7 +277,7 @@ public class BotMessageService {
             return commandRouter.route(text.substring(prefix.length()).trim(), identity, platformFeature,
                     event, generated, () -> notifyImageStart(event, generated));
         }
-        return askModel(event, text, quoted, settings, identity, platformFeature, channel, images, generated);
+        return askModel(event, text, quoted, quotedHasImages, settings, identity, platformFeature, channel, images, generated);
     }
 
     /** 纯文本包成报表：短内容仍按纯文本发出，长内容走段落渲染。 */
@@ -276,7 +285,8 @@ public class BotMessageService {
         return BotReport.fromMarkdown(value);
     }
 
-    private BotReport askModel(OneBotEvent event, String text, String quoted, BotSettings settings, BotIdentity identity,
+    private BotReport askModel(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
+                               boolean quotedHasImages, BotSettings settings, BotIdentity identity,
                                boolean platformFeature, BotChannel channel,
                                List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         BotChatClientFactory.Persona persona = personaOf(identity, platformFeature);
@@ -287,7 +297,7 @@ public class BotMessageService {
                     : "看图片需要开启大模型（SPRING_AI_MODEL_CHAT）。当前可用命令：\n" + commandRouter.help(identity, platformFeature);
             return text(message);
         }
-        String promptText = parser.buildPrompt(text, quoted, !images.isEmpty());
+        String promptText = parser.buildPrompt(text, quoted.text(), !images.isEmpty(), quotedHasImages);
         ChatClient.ChatClientRequestSpec request = chatClient.prompt()
                 .user(spec -> {
                     spec.text(promptText);
@@ -446,12 +456,23 @@ public class BotMessageService {
      * <p>图片本身不入库（体积大且会过期），只记数量与读取情况 ——
      * 配合文字内容足够用于事后查证。</p>
      */
-    private static String describeIncoming(String text, int total, int fetched) {
+    private static String describeIncoming(String text, int total, int fetched,
+                                           int quotedTotal, int quotedFetched) {
         StringBuilder sb = new StringBuilder();
         if (total > 0) {
             sb.append("[图片 ×").append(total);
             if (fetched < total) {
                 sb.append("，成功读取 ").append(fetched).append(" 张");
+            }
+            sb.append("]");
+        }
+        if (quotedTotal > 0) {
+            if (!sb.isEmpty()) {
+                sb.append(" ");
+            }
+            sb.append("[引用图片 ×").append(quotedTotal);
+            if (quotedFetched < quotedTotal) {
+                sb.append("，成功读取 ").append(quotedFetched).append(" 张");
             }
             sb.append("]");
         }
