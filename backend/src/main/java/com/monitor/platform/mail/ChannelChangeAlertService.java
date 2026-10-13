@@ -3,13 +3,16 @@ package com.monitor.platform.mail;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import com.monitor.platform.common.time.BusinessTime;
+import com.monitor.platform.pool.RateChangeImpactService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,19 +57,22 @@ public class ChannelChangeAlertService {
     private final SmtpConfigProvider smtpConfigProvider;
     private final MailService mailService;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
+    private final RateChangeImpactService rateChangeImpactService;
 
     public ChannelChangeAlertService(UpstreamChangeEventRepository changeEventRepository,
                                      AccountNameResolver accountNameResolver,
                                      MailRecipientRepository mailRecipientRepository,
                                      SmtpConfigProvider smtpConfigProvider,
                                      MailService mailService,
-                                     ObjectProvider<ChatClient.Builder> chatClientBuilder) {
+                                     ObjectProvider<ChatClient.Builder> chatClientBuilder,
+                                     RateChangeImpactService rateChangeImpactService) {
         this.changeEventRepository = changeEventRepository;
         this.accountNameResolver = accountNameResolver;
         this.mailRecipientRepository = mailRecipientRepository;
         this.smtpConfigProvider = smtpConfigProvider;
         this.mailService = mailService;
         this.chatClientBuilder = chatClientBuilder;
+        this.rateChangeImpactService = rateChangeImpactService;
     }
 
     /**
@@ -136,8 +142,9 @@ public class ChannelChangeAlertService {
 
         Map<Integer, String> accountNames = new HashMap<>();
         Map<Integer, String> platformNames = new HashMap<>();
-        String summary = summarize(events, accountNames);
-        String body = buildBody(events, intro, summary, accountNames, platformNames);
+        List<RateChangeImpactService.ImpactRow> impacts = collectImpacts(events);
+        String summary = summarize(events, accountNames, impacts);
+        String body = buildBody(events, intro, summary, accountNames, platformNames, impacts);
         List<String> to = recipients.stream().map(MailRecipientEntity::getEmail).toList();
         mailService.send(smtpConfig, to, subject, body);
         log.info("{}邮件已发送: recipients={}, eventCount={}, aiSummary={}",
@@ -150,7 +157,26 @@ public class ChannelChangeAlertService {
      * <p>模型没配、调用失败、返回为空 —— 任何一种情况都返回 {@code null}，
      * 调用方会退回原始明细表格。**告警的送达不能依赖模型可用。**</p>
      */
-    private String summarize(List<UpstreamChangeEventEntity> events, Map<Integer, String> accountNames) {
+    /**
+     * 逐条评估「上游涨价 → 我平台哪些分组倒挂」。
+     *
+     * <p>只读库没配 / 查询失败都只记日志：影响评估是锦上添花，
+     * 不能让告警本身发不出去。返回的每行是「本平台账号 × 分组」。</p>
+     */
+    private List<RateChangeImpactService.ImpactRow> collectImpacts(List<UpstreamChangeEventEntity> events) {
+        List<RateChangeImpactService.ImpactRow> rows = new ArrayList<>();
+        for (UpstreamChangeEventEntity event : events) {
+            try {
+                rows.addAll(rateChangeImpactService.impactOf(event));
+            } catch (RuntimeException ex) {
+                log.warn("渠道影响评估失败: eventId={}, reason={}", event.getId(), ex.getMessage());
+            }
+        }
+        return rows;
+    }
+
+    private String summarize(List<UpstreamChangeEventEntity> events, Map<Integer, String> accountNames,
+                             List<RateChangeImpactService.ImpactRow> impacts) {
         ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
         if (builder == null) {
             return null;
@@ -158,7 +184,7 @@ public class ChannelChangeAlertService {
         try {
             String answer = builder.build().prompt()
                     .system(SUMMARY_SYSTEM_PROMPT)
-                    .user("原始变更记录：\n" + rawLines(events, accountNames))
+                    .user("原始变更记录：\n" + rawLines(events, accountNames, impacts))
                     .call()
                     .content();
             if (answer == null || answer.isBlank()) {
@@ -172,7 +198,8 @@ public class ChannelChangeAlertService {
     }
 
     /** 喂给模型的原始行（一行一条，含账号与旧值→新值）。 */
-    private String rawLines(List<UpstreamChangeEventEntity> events, Map<Integer, String> accountNames) {
+    private String rawLines(List<UpstreamChangeEventEntity> events, Map<Integer, String> accountNames,
+                            List<RateChangeImpactService.ImpactRow> impacts) {
         StringBuilder sb = new StringBuilder();
         for (UpstreamChangeEventEntity event : events) {
             sb.append("- ").append(MailFormat.formatTime(event.getDetectedAt()))
@@ -185,13 +212,15 @@ public class ChannelChangeAlertService {
                 sb.append("（").append(before == null ? "?" : before)
                         .append(" -> ").append(after == null ? "?" : after).append("）");
             }
+            appendImpactLines(sb, event, impacts);
             sb.append('\n');
         }
         return sb.toString();
     }
 
     private String buildBody(List<UpstreamChangeEventEntity> events, String intro, String summary,
-                             Map<Integer, String> accountNames, Map<Integer, String> platformNames) {
+                             Map<Integer, String> accountNames, Map<Integer, String> platformNames,
+                             List<RateChangeImpactService.ImpactRow> impacts) {
         StringBuilder html = new StringBuilder();
         html.append("<p>").append(intro).append("</p>");
 
@@ -206,6 +235,7 @@ public class ChannelChangeAlertService {
                     .append("（未生成 AI 总结：未配置大模型或调用失败，下面直接列出原始变更）</p>");
         }
 
+        html.append(impactBlock(impacts));
         html.append("<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" ")
                 .append("style=\"border-collapse:collapse;font-size:13px\">");
         html.append("<tr style=\"background:#f5f5f5\">")
@@ -239,6 +269,86 @@ public class ChannelChangeAlertService {
         return html.toString();
     }
 
+    /**
+     * 影响评估表格：一行一个（本平台账号 × 所属分组）。
+     *
+     * <p>这是「一眼看出影响范围」的核心：上游渠道涨价后，我平台哪些分组已经倒挂 ——
+     * 上游新倍率高于该分组的售价倍率，倒挂行标红。</p>
+     */
+    private String impactBlock(List<RateChangeImpactService.ImpactRow> impacts) {
+        if (impacts == null || impacts.isEmpty()) {
+            return "";
+        }
+        boolean anyAffected = RateChangeImpactService.hasAffected(impacts);
+        StringBuilder html = new StringBuilder();
+        html.append("<div style=\"background:#fff7e6;border-left:3px solid #fa8c16;padding:10px 12px;margin:14px 0\">")
+                .append("<strong>影响评估：上游新倍率 vs 本平台分组倍率</strong>")
+                .append("<p style=\"margin:8px 0 0;font-size:13px\">")
+                .append(anyAffected
+                        ? "标红的分组已经<strong>倒挂</strong>：上游成本倍率高于该分组售价倍率，继续按这个分组卖会亏。"
+                        : "本次涨价尚未超过任何分组倍率，暂无倒挂。")
+                .append("</p>")
+                .append("<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" ")
+                .append("style=\"border-collapse:collapse;font-size:13px;margin-top:8px\">")
+                .append("<tr style=\"background:#f5f5f5\">")
+                .append("<th align=\"left\">本平台账号</th>")
+                .append("<th align=\"left\">所属分组</th>")
+                .append("<th align=\"right\">分组倍率</th>")
+                .append("<th align=\"left\">上游渠道</th>")
+                .append("<th align=\"right\">上游倍率（原 → 新）</th>")
+                .append("<th align=\"right\">涨价幅度</th>")
+                .append("<th align=\"left\">是否受影响</th>")
+                .append("<th align=\"left\">提醒级别</th>")
+                .append("</tr>");
+        for (RateChangeImpactService.ImpactRow row : impacts) {
+            html.append(row.affected() ? "<tr style=\"background:#fff1f0\">" : "<tr>")
+                    .append("<td>").append(MailFormat.escape(row.platformAccount())).append("</td>")
+                    .append("<td>").append(MailFormat.escape(row.groupName())).append("</td>")
+                    .append("<td align=\"right\">").append(decimal(row.groupRatio())).append("</td>")
+                    .append("<td>").append(MailFormat.escape(row.upstreamChannel())).append("</td>")
+                    .append("<td align=\"right\">").append(decimal(row.oldRatio())).append(" → ")
+                    .append(decimal(row.newRatio())).append("</td>")
+                    .append("<td align=\"right\">").append(percent(row.increasePercent())).append("</td>")
+                    .append("<td>").append(row.affected() ? "<strong>是</strong>" : "否").append("</td>")
+                    .append("<td>").append(levelLabel(row.level())).append("</td>")
+                    .append("</tr>");
+        }
+        html.append("</table></div>");
+        return html.toString();
+    }
+
+    /** 把影响评估一并喂给大模型，避免总结里只说「涨了」不说「影响到谁」。 */
+    private void appendImpactLines(StringBuilder sb, UpstreamChangeEventEntity event,
+                                   List<RateChangeImpactService.ImpactRow> impacts) {
+        if (impacts == null || impacts.isEmpty()) {
+            return;
+        }
+        for (RateChangeImpactService.ImpactRow row : impacts) {
+            if (event.getGroupName() != null && !event.getGroupName().equals(row.upstreamChannel())) {
+                continue;
+            }
+            sb.append("；影响=").append(row.platformAccount())
+                    .append('/').append(row.groupName())
+                    .append("(分组倍率 ").append(decimal(row.groupRatio()))
+                    .append(row.affected() ? "，已倒挂)" : "，未倒挂)");
+        }
+    }
+
+    private static String decimal(BigDecimal value) {
+        return value == null ? "-" : value.stripTrailingZeros().toPlainString();
+    }
+
+    private static String percent(BigDecimal value) {
+        return value == null ? "-" : value.stripTrailingZeros().toPlainString() + "%";
+    }
+
+    private static String levelLabel(String level) {
+        return switch (level == null ? "INFO" : level) {
+            case "CRITICAL" -> "严重";
+            case "WARNING" -> "警告";
+            default -> "信息";
+        };
+    }
     /** 受影响的「上游账号 Key」名；取不到退回单个 key 名 / 上游 ID。 */
     private String upstreamKeyLabel(UpstreamChangeEventEntity event) {
         if (event.getUpstreamKeyNames() != null && !event.getUpstreamKeyNames().isBlank()) {
