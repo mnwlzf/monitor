@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { Account, AccountMetricPoint, ApiKey, ChangeEvent, Channel, MetricRange, Platform, PlatformType, UsageDashboard } from '../types'
+import type { Account, AccountMetricPoint, ApiKey, ChangeEvent, ChangeImpact, Channel, MetricRange, Platform, PlatformType, UsageDashboard } from '../types'
 
 export interface CreateAccountInput {
   displayName: string
@@ -262,6 +262,21 @@ function normalizeCredentialStatus(status?: string): Account['credentialStatus']
   return 'UNKNOWN'
 }
 
+/** 渠道倍率变化的影响行：数字统一转 number，级别收敛到三档。 */
+function toChangeImpact(row: ChangeImpactDto): ChangeImpact {
+  return {
+    platformAccount: row.platformAccount || '',
+    externalAccountId: row.externalAccountId ?? null,
+    groupName: row.groupName || '',
+    groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
+    oldRatio: row.oldRatio == null ? null : Number(row.oldRatio),
+    newRatio: row.newRatio == null ? null : Number(row.newRatio),
+    increasePercent: row.increasePercent == null ? null : Number(row.increasePercent),
+    affected: row.affected === true,
+    level: row.level === 'CRITICAL' || row.level === 'WARNING' ? row.level : 'INFO',
+  }
+}
+
 function normalizeCollectStatus(status?: string | null): Account['lastCollectStatus'] {
   if (status === 'SUCCESS' || status === 'FAILED' || status === 'RUNNING' || status === 'PARTIAL') return status
   return 'UNKNOWN'
@@ -293,6 +308,7 @@ interface ChangeEventDto {
   upstreamKeyNames?: string
   localKeyNames?: string
   groupRatio?: string | number | null
+  impacts?: ChangeImpactDto[]
   fieldName?: string
   oldValue?: string
   newValue?: string
@@ -335,6 +351,7 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
     upstreamKeyNames: row.upstreamKeyNames || '',
     localKeyNames: row.localKeyNames || '',
     groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
+    impacts: (row.impacts ?? []).map(toChangeImpact),
     field: row.fieldName || '',
     oldValue: row.oldValue || 'null',
     newValue: row.newValue || 'null',
@@ -344,6 +361,18 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
     inUse: row.inUse === true,
   }))
 }
+interface ChangeImpactDto {
+  platformAccount?: string
+  externalAccountId?: number | null
+  groupName?: string
+  groupRatio?: string | number | null
+  oldRatio?: string | number | null
+  newRatio?: string | number | null
+  increasePercent?: string | number | null
+  affected?: boolean
+  level?: string
+}
+
 interface UsageDashboardDto {
   id: string | number
   accountId: string | number

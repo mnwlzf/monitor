@@ -1,6 +1,7 @@
 package com.monitor.platform.api.dto;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.time.OffsetDateTime;
 
 /**
@@ -17,6 +18,7 @@ import java.time.OffsetDateTime;
  * @param upstreamKeyNames 受影响的「上游账号 Key」名字，多个用「、」连接（渠道事件按同分组匹配）
  * @param localKeyNames    对应的「本平台 Key」名字（号池账号名），多个用「、」连接
  * @param groupRatio   所在分组的当前倍率（渠道事件）
+ * @param impacts      渠道倍率变化对本平台的影响（一行 = 本平台账号 × 分组）；其它事件为空
  * @param changeType   变更类型
  * @param fieldName    发生变化的字段
  * @param oldValue     变更前值
@@ -45,6 +47,33 @@ public record UpstreamChangeEventResponse(
         String severity,
         String message,
         OffsetDateTime detectedAt,
-        boolean inUse
+        boolean inUse,
+        List<ChangeImpact> impacts
 ) {
+
+    /**
+     * 渠道倍率变化对「我自己的 Sub2API」的影响。
+     *
+     * @param platformAccount   本平台号池账号名
+     * @param externalAccountId 本平台号池账号 ID
+     * @param groupName         本平台分组名
+     * @param groupRatio        本平台分组倍率
+     * @param oldRatio          上游原倍率
+     * @param newRatio          上游新倍率
+     * @param increasePercent   涨价幅度（%）
+     * @param affected          上游新倍率是否已超过该分组倍率（倒挂）
+     * @param level             提醒级别：INFO / WARNING / CRITICAL
+     */
+    public record ChangeImpact(
+            String platformAccount,
+            Long externalAccountId,
+            String groupName,
+            BigDecimal groupRatio,
+            BigDecimal oldRatio,
+            BigDecimal newRatio,
+            BigDecimal increasePercent,
+            boolean affected,
+            String level
+    ) {
+    }
 }

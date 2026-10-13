@@ -99,6 +99,8 @@ export interface ChangeEvent {
   localKeyNames: string
   /** 所在分组的当前倍率（渠道事件）。 */
   groupRatio: number | null
+  /** 渠道倍率变化对我平台的影响（一行 = 本平台账号 × 分组）；非倍率事件为空。 */
+  impacts: ChangeImpact[]
   field: string
   oldValue: string
   newValue: string
@@ -114,6 +116,22 @@ export interface ChangeEvent {
  *
  * 完整明文不随列表下发，仅返回脱敏值；平台特有明细放在 metrics 中。
  */
+/**
+ * 渠道倍率变化对本平台的影响。
+ *
+ * `affected` = 上游新倍率已超过该分组倍率（倒挂，按这个分组卖会亏）。
+ */
+export interface ChangeImpact {
+  platformAccount: string
+  externalAccountId: number | null
+  groupName: string
+  groupRatio: number | null
+  oldRatio: number | null
+  newRatio: number | null
+  increasePercent: number | null
+  affected: boolean
+  level: 'INFO' | 'WARNING' | 'CRITICAL'
+}
 export interface ApiKey {
   id: number
   accountId: number

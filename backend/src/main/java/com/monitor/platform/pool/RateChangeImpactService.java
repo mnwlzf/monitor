@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -71,9 +73,85 @@ public class RateChangeImpactService {
                             boolean affected, String level) {
     }
 
-    /** 这条变更的影响评估；不是渠道事件 / 读不到只读库时返回空列表。 */
+    /** 这条变更的影响评估；不是渠道倍率事件 / 读不到只读库时返回空列表。 */
     public List<ImpactRow> impactOf(UpstreamChangeEventEntity event) {
-        if (event == null || !"GROUP".equalsIgnoreCase(event.getEntityType()) || !groupReader.isAvailable()) {
+        if (event == null) {
+            return List.of();
+        }
+        return impactsOf(List.of(event)).getOrDefault(event.getId(), List.of());
+    }
+
+    /**
+     * 批量影响评估：号池账号与分组各查一次，避免变更列表（最多几百条）逐条打库。
+     *
+     * @return eventId → 影响行；只包含渠道倍率事件，其它事件不在返回结果里
+     */
+    public Map<Long, List<ImpactRow>> impactsOf(List<UpstreamChangeEventEntity> events) {
+        if (events == null || events.isEmpty() || !groupReader.isAvailable()) {
+            return Map.of();
+        }
+        List<UpstreamChangeEventEntity> rateEvents = events.stream()
+                .filter(RateChangeImpactService::isRateChange)
+                .toList();
+        if (rateEvents.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, PoolAccountEntityView> poolByKey = boundPoolAccounts();
+        Map<Integer, List<AccountApiKeyEntity>> keysByAccount = new HashMap<>();
+        Map<Long, List<AccountApiKeyEntity>> scopedKeys = new HashMap<>();
+        Set<Long> externalIds = new LinkedHashSet<>();
+        for (UpstreamChangeEventEntity event : rateEvents) {
+            List<AccountApiKeyEntity> keys = keysByAccount.computeIfAbsent(event.getAccountId(),
+                    accountId -> apiKeyRepository.findByAccount(accountId, false));
+            List<AccountApiKeyEntity> scoped = scopeKeys(keys, channelOf(event));
+            scopedKeys.put(event.getId(), scoped);
+            for (AccountApiKeyEntity key : scoped) {
+                PoolAccountEntityView pool = poolByKey.get(key.getId());
+                if (pool != null) {
+                    externalIds.add(pool.externalAccountId());
+                }
+            }
+        }
+        Map<Long, List<Sub2GroupRatioReader.PlatformGroup>> groups = groupReader.groupsByAccount(externalIds);
+
+        Map<Long, List<ImpactRow>> result = new LinkedHashMap<>();
+        for (UpstreamChangeEventEntity event : rateEvents) {
+            result.put(event.getId(),
+                    buildRows(event, scopedKeys.getOrDefault(event.getId(), List.of()), poolByKey, groups));
+        }
+        return result;
+    }
+
+    private static boolean isRateChange(UpstreamChangeEventEntity event) {
+        if (event == null || !"GROUP".equalsIgnoreCase(event.getEntityType()) || event.getChangeType() == null) {
+            return false;
+        }
+        return "RATE_CHANGED".equalsIgnoreCase(event.getChangeType())
+                || "BASE_RATE_CHANGED".equalsIgnoreCase(event.getChangeType());
+    }
+
+    private static String channelOf(UpstreamChangeEventEntity event) {
+        return event.getGroupName() == null || event.getGroupName().isBlank()
+                ? event.getEntityKey()
+                : event.getGroupName();
+    }
+
+    /** 优先只取「发生变化的那个分组」下的 Key；分组名对不上时退回该账号全部 Key。 */
+    private static List<AccountApiKeyEntity> scopeKeys(List<AccountApiKeyEntity> keys, String channel) {
+        if (keys == null || keys.isEmpty()) {
+            return List.of();
+        }
+        List<AccountApiKeyEntity> scoped = keys.stream()
+                .filter(key -> channel == null || channel.equals(key.getGroupName()))
+                .toList();
+        return scoped.isEmpty() ? keys : scoped;
+    }
+
+    private List<ImpactRow> buildRows(UpstreamChangeEventEntity event, List<AccountApiKeyEntity> scoped,
+                                      Map<Long, PoolAccountEntityView> poolByKey,
+                                      Map<Long, List<Sub2GroupRatioReader.PlatformGroup>> groups) {
+        if (scoped.isEmpty()) {
             return List.of();
         }
         BigDecimal before = decimal(event.getOldValue());
@@ -81,31 +159,7 @@ public class RateChangeImpactService {
         if (after == null) {
             return List.of();
         }
-        String channel = event.getGroupName() == null || event.getGroupName().isBlank()
-                ? event.getEntityKey()
-                : event.getGroupName();
-
-        List<AccountApiKeyEntity> keys = apiKeyRepository.findByAccount(event.getAccountId(), false);
-        if (keys.isEmpty()) {
-            return List.of();
-        }
-        // 优先只取「发生变化的那个分组」下的 Key；分组名对不上时退回该账号全部 Key
-        List<AccountApiKeyEntity> scoped = keys.stream()
-                .filter(key -> channel == null || channel.equals(key.getGroupName()))
-                .toList();
-        if (scoped.isEmpty()) {
-            scoped = keys;
-        }
-
-        Map<Long, PoolAccountEntityView> poolByKey = boundPoolAccounts();
-        List<Long> externalIds = scoped.stream()
-                .map(key -> Optional.ofNullable(poolByKey.get(key.getId()))
-                        .map(PoolAccountEntityView::externalAccountId).orElse(null))
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-        Map<Long, List<Sub2GroupRatioReader.PlatformGroup>> groups = groupReader.groupsByAccount(externalIds);
-
+        String channel = channelOf(event);
         boolean rising = before != null && after.compareTo(before) > 0;
         BigDecimal increase = percentIncrease(before, after);
 
@@ -135,12 +189,11 @@ public class RateChangeImpactService {
                         levelOf(rising, affected, increase)));
             }
         }
-        // 受影响的排前面：提醒里第一眼要看到的是「哪些分组已经倒挂」
+        // 受影响的排前面：第一眼要看到的是「哪些分组已经倒挂」
         rows.sort(Comparator.comparing(ImpactRow::affected).reversed()
                 .thenComparing(ImpactRow::groupRatio, Comparator.nullsLast(Comparator.reverseOrder())));
         return rows;
     }
-
     /** 是否有分组「倒挂」（上游成本已高于分组售价）。 */
     public static boolean hasAffected(List<ImpactRow> rows) {
         return rows != null && rows.stream().anyMatch(ImpactRow::affected);

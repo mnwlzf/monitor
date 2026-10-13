@@ -78,6 +78,22 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="影响（我平台分组）" min-width="230">
+          <template #default="{ row }">
+            <span v-if="!row.impacts?.length" class="muted">—</span>
+            <el-tag
+              v-for="impact in row.impacts"
+              :key="`${impact.externalAccountId}-${impact.groupName}`"
+              size="small"
+              :type="impact.affected ? 'danger' : 'info'"
+              effect="plain"
+              class="admin-change-impact-tag"
+            >
+              {{ impact.groupName }}（倍率 {{ formatRatio(impact.groupRatio) }}）{{ impact.affected ? ' 倒挂' : '' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
         <el-table-column label="变化" min-width="280">
           <template #default="{ row }">
             <div v-if="changeSummary(asChange(row))" class="admin-change-summary">
@@ -123,6 +139,33 @@
           <template v-if="changeDetail.groupRatio != null"> · 分组倍率：{{ formatRatio(changeDetail.groupRatio) }}</template>
         </p>
         <p class="admin-change-detail-message">{{ changeDetail.message || '—' }}</p>
+        <div v-if="changeDetail.impacts?.length" class="admin-change-detail-impact">
+          <span class="muted">对我平台的影响（上游新倍率 vs 分组倍率）</span>
+          <table class="admin-change-impact-table">
+            <thead>
+              <tr>
+                <th>本平台账号</th>
+                <th>所属分组</th>
+                <th>分组倍率</th>
+                <th>上游倍率（原 → 新）</th>
+                <th>涨价幅度</th>
+                <th>是否受影响</th>
+                <th>提醒级别</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="impact in changeDetail.impacts" :key="`${impact.externalAccountId}-${impact.groupName}`" :class="{ 'is-affected': impact.affected }">
+                <td>{{ impact.platformAccount || '—' }}</td>
+                <td>{{ impact.groupName || '—' }}</td>
+                <td>{{ formatRatio(impact.groupRatio) }}</td>
+                <td>{{ formatRatio(impact.oldRatio) }} → {{ formatRatio(impact.newRatio) }}</td>
+                <td>{{ impact.increasePercent == null ? '—' : `${formatRatio(impact.increasePercent)}%` }}</td>
+                <td>{{ impact.affected ? '是（倒挂）' : '否' }}</td>
+                <td>{{ impact.level }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <div v-if="changeDetail.field" class="admin-change-detail-field">字段：{{ changeDetail.field }}</div>
         <div class="admin-change-detail-block">
           <span class="muted">变更前</span>
@@ -184,7 +227,8 @@ const typeOptions = [
 ]
 
 const filteredChanges = computed(() => props.changes.filter(change => {
-  const text = `${change.accountName} ${change.upstreamKeyNames} ${change.localKeyNames} ${change.entityName} ${change.entity} ${change.field} ${change.message} ${change.type} ${change.platformName}`.toLowerCase()
+  const impactText = (change.impacts ?? []).map(impact => `${impact.platformAccount} ${impact.groupName}`).join(' ')
+  const text = `${change.accountName} ${change.upstreamKeyNames} ${change.localKeyNames} ${change.entityName} ${change.entity} ${change.field} ${change.message} ${change.type} ${change.platformName} ${impactText}`.toLowerCase()
   const keywordMatched = !keyword.value || text.includes(keyword.value.trim().toLowerCase())
   const platformMatched = !platformFilter.value || change.platformId === platformFilter.value
   const typeMatched = !typeFilter.value || change.type === typeFilter.value
@@ -377,6 +421,34 @@ function formatDate(value: string) {
 
 .admin-change-ratio-tag {
   margin-left: 6px;
+}
+
+.admin-change-impact-tag {
+  margin: 0 4px 4px 0;
+}
+
+.admin-change-detail-impact {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.admin-change-impact-table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.admin-change-impact-table th,
+.admin-change-impact-table td {
+  padding: 6px 8px;
+  border: 1px solid #ebeef5;
+  text-align: left;
+}
+
+.admin-change-impact-table tr.is-affected td {
+  background-color: #fff1f0;
+  color: #c45656;
 }
 
 /* 详情弹窗顶部的「本平台 Key · 上游 Key · 分组」一行 */

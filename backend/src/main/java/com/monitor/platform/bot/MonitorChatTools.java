@@ -264,6 +264,7 @@ public class MonitorChatTools {
                     localKeyNames(item.event()),
                     upstreamKeyNames(item.event()),
                     groupWithRatio(item.event()),
+                    impactSummary(item.event()),
                     inUse(item.event()) ? "使用中" : "—",
                     changeText(item.event())));
         }
@@ -276,6 +277,7 @@ public class MonitorChatTools {
                 BotReport.Col.left("本平台 Key"),
                 BotReport.Col.left("上游 Key"),
                 BotReport.Col.left("分组（倍率）"),
+                BotReport.Col.left("影响（我平台分组）"),
                 BotReport.Col.left("使用中"),
                 BotReport.Col.left("内容")), rows, null);
 
@@ -319,6 +321,32 @@ public class MonitorChatTools {
             return entityName(event);
         }
         return "—";
+    }
+
+    /**
+     * 渠道倍率变化对我平台的影响摘要：{@code 分组名(倍率)}；倒挂的额外标 ⚠。
+     *
+     * <p>一个账号可能同时服务多个分组，所以这里可能是多项，用「、」连接。</p>
+     */
+    private static String impactSummary(UpstreamChangeEventResponse event) {
+        List<UpstreamChangeEventResponse.ChangeImpact> impacts = event.impacts();
+        if (impacts == null || impacts.isEmpty()) {
+            return "—";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (UpstreamChangeEventResponse.ChangeImpact impact : impacts) {
+            if (!sb.isEmpty()) {
+                sb.append("、");
+            }
+            sb.append(impact.groupName() == null || impact.groupName().isBlank()
+                            ? "未知分组"
+                            : impact.groupName())
+                    .append('(').append(ReportFormats.decimal(impact.groupRatio())).append(')');
+            if (impact.affected()) {
+                sb.append("⚠倒挂");
+            }
+        }
+        return sb.toString();
     }
 
     /** 分组名 + 该分组的当前倍率（渠道倍率变化时一眼看出涨到多少）。 */
@@ -375,6 +403,7 @@ public class MonitorChatTools {
                 String.valueOf(event.accountName()),
                 String.valueOf(event.upstreamKeyNames()),
                 String.valueOf(event.localKeyNames()),
+                impactSummary(event),
                 String.valueOf(event.oldValue()),
                 String.valueOf(event.newValue())).toLowerCase(Locale.ROOT);
         return haystack.contains(keyword);

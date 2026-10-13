@@ -16,6 +16,7 @@ import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSna
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.common.time.BusinessTime;
+import com.monitor.platform.pool.RateChangeImpactService;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -57,6 +58,7 @@ public class UpstreamUsageService {
     private final UpstreamChangeEventRepository changeEventRepository;
     private final JsonPayloads json;
     private final UpstreamAccountAccess accounts;
+    private final RateChangeImpactService rateChangeImpactService;
 
     public UpstreamUsageService(PlatformRepository platformRepository,
                                 AccountRepository accountRepository,
@@ -64,7 +66,8 @@ public class UpstreamUsageService {
                                 AccountUsageDashboardSnapshotRepository usageDashboardRepository,
                                 UpstreamChangeEventRepository changeEventRepository,
                                 JsonPayloads json,
-                                UpstreamAccountAccess accounts) {
+                                UpstreamAccountAccess accounts,
+                                RateChangeImpactService rateChangeImpactService) {
         this.platformRepository = platformRepository;
         this.accountRepository = accountRepository;
         this.metricSnapshotRepository = metricSnapshotRepository;
@@ -72,6 +75,7 @@ public class UpstreamUsageService {
         this.changeEventRepository = changeEventRepository;
         this.json = json;
         this.accounts = accounts;
+        this.rateChangeImpactService = rateChangeImpactService;
     }
 
     /**
@@ -85,15 +89,19 @@ public class UpstreamUsageService {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
         int safeLimit = Math.max(1, Math.min(limit, 500));
-        List<UpstreamChangeEventResponse> result = new ArrayList<>();
+        List<UpstreamChangeEventEntity> events = new ArrayList<>();
         for (AccountEntity account : accountRepository.findByPlatformId(platformId)) {
-            for (UpstreamChangeEventEntity event : changeEventRepository.findRecent(account.getId(), safeLimit)) {
-                result.add(toChangeEventResponse(event));
-            }
+            events.addAll(changeEventRepository.findRecent(account.getId(), safeLimit));
         }
-        result.sort(Comparator.comparing(UpstreamChangeEventResponse::detectedAt,
+        events.sort(Comparator.comparing(UpstreamChangeEventEntity::getDetectedAt,
                 Comparator.nullsLast(Comparator.reverseOrder())));
-        return result.stream().limit(safeLimit).toList();
+        List<UpstreamChangeEventEntity> shown = events.stream().limit(safeLimit).toList();
+        // 渠道倍率事件顺带评估「我平台哪些分组倒挂」；批量做，避免逐条打库
+        Map<Long, List<RateChangeImpactService.ImpactRow>> impacts =
+                rateChangeImpactService.impactsOf(shown);
+        return shown.stream()
+                .map(event -> toChangeEventResponse(event, impacts.getOrDefault(event.getId(), List.of())))
+                .toList();
     }
 
     /**
@@ -279,7 +287,8 @@ public class UpstreamUsageService {
     /**
      * 将变更事件实体转换为接口响应。
      */
-    private UpstreamChangeEventResponse toChangeEventResponse(UpstreamChangeEventEntity entity) {
+    private UpstreamChangeEventResponse toChangeEventResponse(UpstreamChangeEventEntity entity,
+                                                              List<RateChangeImpactService.ImpactRow> impacts) {
         return new UpstreamChangeEventResponse(
                 entity.getId(), entity.getAccountId(), entity.getPlatformType(),
                 entity.getEntityType(), entity.getEntityKey(), entity.getGroupName(), entity.getAccountName(),
@@ -287,7 +296,21 @@ public class UpstreamUsageService {
                 entity.getGroupRatio(), entity.getChangeType(),
                 entity.getFieldName(), entity.getOldValue(), entity.getNewValue(),
                 entity.getSeverity(), entity.getMessage(), entity.getDetectedAt(),
-                Boolean.TRUE.equals(entity.getInUse())
+                Boolean.TRUE.equals(entity.getInUse()),
+                impacts.stream().map(UpstreamUsageService::toChangeImpact).toList()
         );
+    }
+
+    private static UpstreamChangeEventResponse.ChangeImpact toChangeImpact(RateChangeImpactService.ImpactRow row) {
+        return new UpstreamChangeEventResponse.ChangeImpact(
+                row.platformAccount(),
+                row.externalAccountId(),
+                row.groupName(),
+                row.groupRatio(),
+                row.oldRatio(),
+                row.newRatio(),
+                row.increasePercent(),
+                row.affected(),
+                row.level());
     }
 }

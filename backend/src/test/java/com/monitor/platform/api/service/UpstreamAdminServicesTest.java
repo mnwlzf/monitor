@@ -20,6 +20,7 @@ import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSna
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.security.CredentialCipher;
 import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.pool.RateChangeImpactService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,6 +58,7 @@ class UpstreamAdminServicesTest {
     @Mock private AccountApiKeyRepository apiKeyRepository;
     @Mock private AccountCredentialService credentialService;
     @Mock private CredentialCipher credentialCipher;
+    @Mock private RateChangeImpactService rateChangeImpactService;
 
     private UpstreamAdminService service;
     private UpstreamUsageService usageService;
@@ -81,7 +83,8 @@ class UpstreamAdminServicesTest {
                 usageDashboardRepository,
                 changeEventRepository,
                 json,
-                accounts);
+                accounts,
+                rateChangeImpactService);
     }
 
     private PlatformEntity platform(int id, String name, String url, String type) {
