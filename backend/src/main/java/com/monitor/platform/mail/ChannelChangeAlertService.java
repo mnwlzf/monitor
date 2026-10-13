@@ -302,7 +302,7 @@ public class ChannelChangeAlertService {
                 .append("</tr>");
         for (RateChangeImpactService.ImpactRow row : impacts) {
             html.append(row.affected() ? "<tr style=\"background:#fff1f0\">" : "<tr>")
-                    .append("<td>").append(MailFormat.escape(row.platformAccount())).append("</td>")
+                    .append("<td>").append(MailFormat.escape(row.accountName())).append("</td>")
                     .append("<td>").append(MailFormat.escape(row.groupName())).append("</td>")
                     .append("<td align=\"right\">").append(decimal(row.groupRatio())).append("</td>")
                     .append("<td>").append(MailFormat.escape(row.upstreamChannel())).append("</td>")
@@ -327,7 +327,7 @@ public class ChannelChangeAlertService {
             if (event.getGroupName() != null && !event.getGroupName().equals(row.upstreamChannel())) {
                 continue;
             }
-            sb.append("；影响=").append(row.platformAccount())
+            sb.append("；影响=").append(row.accountName())
                     .append('/').append(row.groupName())
                     .append("(分组倍率 ").append(decimal(row.groupRatio()))
                     .append(row.affected() ? "，已倒挂)" : "，未倒挂)");

@@ -303,8 +303,8 @@ public class UpstreamUsageService {
 
     private static UpstreamChangeEventResponse.ChangeImpact toChangeImpact(RateChangeImpactService.ImpactRow row) {
         return new UpstreamChangeEventResponse.ChangeImpact(
-                row.platformAccount(),
-                row.externalAccountId(),
+                row.accountName(),
+                row.accountId(),
                 row.groupName(),
                 row.groupRatio(),
                 row.oldRatio(),

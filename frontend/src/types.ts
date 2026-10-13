@@ -122,8 +122,8 @@ export interface ChangeEvent {
  * `affected` = 上游新倍率已超过该分组倍率（倒挂，按这个分组卖会亏）。
  */
 export interface ChangeImpact {
-  platformAccount: string
-  externalAccountId: number | null
+  accountName: string
+  accountId: number | null
   groupName: string
   groupRatio: number | null
   oldRatio: number | null

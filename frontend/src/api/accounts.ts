@@ -265,8 +265,8 @@ function normalizeCredentialStatus(status?: string): Account['credentialStatus']
 /** 渠道倍率变化的影响行：数字统一转 number，级别收敛到三档。 */
 function toChangeImpact(row: ChangeImpactDto): ChangeImpact {
   return {
-    platformAccount: row.platformAccount || '',
-    externalAccountId: row.externalAccountId ?? null,
+    accountName: row.accountName || '',
+    accountId: row.accountId ?? null,
     groupName: row.groupName || '',
     groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
     oldRatio: row.oldRatio == null ? null : Number(row.oldRatio),
@@ -362,8 +362,8 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
   }))
 }
 interface ChangeImpactDto {
-  platformAccount?: string
-  externalAccountId?: number | null
+  accountName?: string
+  accountId?: number | null
   groupName?: string
   groupRatio?: string | number | null
   oldRatio?: string | number | null

@@ -83,7 +83,7 @@
             <span v-if="!row.impacts?.length" class="muted">—</span>
             <el-tag
               v-for="impact in row.impacts"
-              :key="`${impact.externalAccountId}-${impact.groupName}`"
+              :key="`${impact.accountId}-${impact.groupName}`"
               size="small"
               :type="impact.affected ? 'danger' : 'info'"
               effect="plain"
@@ -154,8 +154,8 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="impact in changeDetail.impacts" :key="`${impact.externalAccountId}-${impact.groupName}`" :class="{ 'is-affected': impact.affected }">
-                <td>{{ impact.platformAccount || '—' }}</td>
+              <tr v-for="impact in changeDetail.impacts" :key="`${impact.accountId}-${impact.groupName}`" :class="{ 'is-affected': impact.affected }">
+                <td>{{ impact.accountName || '—' }}</td>
                 <td>{{ impact.groupName || '—' }}</td>
                 <td>{{ formatRatio(impact.groupRatio) }}</td>
                 <td>{{ formatRatio(impact.oldRatio) }} → {{ formatRatio(impact.newRatio) }}</td>
@@ -227,7 +227,7 @@ const typeOptions = [
 ]
 
 const filteredChanges = computed(() => props.changes.filter(change => {
-  const impactText = (change.impacts ?? []).map(impact => `${impact.platformAccount} ${impact.groupName}`).join(' ')
+  const impactText = (change.impacts ?? []).map(impact => `${impact.accountName} ${impact.groupName}`).join(' ')
   const text = `${change.accountName} ${change.upstreamKeyNames} ${change.localKeyNames} ${change.entityName} ${change.entity} ${change.field} ${change.message} ${change.type} ${change.platformName} ${impactText}`.toLowerCase()
   const keywordMatched = !keyword.value || text.includes(keyword.value.trim().toLowerCase())
   const platformMatched = !platformFilter.value || change.platformId === platformFilter.value

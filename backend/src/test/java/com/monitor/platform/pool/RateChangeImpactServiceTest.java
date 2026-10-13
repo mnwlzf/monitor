@@ -1,71 +1,75 @@
 package com.monitor.platform.pool;
 
-import com.monitor.platform.collector.repository.AccountApiKeyRepository;
-import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
+import com.monitor.platform.collector.repository.AccountRepository;
+import com.monitor.platform.collector.repository.UpstreamGroupRepository;
+import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
-import com.monitor.platform.pool.repository.PoolAccountRepository;
+import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 上游渠道涨价 → 本平台分组影响评估。
+ * 上游渠道倍率变化 → 我平台分组影响评估。
  *
- * <p>核心规则：上游新倍率大于分组倍率就算「倒挂」（成本高于售价）。</p>
+ * <p>数据来自项目自己采集的 upstream_groups（Sub2API 的 /groups/available）：
+ * 一个账号可以同时属于多个分组，每个分组带自己的倍率。</p>
+ *
+ * <p>核心规则：上游新倍率大于分组倍率就算「倒挂」（按这个分组卖已不划算）。</p>
  */
 class RateChangeImpactServiceTest {
 
-    private AccountApiKeyRepository apiKeyRepository;
-    private PoolAccountRepository poolAccountRepository;
-    private Sub2GroupRatioReader groupReader;
+    private UpstreamGroupRepository groupRepository;
+    private AccountRepository accountRepository;
     private RateChangeImpactService service;
 
     @BeforeEach
     void setUp() {
-        apiKeyRepository = mock(AccountApiKeyRepository.class);
-        poolAccountRepository = mock(PoolAccountRepository.class);
-        groupReader = mock(Sub2GroupRatioReader.class);
-        service = new RateChangeImpactService(apiKeyRepository, poolAccountRepository, groupReader);
+        groupRepository = mock(UpstreamGroupRepository.class);
+        accountRepository = mock(AccountRepository.class);
+        service = new RateChangeImpactService(groupRepository, accountRepository);
 
-        AccountApiKeyEntity key = new AccountApiKeyEntity();
-        key.setId(100L);
-        key.setAccountId(10);
-        key.setGroupName("渠道A");
-        when(apiKeyRepository.findByAccount(anyInt(), anyBoolean())).thenReturn(List.of(key));
+        AccountEntity account = new AccountEntity();
+        account.setId(10);
+        account.setDisplayName("我平台账号");
+        when(accountRepository.findById(anyInt())).thenReturn(Optional.of(account));
 
-        PoolAccountEntity pool = new PoolAccountEntity();
-        pool.setId(1L);
-        pool.setPlatformId(1);
-        pool.setExternalAccountId(52064L);
-        pool.setName("满血");
-        pool.setBoundKeyId(100L);
-        when(poolAccountRepository.findDistinctPlatformIds()).thenReturn(List.of(1));
-        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(pool));
+        when(groupRepository.findByAccount(anyInt(), anyBoolean())).thenReturn(List.of(
+                group("g-a", "渠道A", "1.25"),
+                group("g-b", "pro", "0.30")));
+    }
 
-        when(groupReader.isAvailable()).thenReturn(true);
-        when(groupReader.groupsByAccount(any())).thenReturn(Map.of(52064L, List.of(
-                new Sub2GroupRatioReader.PlatformGroup(22L, "ClaudeCode MAX20", new BigDecimal("1.25")),
-                new Sub2GroupRatioReader.PlatformGroup(32L, "pro", new BigDecimal("0.30")))));
+    private static UpstreamGroupEntity group(String externalId, String name, String ratio) {
+        UpstreamGroupEntity entity = new UpstreamGroupEntity();
+        entity.setAccountId(10);
+        entity.setExternalGroupId(externalId);
+        entity.setGroupName(name);
+        entity.setCurrentRatio(new BigDecimal(ratio));
+        entity.setIsActive(true);
+        return entity;
     }
 
     private static UpstreamChangeEventEntity rateEvent(String before, String after) {
+        return event("RATE_CHANGED", "渠道A", before, after);
+    }
+
+    private static UpstreamChangeEventEntity event(String changeType, String groupName, String before, String after) {
         UpstreamChangeEventEntity event = new UpstreamChangeEventEntity();
         event.setId(1L);
         event.setAccountId(10);
         event.setEntityType("GROUP");
         event.setEntityKey("grp-1");
-        event.setGroupName("渠道A");
-        event.setChangeType("RATE_CHANGED");
+        event.setGroupName(groupName);
+        event.setChangeType(changeType);
         event.setOldValue(before);
         event.setNewValue(after);
         return event;
@@ -76,17 +80,34 @@ class RateChangeImpactServiceTest {
         List<RateChangeImpactService.ImpactRow> rows = service.impactOf(rateEvent("0.10", "1.50"));
 
         assertThat(rows).hasSize(2);
-        // 受影响（1.50 > 1.25）的排最前
+        // 倍率高的分组排前面
         RateChangeImpactService.ImpactRow first = rows.get(0);
-        assertThat(first.platformAccount()).isEqualTo("满血");
-        assertThat(first.groupName()).isEqualTo("ClaudeCode MAX20");
+        assertThat(first.accountName()).isEqualTo("我平台账号");
+        assertThat(first.groupName()).isEqualTo("渠道A");
         assertThat(first.groupRatio()).isEqualByComparingTo("1.25");
-        assertThat(first.upstreamChannel()).isEqualTo("渠道A");
         assertThat(first.oldRatio()).isEqualByComparingTo("0.10");
         assertThat(first.newRatio()).isEqualByComparingTo("1.50");
         assertThat(first.affected()).isTrue();
         assertThat(first.level()).isEqualTo("CRITICAL");
+        assertThat(rows).allMatch(RateChangeImpactService.ImpactRow::affected);
         assertThat(RateChangeImpactService.hasAffected(rows)).isTrue();
+        assertThat(RateChangeImpactService.overallLevel(rows)).isEqualTo("CRITICAL");
+    }
+
+    @Test
+    void marksOnlyGroupsBelowTheNewRatio() {
+        // 新倍率 0.50：低于 1.25 的渠道A，但高于 0.30 的 pro
+        List<RateChangeImpactService.ImpactRow> rows = service.impactOf(rateEvent("0.10", "0.50"));
+
+        assertThat(rows).hasSize(2);
+        // 受影响的排前面：pro 倒挂，渠道A 没有
+        RateChangeImpactService.ImpactRow pro = rows.get(0);
+        assertThat(pro.groupName()).isEqualTo("pro");
+        assertThat(pro.affected()).isTrue();
+        assertThat(pro.level()).isEqualTo("CRITICAL");
+        RateChangeImpactService.ImpactRow channel = rows.get(1);
+        assertThat(channel.groupName()).isEqualTo("渠道A");
+        assertThat(channel.affected()).isFalse();
         assertThat(RateChangeImpactService.overallLevel(rows)).isEqualTo("CRITICAL");
     }
 
@@ -110,9 +131,7 @@ class RateChangeImpactServiceTest {
     }
 
     @Test
-    void returnsEmptyWhenReadOnlyDatabaseUnavailable() {
-        when(groupReader.isAvailable()).thenReturn(false);
-
-        assertThat(service.impactOf(rateEvent("0.10", "1.50"))).isEmpty();
+    void ignoresNonRateChangeEvents() {
+        assertThat(service.impactOf(event("GROUP_UPDATED", "渠道A", null, "渠道改名"))).isEmpty();
     }
 }
