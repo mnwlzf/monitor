@@ -280,7 +280,7 @@ public class MonitorChatTools {
                         item.platform(),
                         blankToDash(impact.accountName()),
                         blankToDash(impact.groupName()),
-                        ReportFormats.decimal(impact.effectiveRatio()),
+                        ReportFormats.decimal(impact.groupRatio()),
                         entityName(event) + "（" + ReportFormats.decimal(impact.oldRatio())
                                 + " → " + ReportFormats.decimal(impact.newRatio()) + "）",
                         impact.affected() ? "是（倒挂）" : "否",
@@ -295,7 +295,7 @@ public class MonitorChatTools {
                 BotReport.Col.left("平台"),
                 BotReport.Col.left("本平台账号"),
                 BotReport.Col.left("所属分组"),
-                BotReport.Col.right("结算倍率"),
+                BotReport.Col.right("分组倍率"),
                 BotReport.Col.left("上游渠道（原 → 新）"),
                 BotReport.Col.left("是否受影响"),
                 BotReport.Col.left("内容")), rows, null);

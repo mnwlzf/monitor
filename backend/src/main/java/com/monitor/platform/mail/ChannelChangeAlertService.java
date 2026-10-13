@@ -285,7 +285,7 @@ public class ChannelChangeAlertService {
                 .append("<strong>影响评估：上游新倍率 vs 本平台分组倍率</strong>")
                 .append("<p style=\"margin:8px 0 0;font-size:13px\">")
                 .append(anyAffected
-                        ? "标红的分组已经<strong>倒挂</strong>：上游成本倍率高于该分组的结算倍率（分组倍率 × 账号倍率），继续按这个分组卖会亏。"
+                        ? "标红的分组已经<strong>倒挂</strong>：上游成本倍率高于该分组倍率，继续按这个分组卖会亏。"
                         : "本次涨价尚未超过任何分组倍率，暂无倒挂。")
                 .append("</p>")
                 .append("<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" ")
@@ -294,8 +294,6 @@ public class ChannelChangeAlertService {
                 .append("<th align=\"left\">本平台账号</th>")
                 .append("<th align=\"left\">所属分组</th>")
                 .append("<th align=\"right\">分组倍率</th>")
-                .append("<th align=\"right\">账号倍率</th>")
-                .append("<th align=\"right\">结算倍率<br>（分组 × 账号）</th>")
                 .append("<th align=\"left\">上游渠道</th>")
                 .append("<th align=\"right\">上游倍率（原 → 新）</th>")
                 .append("<th align=\"right\">涨价幅度</th>")
@@ -307,8 +305,6 @@ public class ChannelChangeAlertService {
                     .append("<td>").append(MailFormat.escape(row.accountName())).append("</td>")
                     .append("<td>").append(MailFormat.escape(row.groupName())).append("</td>")
                     .append("<td align=\"right\">").append(decimal(row.groupRatio())).append("</td>")
-                    .append("<td align=\"right\">").append(decimal(row.accountRatio())).append("</td>")
-                    .append("<td align=\"right\"><strong>").append(decimal(row.effectiveRatio())).append("</strong></td>")
                     .append("<td>").append(MailFormat.escape(row.upstreamChannel())).append("</td>")
                     .append("<td align=\"right\">").append(decimal(row.oldRatio())).append(" → ")
                     .append(decimal(row.newRatio())).append("</td>")
@@ -333,7 +329,7 @@ public class ChannelChangeAlertService {
             }
             sb.append("；影响=").append(row.accountName())
                     .append('/').append(row.groupName())
-                    .append("(结算倍率 ").append(decimal(row.effectiveRatio()))
+                    .append("(分组倍率 ").append(decimal(row.groupRatio()))
                     .append(row.affected() ? "，已倒挂)" : "，未倒挂)");
         }
     }

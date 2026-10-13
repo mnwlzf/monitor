@@ -28,10 +28,9 @@ import java.util.Set;
  * （pool_accounts.bound_key_id）→ 该账号所属<strong>分组</strong>
  * （Sub2API account_groups，多对多）→ 结算倍率。</p>
  *
- * <p><strong>结算倍率 = 分组倍率 × 账号倍率</strong>（Sub2API 的口径，usage_logs 里
- * {@code rate_multiplier} 与 {@code account_rate_multiplier} 也是这两个值）。</p>
+ * <p><strong>只按分组倍率</strong>计算（业务上确认账号倍率不参与）。</p>
  *
- * <p><strong>是否受影响</strong>：上游渠道新倍率 <em>大于</em> 某个分组的结算倍率 ——
+ * <p><strong>是否受影响</strong>：上游渠道新倍率 <em>大于</em> 某个分组的倍率 ——
  * 也就是「按这个分组卖出去的价格，已经低于上游成本」。一个账号可能同时属于多个分组，
  * 所以结果是一行一个（账号 × 分组）。</p>
  *
@@ -63,8 +62,6 @@ public class RateChangeImpactService {
      * @param externalAccountId 本平台号池账号 ID（Sub2API account id）
      * @param groupName         所属分组名
      * @param groupRatio        分组倍率
-     * @param accountRatio      账号倍率
-     * @param effectiveRatio    结算倍率 = 分组倍率 × 账号倍率
      * @param upstreamChannel   发生变化的那个上游渠道名
      * @param oldRatio          上游原倍率
      * @param newRatio          上游新倍率
@@ -73,7 +70,7 @@ public class RateChangeImpactService {
      * @param level             提醒级别：INFO / WARNING / CRITICAL
      */
     public record ImpactRow(String accountName, Long externalAccountId, String groupName, BigDecimal groupRatio,
-                            BigDecimal accountRatio, BigDecimal effectiveRatio, String upstreamChannel,
+                            String upstreamChannel,
                             BigDecimal oldRatio, BigDecimal newRatio, BigDecimal increasePercent,
                             boolean affected, String level) {
     }
@@ -118,8 +115,8 @@ public class RateChangeImpactService {
                 }
             }
         }
-        Map<Long, List<Sub2AccountGroupRateReader.AccountGroupRate>> groups =
-                groupRateReader.ratesByAccount(externalIds);
+        Map<Long, List<Sub2AccountGroupRateReader.AccountGroup>> groups =
+                groupRateReader.groupsByAccount(externalIds);
 
         Map<Long, List<ImpactRow>> result = new LinkedHashMap<>();
         for (UpstreamChangeEventEntity event : rateEvents) {
@@ -156,7 +153,7 @@ public class RateChangeImpactService {
 
     private List<ImpactRow> buildRows(UpstreamChangeEventEntity event, List<AccountApiKeyEntity> scoped,
                                       Map<Long, PoolAccountView> poolByKey,
-                                      Map<Long, List<Sub2AccountGroupRateReader.AccountGroupRate>> groups) {
+                                      Map<Long, List<Sub2AccountGroupRateReader.AccountGroup>> groups) {
         if (scoped.isEmpty()) {
             return List.of();
         }
@@ -176,20 +173,18 @@ public class RateChangeImpactService {
             if (pool == null) {
                 continue;
             }
-            for (Sub2AccountGroupRateReader.AccountGroupRate group
+            for (Sub2AccountGroupRateReader.AccountGroup group
                     : groups.getOrDefault(pool.externalAccountId(), List.of())) {
                 if (!seen.add(pool.externalAccountId() + "|" + group.groupId())) {
                     continue;
                 }
-                BigDecimal effective = group.effectiveRatio();
-                boolean affected = rising && effective != null && after.compareTo(effective) > 0;
+                BigDecimal groupRatio = group.groupRatio();
+                boolean affected = rising && groupRatio != null && after.compareTo(groupRatio) > 0;
                 rows.add(new ImpactRow(
                         pool.name(),
                         pool.externalAccountId(),
                         group.groupName(),
-                        group.groupRatio(),
-                        group.accountRatio(),
-                        effective,
+                        groupRatio,
                         upstreamChannel,
                         before,
                         after,
@@ -198,13 +193,13 @@ public class RateChangeImpactService {
                         levelOf(rising, affected, increase)));
             }
         }
-        // 受影响的排前面、结算倍率高的排前面：第一眼要看到的是「哪些分组已经倒挂」
+        // 受影响的排前面、倍率高的排前面：第一眼要看到的是「哪些分组已经倒挂」
         rows.sort(Comparator.comparing(ImpactRow::affected).reversed()
-                .thenComparing(ImpactRow::effectiveRatio, Comparator.nullsLast(Comparator.reverseOrder())));
+                .thenComparing(ImpactRow::groupRatio, Comparator.nullsLast(Comparator.reverseOrder())));
         return rows;
     }
 
-    /** 是否有分组「倒挂」（上游成本已高于分组结算倍率）。 */
+    /** 是否有分组「倒挂」（上游成本已高于分组倍率）。 */
     public static boolean hasAffected(List<ImpactRow> rows) {
         return rows != null && rows.stream().anyMatch(ImpactRow::affected);
     }

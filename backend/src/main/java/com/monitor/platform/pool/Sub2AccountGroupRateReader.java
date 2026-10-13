@@ -16,20 +16,15 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 本平台（你自己搭建的 Sub2API）账号 → 所属分组 → 倍率。
+ * 本平台（你自己搭建的 Sub2API）账号 → 所属分组 → 分组倍率。
  *
- * <p>对应 Sub2API 的表结构（见 {@code sub2api/backend/ent/schema}）：</p>
- * <ul>
- *     <li>{@code account_groups(account_id, group_id)} —— 账号与分组是<strong>多对多</strong>，
- *         一个账号可以同时属于多个分组；</li>
- *     <li>{@code groups.rate_multiplier} —— 分组倍率；</li>
- *     <li>{@code accounts.rate_multiplier} —— 账号自身倍率。</li>
- * </ul>
+ * <p>对应 Sub2API 的表结构（见 {@code sub2api/backend/ent/schema}）：
+ * {@code account_groups(account_id, group_id)} 是<strong>多对多</strong>中间表 ——
+ * 一个账号可以同时属于多个分组；分组倍率取 {@code groups.rate_multiplier}。</p>
  *
- * <p>一次请求的最终结算倍率是两者<strong>相乘</strong>（Sub2API 的 usage_logs 里也同时存了
- * {@code rate_multiplier} 与 {@code account_rate_multiplier}，可对照）。</p>
+ * <p>口径：<strong>只按分组倍率</strong>，不再乘账号倍率（业务上确认账号倍率不参与计算）。</p>
  *
- * <p>需要只读角色对 {@code accounts} / {@code account_groups} 有 SELECT 权限；
+ * <p>需要只读角色对 {@code account_groups} 有 SELECT 权限（{@code groups} 已有）；
  * 没权限或查询失败时返回空 Map，调用方降级处理。</p>
  */
 @Component
@@ -47,34 +42,22 @@ public class Sub2AccountGroupRateReader {
     }
 
     /**
-     * 一个账号在一个分组下的倍率。
+     * 一个账号所属的一个分组。
      *
-     * @param accountId    本平台账号 ID（Sub2API accounts.id）
-     * @param accountRatio 账号倍率
-     * @param groupId      分组 ID
-     * @param groupName    分组名
-     * @param groupRatio   分组倍率
+     * @param accountId  本平台账号 ID（Sub2API accounts.id）
+     * @param groupId    分组 ID
+     * @param groupName  分组名
+     * @param groupRatio 分组倍率
      */
-    public record AccountGroupRate(long accountId, BigDecimal accountRatio, long groupId, String groupName,
-                                   BigDecimal groupRatio) {
-
-        /** 最终结算倍率 = 分组倍率 × 账号倍率。 */
-        public BigDecimal effectiveRatio() {
-            if (groupRatio == null) {
-                return null;
-            }
-            return accountRatio == null ? groupRatio : groupRatio.multiply(accountRatio);
-        }
+    public record AccountGroup(long accountId, long groupId, String groupName, BigDecimal groupRatio) {
     }
 
     public boolean isAvailable() {
         return jdbc.hasConnection();
     }
 
-    /**
-     * 每个账号所属的分组（含分组倍率与账号倍率），按结算倍率从高到低。
-     */
-    public Map<Long, List<AccountGroupRate>> ratesByAccount(Collection<Long> accountIds) {
+    /** 每个账号所属的分组（含分组倍率），按倍率从高到低。 */
+    public Map<Long, List<AccountGroup>> groupsByAccount(Collection<Long> accountIds) {
         if (accountIds == null || accountIds.isEmpty() || !isAvailable()) {
             return Map.of();
         }
@@ -84,27 +67,24 @@ public class Sub2AccountGroupRateReader {
         }
         String placeholders = String.join(",", Collections.nCopies(ids.length, "?"));
         String sql = """
-                SELECT a.id                AS account_id,
-                       a.rate_multiplier   AS account_ratio,
-                       g.id                AS group_id,
-                       g.name              AS group_name,
-                       g.rate_multiplier   AS group_ratio
-                  FROM accounts a
-                  JOIN account_groups ag ON ag.account_id = a.id
+                SELECT ag.account_id   AS account_id,
+                       g.id            AS group_id,
+                       g.name          AS group_name,
+                       g.rate_multiplier AS group_ratio
+                  FROM account_groups ag
                   JOIN groups g ON g.id = ag.group_id
-                 WHERE a.id IN (%s)
+                 WHERE ag.account_id IN (%s)
                    AND g.deleted_at IS NULL
-                 ORDER BY a.id, g.rate_multiplier DESC
+                 ORDER BY ag.account_id, g.rate_multiplier DESC
                 """.formatted(placeholders);
 
-        Map<Long, List<AccountGroupRate>> result = new LinkedHashMap<>();
+        Map<Long, List<AccountGroup>> result = new LinkedHashMap<>();
         try {
             jdbc.template().query(sql, rs -> {
                 long accountId = rs.getLong("account_id");
                 result.computeIfAbsent(accountId, key -> new ArrayList<>())
-                        .add(new AccountGroupRate(
+                        .add(new AccountGroup(
                                 accountId,
-                                rs.getBigDecimal("account_ratio"),
                                 rs.getLong("group_id"),
                                 rs.getString("group_name"),
                                 rs.getBigDecimal("group_ratio")));
@@ -112,7 +92,7 @@ public class Sub2AccountGroupRateReader {
         } catch (RuntimeException ex) {
             if (!permissionWarned) {
                 permissionWarned = true;
-                log.warn("读取 Sub2API 账号分组失败（通常是只读角色缺少 accounts / account_groups 的 SELECT 权限）: {}",
+                log.warn("读取 Sub2API 账号分组失败（通常是只读角色缺少 account_groups 的 SELECT 权限）: {}",
                         ex.getMessage());
             }
             return Map.of();

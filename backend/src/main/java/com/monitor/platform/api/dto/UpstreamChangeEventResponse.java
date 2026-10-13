@@ -58,8 +58,6 @@ public record UpstreamChangeEventResponse(
      * @param externalAccountId 本平台号池账号 ID
      * @param groupName         所属分组名
      * @param groupRatio        分组倍率
-     * @param accountRatio      账号倍率
-     * @param effectiveRatio    结算倍率 = 分组倍率 × 账号倍率
      * @param oldRatio          上游原倍率
      * @param newRatio          上游新倍率
      * @param increasePercent   涨价幅度（%）
@@ -71,8 +69,6 @@ public record UpstreamChangeEventResponse(
             Long externalAccountId,
             String groupName,
             BigDecimal groupRatio,
-            BigDecimal accountRatio,
-            BigDecimal effectiveRatio,
             BigDecimal oldRatio,
             BigDecimal newRatio,
             BigDecimal increasePercent,

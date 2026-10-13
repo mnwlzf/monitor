@@ -307,8 +307,6 @@ public class UpstreamUsageService {
                 row.externalAccountId(),
                 row.groupName(),
                 row.groupRatio(),
-                row.accountRatio(),
-                row.effectiveRatio(),
                 row.oldRatio(),
                 row.newRatio(),
                 row.increasePercent(),

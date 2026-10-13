@@ -70,16 +70,6 @@
           <template #default="{ row }">{{ row.impact ? formatRatio(row.impact.groupRatio) : '—' }}</template>
         </el-table-column>
 
-        <el-table-column label="账号倍率" width="100" align="right">
-          <template #default="{ row }">{{ row.impact ? formatRatio(row.impact.accountRatio) : '—' }}</template>
-        </el-table-column>
-
-        <el-table-column label="结算倍率" width="110" align="right">
-          <template #default="{ row }">
-            <strong v-if="row.impact">{{ formatRatio(row.impact.effectiveRatio) }}</strong>
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
 
         <el-table-column label="上游倍率（原 → 新）" min-width="150">
           <template #default="{ row }">
@@ -173,8 +163,6 @@
                 <th>本平台账号</th>
                 <th>所属分组</th>
                 <th>分组倍率</th>
-                <th>账号倍率</th>
-                <th>结算倍率</th>
                 <th>上游倍率（原 → 新）</th>
                 <th>涨价幅度</th>
                 <th>是否受影响</th>
@@ -186,8 +174,6 @@
                 <td>{{ impact.accountName || '—' }}</td>
                 <td>{{ impact.groupName || '—' }}</td>
                 <td>{{ formatRatio(impact.groupRatio) }}</td>
-                <td>{{ formatRatio(impact.accountRatio) }}</td>
-                <td>{{ formatRatio(impact.effectiveRatio) }}</td>
                 <td>{{ formatRatio(impact.oldRatio) }} → {{ formatRatio(impact.newRatio) }}</td>
                 <td>{{ impact.increasePercent == null ? '—' : `${formatRatio(impact.increasePercent)}%` }}</td>
                 <td>{{ impact.affected ? '是（倒挂）' : '否' }}</td>
