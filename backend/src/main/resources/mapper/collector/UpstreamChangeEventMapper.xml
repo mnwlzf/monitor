@@ -125,7 +125,12 @@
         LIMIT #{limit}
     </select>
 
-    <!-- 正在使用渠道的倍率变化：实时告警只关心这一类（直接关系成本） -->
+    <!--
+        正在使用渠道的倍率变化：实时告警只关心这一类（直接关系成本）。
+
+        排除「号池监控源」平台（那是我自己的平台，它自己的渠道/倍率变化不影响成本，
+        不用发邮件）—— 页面的变更记录不受影响，只是不发信。
+    -->
     <select id="selectInUseGroupRateEventsSince" resultMap="UpstreamChangeEventResultMap">
         SELECT <include refid="UpstreamChangeEventColumns"/>
         <include refid="UpstreamChangeEventJoin"/>
@@ -133,11 +138,18 @@
           AND e.entity_type = 'GROUP'
           AND e.change_type IN ('RATE_CHANGED', 'BASE_RATE_CHANGED')
           AND e.detected_at &gt;= #{since}
+          AND NOT EXISTS (SELECT 1 FROM platforms p
+                           WHERE p.id = a.platform_id
+                             AND p.pool_monitoring_enabled = TRUE)
         ORDER BY e.detected_at DESC
         LIMIT #{limit}
     </select>
 
-    <!-- 渠道变更：按「是否在用」筛，每日汇总用它取非在用的那部分 -->
+    <!--
+        渠道变更：按「是否在用」筛，每日汇总用它取非在用的那部分。
+
+        同样排除「号池监控源」平台：那是我自己的平台，自己的变更不需要汇总给我。
+    -->
     <select id="selectGroupEventsBetween" resultMap="UpstreamChangeEventResultMap">
         SELECT <include refid="UpstreamChangeEventColumns"/>
         <include refid="UpstreamChangeEventJoin"/>
@@ -145,6 +157,9 @@
           AND e.in_use = #{inUse}
           AND e.detected_at &gt;= #{from}
           AND e.detected_at &lt; #{to}
+          AND NOT EXISTS (SELECT 1 FROM platforms p
+                           WHERE p.id = a.platform_id
+                             AND p.pool_monitoring_enabled = TRUE)
         ORDER BY e.detected_at DESC
         LIMIT #{limit}
     </select>
