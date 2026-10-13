@@ -78,19 +78,33 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="影响（我平台分组）" min-width="230">
+        <el-table-column label="影响（我平台分组）" min-width="240">
           <template #default="{ row }">
             <span v-if="!row.impacts?.length" class="muted">—</span>
-            <el-tag
-              v-for="impact in row.impacts"
-              :key="`${impact.externalAccountId}-${impact.groupName}`"
-              size="small"
-              :type="impact.affected ? 'danger' : 'info'"
-              effect="plain"
-              class="admin-change-impact-tag"
-            >
-              {{ impact.groupName }}（结算 {{ formatRatio(impact.effectiveRatio) }}）{{ impact.affected ? ' 倒挂' : '' }}
-            </el-tag>
+            <template v-else>
+              <div class="admin-change-impact-list">
+                <div
+                  v-for="impact in visibleImpacts(asChange(row))"
+                  :key="`${impact.externalAccountId}-${impact.groupName}`"
+                  class="admin-change-impact-item"
+                  :class="{ 'is-affected': impact.affected }"
+                >
+                  <span class="admin-change-impact-name" :title="impact.groupName">{{ impact.groupName }}</span>
+                  <span class="admin-change-impact-ratio">结算 {{ formatRatio(impact.effectiveRatio) }}</span>
+                  <span v-if="impact.affected" class="admin-change-impact-flag">倒挂</span>
+                </div>
+              </div>
+              <el-button
+                v-if="row.impacts.length > IMPACT_PREVIEW_LIMIT"
+                link
+                type="primary"
+                size="small"
+                class="admin-change-impact-more"
+                @click="openChangeDetail(asChange(row))"
+              >
+                查看全部 {{ row.impacts.length }} 个分组
+              </el-button>
+            </template>
           </template>
         </el-table-column>
 
@@ -202,6 +216,14 @@ const onlyInUse = ref(false)
 
 const page = ref(1)
 const pageSize = ref(20)
+
+/** 表格里最多平铺几个分组：一个账号可能属于十几个分组，全铺出来整行没法看。 */
+const IMPACT_PREVIEW_LIMIT = 5
+
+/** 表格只展示前几个受影响分组（后端已按「倒挂优先」排好），其余进详情弹窗。 */
+function visibleImpacts(change: ChangeEvent) {
+  return (change.impacts ?? []).slice(0, IMPACT_PREVIEW_LIMIT)
+}
 
 /** 是否处于筛选中（用于显示「重置筛选」）。 */
 const hasActiveFilter = computed(() =>
@@ -427,8 +449,48 @@ function formatDate(value: string) {
   margin-left: 6px;
 }
 
-.admin-change-impact-tag {
-  margin: 0 4px 4px 0;
+/* 影响列：一个分组一行，倒挂的标红 —— 一行塞十几个标签根本没法看 */
+.admin-change-impact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-change-impact-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.admin-change-impact-name {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-change-impact-ratio {
+  color: #909399;
+}
+
+.admin-change-impact-item.is-affected .admin-change-impact-name {
+  color: #c45656;
+  font-weight: 600;
+}
+
+.admin-change-impact-flag {
+  padding: 0 4px;
+  border: 1px solid #f56c6c;
+  border-radius: 2px;
+  color: #f56c6c;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.admin-change-impact-more {
+  margin-top: 2px;
 }
 
 .admin-change-detail-impact {

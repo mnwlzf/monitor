@@ -323,18 +323,25 @@ public class MonitorChatTools {
         return "—";
     }
 
+    /** 表格单元格里最多列几个分组，其余用「等 N 个」收尾 —— 一行塞十几个没法看。 */
+    private static final int MAX_IMPACT_PREVIEW = 5;
+
     /**
-     * 渠道倍率变化对我平台的影响摘要：{@code 分组名(倍率)}；倒挂的额外标 ⚠。
+     * 渠道倍率变化对我平台的影响摘要：{@code 分组名(结算倍率)}；倒挂的额外标 ⚠。
      *
-     * <p>一个账号可能同时服务多个分组，所以这里可能是多项，用「、」连接。</p>
+     * <p>一个账号可能同时服务多个分组，全部铺开会把表格撑爆，
+     * 因此只列前 {@value #MAX_IMPACT_PREVIEW} 个（后端已按「倒挂优先」排序），
+     * 其余用「…等 N 个分组」收尾。</p>
      */
     private static String impactSummary(UpstreamChangeEventResponse event) {
         List<UpstreamChangeEventResponse.ChangeImpact> impacts = event.impacts();
         if (impacts == null || impacts.isEmpty()) {
             return "—";
         }
+        int limit = Math.min(impacts.size(), MAX_IMPACT_PREVIEW);
         StringBuilder sb = new StringBuilder();
-        for (UpstreamChangeEventResponse.ChangeImpact impact : impacts) {
+        for (int i = 0; i < limit; i++) {
+            UpstreamChangeEventResponse.ChangeImpact impact = impacts.get(i);
             if (!sb.isEmpty()) {
                 sb.append("、");
             }
@@ -345,6 +352,9 @@ public class MonitorChatTools {
             if (impact.affected()) {
                 sb.append("⚠倒挂");
             }
+        }
+        if (impacts.size() > limit) {
+            sb.append("…等 ").append(impacts.size()).append(" 个分组");
         }
         return sb.toString();
     }
