@@ -1,8 +1,10 @@
 package com.monitor.platform.pool;
 
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
+import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
+import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import com.monitor.platform.pool.repository.PoolAccountRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,6 +32,7 @@ class RateChangeImpactServiceTest {
     private AccountApiKeyRepository apiKeyRepository;
     private PoolAccountRepository poolAccountRepository;
     private Sub2AccountGroupRateReader groupRateReader;
+    private UpstreamGroupRepository upstreamGroupRepository;
     private RateChangeImpactService service;
 
     @BeforeEach
@@ -36,7 +40,18 @@ class RateChangeImpactServiceTest {
         apiKeyRepository = mock(AccountApiKeyRepository.class);
         poolAccountRepository = mock(PoolAccountRepository.class);
         groupRateReader = mock(Sub2AccountGroupRateReader.class);
-        service = new RateChangeImpactService(apiKeyRepository, poolAccountRepository, groupRateReader);
+        upstreamGroupRepository = mock(UpstreamGroupRepository.class);
+        service = new RateChangeImpactService(apiKeyRepository, poolAccountRepository, groupRateReader,
+                upstreamGroupRepository);
+
+        // 上游渠道 Codex-pro-不降 属于 openai 平台
+        UpstreamGroupEntity upstreamGroup = new UpstreamGroupEntity();
+        upstreamGroup.setAccountId(10);
+        upstreamGroup.setExternalGroupId("grp-1");
+        upstreamGroup.setGroupName("渠道A");
+        upstreamGroup.setPlatform("openai");
+        when(upstreamGroupRepository.findByAccountAndExternalId(anyInt(), any(), any()))
+                .thenReturn(Optional.of(upstreamGroup));
 
         AccountApiKeyEntity key = new AccountApiKeyEntity();
         key.setId(100L);
@@ -55,8 +70,12 @@ class RateChangeImpactServiceTest {
 
         when(groupRateReader.isAvailable()).thenReturn(true);
         when(groupRateReader.groupsByAccount(any())).thenReturn(Map.of(52064L, List.of(
-                new Sub2AccountGroupRateReader.AccountGroup(52064L, 22L, "ClaudeCode MAX20", new BigDecimal("1.25")),
-                new Sub2AccountGroupRateReader.AccountGroup(52064L, 32L, "pro", new BigDecimal("0.30")))));
+                new Sub2AccountGroupRateReader.AccountGroup(52064L, 22L, "ClaudeCode MAX20", "openai",
+                        new BigDecimal("1.25")),
+                new Sub2AccountGroupRateReader.AccountGroup(52064L, 32L, "pro", "openai", new BigDecimal("0.30")),
+                // 别的平台的分组不能被 codex 渠道的涨价波及
+                new Sub2AccountGroupRateReader.AccountGroup(52064L, 40L, "月之暗面Kimi", "kimi",
+                        new BigDecimal("0.35")))));
     }
 
     private static UpstreamChangeEventEntity rateEvent(String before, String after) {
@@ -69,11 +88,21 @@ class RateChangeImpactServiceTest {
         event.setAccountId(10);
         event.setEntityType("GROUP");
         event.setEntityKey("grp-1");
+        event.setPlatformType("sub2api");
         event.setGroupName(groupName);
         event.setChangeType(changeType);
         event.setOldValue(before);
         event.setNewValue(after);
         return event;
+    }
+
+    @Test
+    void excludesGroupsOfOtherPlatforms() {
+        List<RateChangeImpactService.ImpactRow> rows = service.impactOf(rateEvent("0.30", "0.37"));
+
+        assertThat(rows).extracting(RateChangeImpactService.ImpactRow::groupName)
+                .containsExactlyInAnyOrder("ClaudeCode MAX20", "pro")
+                .doesNotContain("月之暗面Kimi");
     }
 
     @Test

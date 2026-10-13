@@ -47,9 +47,11 @@ public class Sub2AccountGroupRateReader {
      * @param accountId  本平台账号 ID（Sub2API accounts.id）
      * @param groupId    分组 ID
      * @param groupName  分组名
+     * @param platform   分组所属平台（openai / anthropic / grok …），用来和上游渠道对齐
      * @param groupRatio 分组倍率
      */
-    public record AccountGroup(long accountId, long groupId, String groupName, BigDecimal groupRatio) {
+    public record AccountGroup(long accountId, long groupId, String groupName, String platform,
+                               BigDecimal groupRatio) {
     }
 
     public boolean isAvailable() {
@@ -67,10 +69,11 @@ public class Sub2AccountGroupRateReader {
         }
         String placeholders = String.join(",", Collections.nCopies(ids.length, "?"));
         String sql = """
-                SELECT ag.account_id   AS account_id,
-                       g.id            AS group_id,
-                       g.name          AS group_name,
-                       g.rate_multiplier AS group_ratio
+                SELECT ag.account_id      AS account_id,
+                       g.id               AS group_id,
+                       g.name             AS group_name,
+                       g.platform         AS platform,
+                       g.rate_multiplier  AS group_ratio
                   FROM account_groups ag
                   JOIN groups g ON g.id = ag.group_id
                  WHERE ag.account_id IN (%s)
@@ -87,6 +90,7 @@ public class Sub2AccountGroupRateReader {
                                 accountId,
                                 rs.getLong("group_id"),
                                 rs.getString("group_name"),
+                                rs.getString("platform"),
                                 rs.getBigDecimal("group_ratio")));
             }, Arrays.stream(ids).toArray());
         } catch (RuntimeException ex) {

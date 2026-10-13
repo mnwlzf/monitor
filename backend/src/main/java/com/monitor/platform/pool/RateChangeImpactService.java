@@ -1,8 +1,10 @@
 package com.monitor.platform.pool;
 
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
+import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
+import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import com.monitor.platform.pool.repository.PoolAccountRepository;
 import org.springframework.stereotype.Service;
 
@@ -46,13 +48,16 @@ public class RateChangeImpactService {
     private final AccountApiKeyRepository apiKeyRepository;
     private final PoolAccountRepository poolAccountRepository;
     private final Sub2AccountGroupRateReader groupRateReader;
+    private final UpstreamGroupRepository upstreamGroupRepository;
 
     public RateChangeImpactService(AccountApiKeyRepository apiKeyRepository,
                                    PoolAccountRepository poolAccountRepository,
-                                   Sub2AccountGroupRateReader groupRateReader) {
+                                   Sub2AccountGroupRateReader groupRateReader,
+                                   UpstreamGroupRepository upstreamGroupRepository) {
         this.apiKeyRepository = apiKeyRepository;
         this.poolAccountRepository = poolAccountRepository;
         this.groupRateReader = groupRateReader;
+        this.upstreamGroupRepository = upstreamGroupRepository;
     }
 
     /**
@@ -120,8 +125,11 @@ public class RateChangeImpactService {
 
         Map<Long, List<ImpactRow>> result = new LinkedHashMap<>();
         for (UpstreamChangeEventEntity event : rateEvents) {
-            result.put(event.getId(),
-                    buildRows(event, scopedKeys.getOrDefault(event.getId(), List.of()), poolByKey, groups));
+            result.put(event.getId(), buildRows(event,
+                    scopedKeys.getOrDefault(event.getId(), List.of()),
+                    poolByKey,
+                    groups,
+                    channelPlatform(event)));
         }
         return result;
     }
@@ -132,6 +140,32 @@ public class RateChangeImpactService {
         }
         return "RATE_CHANGED".equalsIgnoreCase(event.getChangeType())
                 || "BASE_RATE_CHANGED".equalsIgnoreCase(event.getChangeType());
+    }
+
+    /**
+     * 上游渠道所属平台（openai / anthropic / grok …）。
+     *
+     * <p>用来把影响范围限定在<strong>同一平台</strong>的分组上：
+     * 上游 codex 渠道涨价，不该落到我平台 kimi / grok 的分组上。</p>
+     *
+     * @return 取不到时返回 null（此时不按平台过滤，避免漏报）
+     */
+    private String channelPlatform(UpstreamChangeEventEntity event) {
+        if (event.getAccountId() == null || event.getEntityKey() == null || event.getEntityKey().isBlank()) {
+            return null;
+        }
+        return upstreamGroupRepository.findByAccountAndExternalId(event.getAccountId(), event.getPlatformType(), event.getEntityKey())
+                .map(UpstreamGroupEntity::getPlatform)
+                .filter(platform -> platform != null && !platform.isBlank())
+                .orElse(null);
+    }
+
+    /** 分组平台与渠道平台不一致就跳过；任一为空时不过滤（避免漏报）。 */
+    private static boolean matchesPlatform(String groupPlatform, String channelPlatform) {
+        if (channelPlatform == null || groupPlatform == null || groupPlatform.isBlank()) {
+            return true;
+        }
+        return groupPlatform.equalsIgnoreCase(channelPlatform);
     }
 
     private static String channelOf(UpstreamChangeEventEntity event) {
@@ -153,7 +187,8 @@ public class RateChangeImpactService {
 
     private List<ImpactRow> buildRows(UpstreamChangeEventEntity event, List<AccountApiKeyEntity> scoped,
                                       Map<Long, PoolAccountView> poolByKey,
-                                      Map<Long, List<Sub2AccountGroupRateReader.AccountGroup>> groups) {
+                                      Map<Long, List<Sub2AccountGroupRateReader.AccountGroup>> groups,
+                                      String channelPlatform) {
         if (scoped.isEmpty()) {
             return List.of();
         }
@@ -175,6 +210,9 @@ public class RateChangeImpactService {
             }
             for (Sub2AccountGroupRateReader.AccountGroup group
                     : groups.getOrDefault(pool.externalAccountId(), List.of())) {
+                if (!matchesPlatform(group.platform(), channelPlatform)) {
+                    continue;
+                }
                 if (!seen.add(pool.externalAccountId() + "|" + group.groupId())) {
                     continue;
                 }
