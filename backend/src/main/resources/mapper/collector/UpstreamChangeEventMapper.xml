@@ -41,21 +41,40 @@
           ORDER BY k.id DESC
           LIMIT 1) AS key_name,
         g.current_ratio AS group_ratio,
-        -- 受影响的「上游账号 Key」：密钥事件按 key 匹配，渠道事件按同分组匹配
-        (SELECT string_agg(k.key_name, '、' ORDER BY k.id)
-           FROM account_api_keys k
-          WHERE k.account_id = e.account_id
-            AND ((e.entity_type = 'API_KEY' AND k.external_key_id = e.entity_key)
-              OR (e.entity_type = 'GROUP'
-                  AND (g.group_name IS NULL OR k.group_name = g.group_name)))) AS upstream_key_names,
+        -- 受影响的「上游账号 Key」：密钥事件按本地主键 / 上游 key 匹配，渠道事件按同分组匹配。
+        -- key_name 为空的上游很常见，退回脱敏值与上游 ID，避免整列空白。
+        COALESCE(
+            (SELECT string_agg(COALESCE(NULLIF(k.key_name, ''), k.key_masked, k.external_key_id), '、' ORDER BY k.id)
+               FROM account_api_keys k
+              WHERE k.account_id = e.account_id
+                AND ((e.entity_type = 'API_KEY'
+                      AND (k.id = e.entity_id OR k.external_key_id = e.entity_key))
+                  OR (e.entity_type = 'GROUP'
+                      AND (g.group_name IS NULL OR k.group_name = g.group_name)))),
+            -- 分组对不上（渠道改名 / 还没采到该分组的 Key）时，退回该账号仍在用的 Key
+            (SELECT string_agg(COALESCE(NULLIF(k.key_name, ''), k.key_masked, k.external_key_id), '、' ORDER BY k.id)
+               FROM account_api_keys k
+              WHERE k.account_id = e.account_id
+                AND k.is_active = TRUE),
+            '未匹配到上游 Key'
+        ) AS upstream_key_names,
         -- 对应的「本平台 Key」：号池账号通过 bound_key_id 绑到上游 Key
-        (SELECT string_agg(pa.name, '、' ORDER BY pa.id)
-           FROM account_api_keys k
-           JOIN pool_accounts pa ON pa.bound_key_id = k.id
-          WHERE k.account_id = e.account_id
-            AND ((e.entity_type = 'API_KEY' AND k.external_key_id = e.entity_key)
-              OR (e.entity_type = 'GROUP'
-                  AND (g.group_name IS NULL OR k.group_name = g.group_name)))) AS local_key_names
+        COALESCE(
+            (SELECT string_agg(COALESCE(NULLIF(pa.name, ''), '号池账号 ' || pa.external_account_id), '、' ORDER BY pa.id)
+               FROM account_api_keys k
+               JOIN pool_accounts pa ON pa.bound_key_id = k.id
+              WHERE k.account_id = e.account_id
+                AND ((e.entity_type = 'API_KEY'
+                      AND (k.id = e.entity_id OR k.external_key_id = e.entity_key))
+                  OR (e.entity_type = 'GROUP'
+                      AND (g.group_name IS NULL OR k.group_name = g.group_name)))),
+            (SELECT string_agg(COALESCE(NULLIF(pa.name, ''), '号池账号 ' || pa.external_account_id), '、' ORDER BY pa.id)
+               FROM account_api_keys k
+               JOIN pool_accounts pa ON pa.bound_key_id = k.id
+              WHERE k.account_id = e.account_id
+                AND k.is_active = TRUE),
+            '未绑定本平台 Key'
+        ) AS local_key_names
     </sql>
 
     <!-- 变更事件要带出渠道名：页面和邮件上只有渠道名，光给 ID 运维没法对号入座 -->
