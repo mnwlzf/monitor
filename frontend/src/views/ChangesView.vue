@@ -6,7 +6,7 @@
         <h2>变更记录</h2>
         <p>渠道新增、减少、倍率和状态变化。</p>
       </div>
-      <el-tag effect="plain">{{ filteredChanges.length }} 条记录</el-tag>
+      <el-tag effect="plain">{{ displayRows.length }} 行 · {{ filteredChanges.length }} 个变化</el-tag>
     </div>
 
     <el-card shadow="never" class="admin-card admin-toolbar-card">
@@ -30,109 +30,121 @@
 
     <el-card shadow="never" class="admin-card admin-table-card">
       <el-table
-        v-if="filteredChanges.length"
-        :data="pagedChanges"
-        row-key="id"
+        v-if="displayRows.length"
+        :data="pagedRows"
+        row-key="key"
         stripe
         class="admin-table"
         :row-class-name="changeRowClass"
       >
-        <el-table-column label="时间" width="160" fixed>
+        <el-table-column label="时间" width="150" fixed>
           <template #default="{ row }">
-            <span class="admin-table-stack">{{ formatDate(row.detectedAt) }}</span>
+            <span class="admin-table-stack">{{ formatDate(row.change.detectedAt) }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="平台" min-width="160">
+        <el-table-column label="平台" width="130">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.platformType === 'newapi' ? 'primary' : 'success'" effect="plain">{{ row.platformName || '未知平台' }}</el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="本平台 Key" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span>{{ row.localKeyNames || '—' }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="上游 Key" min-width="170" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span>{{ row.upstreamKeyNames || '—' }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="类型" min-width="190">
-          <template #default="{ row }">
-            <el-tag :type="severityType(row.severity)" effect="light">{{ changeLabel(row.type) }}</el-tag>
-            <el-tag v-if="row.inUse" size="small" type="danger" effect="dark" class="admin-change-inuse-tag">使用中</el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="渠道 / 密钥" min-width="200" show-overflow-tooltip>
-          <template #default="{ row }">
-            <strong>{{ row.entityName || row.entity || '—' }}</strong>
-            <el-tag v-if="row.groupRatio != null" size="small" type="warning" effect="plain" class="admin-change-ratio-tag">
-              倍率 {{ formatRatio(row.groupRatio) }}
+            <el-tag size="small" :type="row.change.platformType === 'newapi' ? 'primary' : 'success'" effect="plain">
+              {{ row.change.platformName || '未知平台' }}
             </el-tag>
-            <div v-if="entitySubtitle(asChange(row))" class="admin-table-sub muted">{{ entitySubtitle(asChange(row)) }}</div>
           </template>
         </el-table-column>
 
-        <el-table-column label="影响（我平台分组）" min-width="240">
+        <el-table-column label="类型" min-width="170">
           <template #default="{ row }">
-            <span v-if="!row.impacts?.length" class="muted">—</span>
-            <template v-else>
-              <div class="admin-change-impact-list">
-                <div
-                  v-for="impact in visibleImpacts(asChange(row))"
-                  :key="`${impact.externalAccountId}-${impact.groupName}`"
-                  class="admin-change-impact-item"
-                  :class="{ 'is-affected': impact.affected }"
-                >
-                  <span class="admin-change-impact-name" :title="impact.groupName">{{ impact.groupName }}</span>
-                  <span class="admin-change-impact-ratio">结算 {{ formatRatio(impact.effectiveRatio) }}</span>
-                  <span v-if="impact.affected" class="admin-change-impact-flag">倒挂</span>
-                </div>
-              </div>
-              <el-button
-                v-if="row.impacts.length > IMPACT_PREVIEW_LIMIT"
-                link
-                type="primary"
-                size="small"
-                class="admin-change-impact-more"
-                @click="openChangeDetail(asChange(row))"
-              >
-                查看全部 {{ row.impacts.length }} 个分组
-              </el-button>
-            </template>
+            <el-tag :type="severityType(row.change.severity)" effect="light">{{ changeLabel(row.change.type) }}</el-tag>
+            <el-tag v-if="row.change.inUse" size="small" type="danger" effect="dark" class="admin-change-inuse-tag">使用中</el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column label="变化" min-width="280">
+        <el-table-column label="本平台账号" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.impact?.accountName || '—' }}</template>
+        </el-table-column>
+
+        <el-table-column label="所属分组" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.impact?.groupName || '—' }}</template>
+        </el-table-column>
+
+        <el-table-column label="分组倍率" width="100" align="right">
+          <template #default="{ row }">{{ row.impact ? formatRatio(row.impact.groupRatio) : '—' }}</template>
+        </el-table-column>
+
+        <el-table-column label="账号倍率" width="100" align="right">
+          <template #default="{ row }">{{ row.impact ? formatRatio(row.impact.accountRatio) : '—' }}</template>
+        </el-table-column>
+
+        <el-table-column label="结算倍率" width="110" align="right">
           <template #default="{ row }">
-            <div v-if="changeSummary(asChange(row))" class="admin-change-summary">
-              <span class="admin-change-chip">{{ changeSummary(asChange(row)) }}</span>
-              <el-button v-if="hasRawDetail(asChange(row))" link type="primary" size="small" @click="openChangeDetail(asChange(row))">查看详情</el-button>
-            </div>
-            <div v-else class="admin-diff-line">
-              <code class="admin-diff-old">{{ displayChangeValue(row.oldValue) }}</code>
-              <span class="admin-diff-arrow">→</span>
-              <code class="admin-diff-new">{{ displayChangeValue(row.newValue) }}</code>
-            </div>
+            <strong v-if="row.impact">{{ formatRatio(row.impact.effectiveRatio) }}</strong>
+            <span v-else class="muted">—</span>
           </template>
         </el-table-column>
 
-        <el-table-column prop="message" label="说明" min-width="220" show-overflow-tooltip />
+        <el-table-column label="上游倍率（原 → 新）" min-width="150">
+          <template #default="{ row }">
+            <span v-if="row.impact">{{ formatRatio(row.impact.oldRatio) }} → {{ formatRatio(row.impact.newRatio) }}</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="涨价幅度" width="100" align="right">
+          <template #default="{ row }">
+            <span v-if="row.impact?.increasePercent != null">{{ formatRatio(row.impact.increasePercent) }}%</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="是否受影响" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.impact" size="small" :type="row.impact.affected ? 'danger' : 'info'" effect="plain">
+              {{ row.impact.affected ? '是（倒挂）' : '否' }}
+            </el-tag>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="提醒级别" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.impact" size="small" :type="severityType(row.impact.level)" effect="plain">
+              {{ impactLevelLabel(row.impact.level) }}
+            </el-tag>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="上游渠道 / 密钥" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <strong>{{ row.change.entityName || row.change.entity || '—' }}</strong>
+            <div v-if="entitySubtitle(row.change)" class="admin-table-sub muted">{{ entitySubtitle(row.change) }}</div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="说明" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ row.change.message || '—' }}</span>
+            <el-button
+              v-if="hasRawDetail(row.change)"
+              link
+              type="primary"
+              size="small"
+              class="admin-change-detail-link"
+              @click="openChangeDetail(row.change)"
+            >
+              查看详情
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-empty v-else description="暂无变更记录" />
 
-      <div v-if="filteredChanges.length > pageSize" class="admin-pagination">
+      <div v-if="displayRows.length > pageSize" class="admin-pagination">
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="pageSize"
           :page-sizes="[20, 50, 100]"
-          :total="filteredChanges.length"
+          :total="displayRows.length"
           layout="total, sizes, prev, pager, next, jumper"
           background
         />
@@ -179,7 +191,7 @@
                 <td>{{ formatRatio(impact.oldRatio) }} → {{ formatRatio(impact.newRatio) }}</td>
                 <td>{{ impact.increasePercent == null ? '—' : `${formatRatio(impact.increasePercent)}%` }}</td>
                 <td>{{ impact.affected ? '是（倒挂）' : '否' }}</td>
-                <td>{{ impact.level }}</td>
+                <td>{{ impactLevelLabel(impact.level) }}</td>
               </tr>
             </tbody>
           </table>
@@ -204,7 +216,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RefreshLeft, Search } from '@element-plus/icons-vue'
-import type { ChangeEvent, Platform } from '../types'
+import type { ChangeEvent, ChangeImpact, Platform } from '../types'
 
 const props = defineProps<{ changes: ChangeEvent[]; platforms: Platform[] }>()
 
@@ -217,12 +229,11 @@ const onlyInUse = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 
-/** 表格里最多平铺几个分组：一个账号可能属于十几个分组，全铺出来整行没法看。 */
-const IMPACT_PREVIEW_LIMIT = 5
-
-/** 表格只展示前几个受影响分组（后端已按「倒挂优先」排好），其余进详情弹窗。 */
-function visibleImpacts(change: ChangeEvent) {
-  return (change.impacts ?? []).slice(0, IMPACT_PREVIEW_LIMIT)
+/** 表格行：一个「变化 × 影响分组」= 一行，完全不做合并。 */
+interface ChangeRow {
+  key: string
+  change: ChangeEvent
+  impact: ChangeImpact | null
 }
 
 /** 是否处于筛选中（用于显示「重置筛选」）。 */
@@ -263,15 +274,38 @@ const filteredChanges = computed(() => props.changes.filter(change => {
   return keywordMatched && platformMatched && typeMatched && severityMatched && inUseMatched
 }))
 
+/**
+ * 展开成一行一个变化：渠道倍率变化会按「账号 × 分组」拆成多行，
+ * 没有影响评估的事件（如密钥变更）保持一行。
+ */
+const displayRows = computed<ChangeRow[]>(() => {
+  const rows: ChangeRow[] = []
+  for (const change of filteredChanges.value) {
+    const impacts = change.impacts ?? []
+    if (!impacts.length) {
+      rows.push({ key: change.id, change, impact: null })
+      continue
+    }
+    impacts.forEach((impact, index) => {
+      rows.push({
+        key: `${change.id}-${impact.externalAccountId ?? 'x'}-${impact.groupName}-${index}`,
+        change,
+        impact,
+      })
+    })
+  }
+  return rows
+})
+
 /** 正在使用密钥的变更整行高亮，便于快速定位。 */
-function changeRowClass({ row }: { row: ChangeEvent }) {
-  return row.inUse ? 'admin-change-in-use-row' : ''
+function changeRowClass({ row }: { row: ChangeRow }) {
+  return row.change.inUse ? 'admin-change-in-use-row' : ''
 }
 
-/** 当前页展示的变更记录。 */
-const pagedChanges = computed(() => {
+/** 当前页展示的行。 */
+const pagedRows = computed(() => {
   const start = (page.value - 1) * pageSize.value
-  return filteredChanges.value.slice(start, start + pageSize.value)
+  return displayRows.value.slice(start, start + pageSize.value)
 })
 
 /** 筛选条件变化时回到第一页。 */
@@ -280,8 +314,8 @@ watch([keyword, platformFilter, typeFilter, severityFilter, onlyInUse, pageSize]
 })
 
 /** 数据减少（刷新/筛选）后把页码收回，避免停留在空页。 */
-watch(() => filteredChanges.value.length, () => {
-  const maxPage = Math.max(1, Math.ceil(filteredChanges.value.length / pageSize.value))
+watch(() => displayRows.value.length, () => {
+  const maxPage = Math.max(1, Math.ceil(displayRows.value.length / pageSize.value))
   if (page.value > maxPage) page.value = maxPage
 })
 
@@ -424,6 +458,13 @@ function openChangeDetail(change: ChangeEvent) {
   showChangeDetail.value = true
 }
 
+/** 影响评估的提醒级别文案。 */
+function impactLevelLabel(level: ChangeImpact['level']) {
+  if (level === 'CRITICAL') return '严重'
+  if (level === 'WARNING') return '警告'
+  return '信息'
+}
+
 function severityType(severity: ChangeEvent['severity']) {
   if (severity === 'CRITICAL') return 'danger'
   if (severity === 'WARNING') return 'warning'
@@ -445,52 +486,8 @@ function formatDate(value: string) {
   margin-left: 6px;
 }
 
-.admin-change-ratio-tag {
+.admin-change-detail-link {
   margin-left: 6px;
-}
-
-/* 影响列：一个分组一行，倒挂的标红 —— 一行塞十几个标签根本没法看 */
-.admin-change-impact-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.admin-change-impact-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.admin-change-impact-name {
-  max-width: 130px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.admin-change-impact-ratio {
-  color: #909399;
-}
-
-.admin-change-impact-item.is-affected .admin-change-impact-name {
-  color: #c45656;
-  font-weight: 600;
-}
-
-.admin-change-impact-flag {
-  padding: 0 4px;
-  border: 1px solid #f56c6c;
-  border-radius: 2px;
-  color: #f56c6c;
-  font-size: 11px;
-  line-height: 16px;
-}
-
-.admin-change-impact-more {
-  margin-top: 2px;
 }
 
 .admin-change-detail-impact {

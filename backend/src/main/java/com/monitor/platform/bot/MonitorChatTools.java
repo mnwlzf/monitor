@@ -255,30 +255,49 @@ public class MonitorChatTools {
                         Comparator.nullsLast(Comparator.reverseOrder())));
         List<PlatformChange> shown = matched.subList(0, Math.min(size, matched.size()));
 
+        // 一行一个变化：渠道倍率事件按「本平台账号 × 所属分组」展开成多行，不做任何合并
         List<BotReport.Row> rows = new ArrayList<>();
         for (PlatformChange item : shown) {
-            rows.add(BotReport.Row.of(
-                    ReportFormats.time(item.event().detectedAt()),
-                    warning(item.event()) ? "⚠ 警告" : "信息",
-                    item.platform(),
-                    localKeyNames(item.event()),
-                    upstreamKeyNames(item.event()),
-                    groupWithRatio(item.event()),
-                    impactSummary(item.event()),
-                    inUse(item.event()) ? "使用中" : "—",
-                    changeText(item.event())));
+            UpstreamChangeEventResponse event = item.event();
+            List<UpstreamChangeEventResponse.ChangeImpact> impacts = event.impacts();
+            if (impacts == null || impacts.isEmpty()) {
+                rows.add(BotReport.Row.of(
+                        ReportFormats.time(event.detectedAt()),
+                        levelText(event),
+                        item.platform(),
+                        "—",
+                        "—",
+                        "—",
+                        entityName(event),
+                        "—",
+                        changeText(event)));
+                continue;
+            }
+            for (UpstreamChangeEventResponse.ChangeImpact impact : impacts) {
+                rows.add(BotReport.Row.of(
+                        ReportFormats.time(event.detectedAt()),
+                        levelText(event),
+                        item.platform(),
+                        blankToDash(impact.accountName()),
+                        blankToDash(impact.groupName()),
+                        ReportFormats.decimal(impact.effectiveRatio()),
+                        entityName(event) + "（" + ReportFormats.decimal(impact.oldRatio())
+                                + " → " + ReportFormats.decimal(impact.newRatio()) + "）",
+                        impact.affected() ? "是（倒挂）" : "否",
+                        changeText(event)));
+            }
         }
 
-        BotReport.Block table = new BotReport.Block("最近 " + rows.size() + " 条"
+        BotReport.Block table = new BotReport.Block("最近 " + shown.size() + " 条变化 / " + rows.size() + " 行"
                 + (keyword.isEmpty() ? "（警告优先）" : "（筛选：" + filter + "）"), List.of(
                 BotReport.Col.left("时间"),
                 BotReport.Col.left("级别"),
                 BotReport.Col.left("平台"),
-                BotReport.Col.left("本平台 Key"),
-                BotReport.Col.left("上游 Key"),
-                BotReport.Col.left("分组（倍率）"),
-                BotReport.Col.left("影响（我平台分组）"),
-                BotReport.Col.left("使用中"),
+                BotReport.Col.left("本平台账号"),
+                BotReport.Col.left("所属分组"),
+                BotReport.Col.right("结算倍率"),
+                BotReport.Col.left("上游渠道（原 → 新）"),
+                BotReport.Col.left("是否受影响"),
                 BotReport.Col.left("内容")), rows, null);
 
         List<String> notes = new ArrayList<>();
@@ -298,77 +317,27 @@ public class MonitorChatTools {
         return "WARNING".equalsIgnoreCase(event.severity());
     }
 
-    /**
-     * 本平台 Key（自己 Sub2API 里的号池账号名）。
-     *
-     * <p>绑定链路：号池账号 {@code pool_accounts.bound_key_id} → 上游 Key
-     * {@code account_api_keys.id}；名字由查询带出来，没绑定就是「—」。</p>
-     */
-    private static String localKeyNames(UpstreamChangeEventResponse event) {
-        return event.localKeyNames() == null || event.localKeyNames().isBlank()
-                ? "—"
-                : event.localKeyNames();
-    }
-
-    /**
-     * 受影响的<strong>上游账号 Key 名</strong>：渠道事件按同分组匹配，密钥事件就是它本身。
-     */
-    private static String upstreamKeyNames(UpstreamChangeEventResponse event) {
-        if (event.upstreamKeyNames() != null && !event.upstreamKeyNames().isBlank()) {
-            return event.upstreamKeyNames();
-        }
-        if ("API_KEY".equalsIgnoreCase(event.entityType())) {
-            return entityName(event);
-        }
-        return "—";
-    }
-
-    /** 表格单元格里最多列几个分组，其余用「等 N 个」收尾 —— 一行塞十几个没法看。 */
-    private static final int MAX_IMPACT_PREVIEW = 5;
-
-    /**
-     * 渠道倍率变化对我平台的影响摘要：{@code 分组名(结算倍率)}；倒挂的额外标 ⚠。
-     *
-     * <p>一个账号可能同时服务多个分组，全部铺开会把表格撑爆，
-     * 因此只列前 {@value #MAX_IMPACT_PREVIEW} 个（后端已按「倒挂优先」排序），
-     * 其余用「…等 N 个分组」收尾。</p>
-     */
-    private static String impactSummary(UpstreamChangeEventResponse event) {
+    /** 影响评估里的账号/分组名，供关键字搜索命中（例如搜「pro」）。 */
+    private static String impactsText(UpstreamChangeEventResponse event) {
         List<UpstreamChangeEventResponse.ChangeImpact> impacts = event.impacts();
         if (impacts == null || impacts.isEmpty()) {
-            return "—";
+            return "";
         }
-        int limit = Math.min(impacts.size(), MAX_IMPACT_PREVIEW);
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < limit; i++) {
-            UpstreamChangeEventResponse.ChangeImpact impact = impacts.get(i);
-            if (!sb.isEmpty()) {
-                sb.append("、");
-            }
-            sb.append(impact.groupName() == null || impact.groupName().isBlank()
-                            ? "未知分组"
-                            : impact.groupName())
-                    .append('(').append(ReportFormats.decimal(impact.effectiveRatio())).append(')');
-            if (impact.affected()) {
-                sb.append("⚠倒挂");
-            }
-        }
-        if (impacts.size() > limit) {
-            sb.append("…等 ").append(impacts.size()).append(" 个分组");
+        for (UpstreamChangeEventResponse.ChangeImpact impact : impacts) {
+            sb.append(' ').append(impact.accountName()).append(' ').append(impact.groupName());
         }
         return sb.toString();
     }
 
-    /** 分组名 + 该分组的当前倍率（渠道倍率变化时一眼看出涨到多少）。 */
-    private static String groupWithRatio(UpstreamChangeEventResponse event) {
-        if (event.groupName() == null || event.groupName().isBlank()) {
-            return entityName(event);
-        }
-        if (event.groupRatio() == null) {
-            return event.groupName();
-        }
-        return event.groupName() + "（倍率 "
-                + event.groupRatio().stripTrailingZeros().toPlainString() + "）";
+    /** 级别 + 是否使用中，合成一列（同行不再单开一列「使用中」）。 */
+    private static String levelText(UpstreamChangeEventResponse event) {
+        String level = warning(event) ? "⚠ 警告" : "信息";
+        return inUse(event) ? level + " · 使用中" : level;
+    }
+
+    private static String blankToDash(String value) {
+        return value == null || value.isBlank() ? "—" : value;
     }
 
     /**
@@ -413,7 +382,7 @@ public class MonitorChatTools {
                 String.valueOf(event.accountName()),
                 String.valueOf(event.upstreamKeyNames()),
                 String.valueOf(event.localKeyNames()),
-                impactSummary(event),
+                impactsText(event),
                 String.valueOf(event.oldValue()),
                 String.valueOf(event.newValue())).toLowerCase(Locale.ROOT);
         return haystack.contains(keyword);
