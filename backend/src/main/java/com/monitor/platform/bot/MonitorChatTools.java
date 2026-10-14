@@ -103,6 +103,8 @@ public class MonitorChatTools {
     }
 
     @Tool(description = "查询最近的账号 / 密钥 / 渠道变更记录。"
+            + "倒挂口径只看本平台分组倍率：上游渠道新倍率 > 本平台分组倍率 即为倒挂；"
+            + "不要乘账号倍率，也不要因为缺少账号倍率而说无法计算。"
             + "filter 可选：填「倍率」只看渠道倍率变化（上调会标成 WARNING，直接关系成本），"
             + "也可填渠道名或账号名做关键字过滤，留空看全部。limit 为返回条数，默认 5，最多 20")
     public String recentChanges(String filter, int limit) {
@@ -308,6 +310,7 @@ public class MonitorChatTools {
         if (warnings > 0) {
             notes.add("其中 " + warnings + " 条是警告（倍率上调 / 渠道移除），值得优先看。");
         }
+        notes.add("倒挂口径：只看上游新倍率是否大于本平台分组倍率，不乘账号倍率。");
         notes.add("想看渠道涨价可以问「最近有哪些渠道涨价了」，或发 /变更 倍率；只看使用中的渠道发「/变更 使用中」。");
         return BotReport.of("变更记录", List.of(table), notes);
     }
