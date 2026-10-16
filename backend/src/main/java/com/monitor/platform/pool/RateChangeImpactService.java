@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -66,8 +67,9 @@ public class RateChangeImpactService {
      * @param accountName       本平台号池账号名（= 我自己平台的 Key 名）
      * @param externalAccountId 本平台号池账号 ID（Sub2API account id）
      * @param upstreamKeyName   上游 Key 名（account_api_keys.key_name，绑定关系匹配到的那把）
-     * @param groupName         所属分组名
-     * @param groupRatio        分组倍率
+     * @param groupName         本平台分组名
+     * @param groupPlatform     本平台分组所属平台（openai / anthropic …）
+     * @param groupRatio        本平台分组倍率
      * @param upstreamChannel   发生变化的那个上游渠道名
      * @param oldRatio          上游原倍率
      * @param newRatio          上游新倍率
@@ -76,7 +78,7 @@ public class RateChangeImpactService {
      * @param level             提醒级别：INFO / WARNING / CRITICAL
      */
     public record ImpactRow(String accountName, Long externalAccountId, String upstreamKeyName,
-                            String groupName, BigDecimal groupRatio,
+                            String groupName, String groupPlatform, BigDecimal groupRatio,
                             String upstreamChannel,
                             BigDecimal oldRatio, BigDecimal newRatio, BigDecimal increasePercent,
                             boolean affected, String level) {
@@ -200,10 +202,43 @@ public class RateChangeImpactService {
             return List.of();
         }
         String needle = channel.trim();
-        return keys.stream()
-                .filter(key -> key.getGroupName() != null
-                        && needle.equalsIgnoreCase(key.getGroupName().trim()))
+        List<AccountApiKeyEntity> exact = keys.stream()
+                .filter(key -> sameGroupName(key.getGroupName(), needle))
                 .toList();
+        if (!exact.isEmpty()) {
+            return exact;
+        }
+        // 分组名一模一样才对得上当然最准，但上游改分组名是常态：例如「官Key-不降智」
+        // 改成「官Key-不降智-无6.1sol」后，Key 上记着的分组名还是旧的那串，
+        // 严格相等就永远匹配不上，邮件里「本平台账号」整列变成「—」。
+        // 这里退一步按「改名前后」认：两个名字任一是另一个的前缀就算同一个分组。
+        // 仍然不做「该账号全部 Key」的兜底 —— 那会把别的渠道的账号算进来（线上踩过）。
+        return keys.stream()
+                .filter(key -> renamedGroup(key.getGroupName(), needle))
+                .toList();
+    }
+
+    /** 分组名是否完全一致（忽略大小写与首尾空白）。 */
+    private static boolean sameGroupName(String keyGroupName, String channel) {
+        return keyGroupName != null && channel.equalsIgnoreCase(keyGroupName.trim());
+    }
+
+    /**
+     * 分组名是否只是被上游改过（例如加了后缀）：两个名字任一是另一个的前缀。
+     *
+     * <p>只认前缀不认「包含」：包含太松，Key 上的「pro」会命中渠道「Codex-pro-不降」，
+     * 把不属于这个渠道的号池账号算进来。</p>
+     */
+    private static boolean renamedGroup(String keyGroupName, String channel) {
+        if (keyGroupName == null) {
+            return false;
+        }
+        String left = keyGroupName.trim().toLowerCase(Locale.ROOT);
+        String right = channel.toLowerCase(Locale.ROOT);
+        if (left.isEmpty() || right.isEmpty() || left.equals(right)) {
+            return false;
+        }
+        return left.startsWith(right) || right.startsWith(left);
     }
 
     private List<ImpactRow> buildRows(UpstreamChangeEventEntity event, List<AccountApiKeyEntity> scoped,
@@ -244,6 +279,7 @@ public class RateChangeImpactService {
                         pool.externalAccountId(),
                         keyName(key),
                         group.groupName(),
+                        group.platform(),
                         groupRatio,
                         upstreamChannel,
                         before,

@@ -27,8 +27,13 @@ import java.util.Map;
  * </ul>
  *
  * <p><strong>正文逐条展开</strong>：一条渠道倍率事件按实际影响拆成多行，
- * 一行只表达一个「本平台 Key × 上游 Key × 分组」的对应关系，不再把多个 Key
+ * 一行只表达一个「本平台账号 × 本平台分组」的对应关系，不再把多个 Key
  * 用「、」拼在同一个单元格里，也不再生成聚合式大模型总结。</p>
+ *
+ * <p>表格把上下游分开写：上游一侧是「上游平台 / 上游账号 / 上游渠道（分组）/ 上游 Key /
+ * 上游倍率（原 → 新）」，本平台一侧是「本平台账号 / 本平台分组（倍率）」。以前的
+ * 「所属分组」一列在匹配到影响时是本平台分组、匹配不到时又变成上游渠道名，
+ * 「分组倍率」也是两套口径，看的人分不清哪边是哪边。</p>
  *
  * <p>本类所有方法都不抛异常：发信失败只记日志，不拖累采集任务。</p>
  */
@@ -79,13 +84,44 @@ public class ChannelChangeAlertService {
             if (events.isEmpty()) {
                 return;
             }
-            String subject = "[Monitor] 正在使用的渠道倍率变化（" + events.size() + " 条事件）";
-            send(MailScene.CHANNEL_ALERT, events, subject,
-                    "以下 <b>正在使用</b> 的渠道发生了倍率变化，请确认是否为预期调整 —— 上调会直接推高成本。",
-                    "渠道实时告警");
+            int rising = countRising(events);
+            String subject = "[Monitor] 正在使用的渠道倍率变化（" + events.size() + " 条事件"
+                    + (rising > 0 ? "，" + rising + " 条上调" : "，全部为下调") + "）";
+            send(MailScene.CHANNEL_ALERT, events, subject, alertIntro(rising), "渠道实时告警");
         } catch (Exception ex) {
             log.error("渠道倍率告警发送失败", ex);
         }
+    }
+
+    /**
+     * 实时告警的开场白。
+     *
+     * <p>以前这里写死「上调会直接推高成本」，降价告警也照样带着这句话，
+     * 收件人就会以为系统把 0.3 → 0.23 判成了涨价。现在按本批的实际方向说话：
+     * 有上调才提成本上升，全是下调就明说成本不会上升。</p>
+     *
+     * @param rising 本批事件里「新倍率大于旧倍率」的条数
+     */
+    private static String alertIntro(int rising) {
+        if (rising == 0) {
+            return "以下 <b>正在使用</b> 的渠道发生了倍率变化，请确认是否为预期调整 —— "
+                    + "本次 <b>全部为下调</b>，成本不会因此上升。";
+        }
+        return "以下 <b>正在使用</b> 的渠道发生了倍率变化，请确认是否为预期调整 —— "
+                + "其中 <b>" + rising + "</b> 条为 <b>上调</b>（级别标为 ⚠ 警告），会直接推高成本。";
+    }
+
+    /** 本批事件里有几条是上调（新倍率大于旧倍率）。 */
+    private static int countRising(List<UpstreamChangeEventEntity> events) {
+        int rising = 0;
+        for (UpstreamChangeEventEntity event : events) {
+            BigDecimal before = decimal(event.getOldValue());
+            BigDecimal after = decimal(event.getNewValue());
+            if (before != null && after != null && after.compareTo(before) > 0) {
+                rising++;
+            }
+        }
+        return rising;
     }
 
     /**
@@ -169,6 +205,7 @@ public class ChannelChangeAlertService {
 
     private String buildBody(String intro, List<DisplayRow> rows,
                              Map<Integer, String> platformNames) {
+        Map<Integer, String> accountNames = new HashMap<>();
         StringBuilder html = new StringBuilder();
         html.append("<p>").append(intro).append("</p>");
 
@@ -177,45 +214,33 @@ public class ChannelChangeAlertService {
         html.append("<tr style=\"background:#f5f5f5\">")
                 .append("<th align=\"left\">时间</th>")
                 .append("<th align=\"left\">级别</th>")
-                .append("<th align=\"left\">平台</th>")
-                .append("<th align=\"left\">本平台 Key</th>")
+                .append("<th align=\"left\">上游平台</th>")
+                .append("<th align=\"left\">上游账号</th>")
+                .append("<th align=\"left\">上游渠道（分组）</th>")
                 .append("<th align=\"left\">上游 Key</th>")
-                .append("<th align=\"left\">所属分组</th>")
-                .append("<th align=\"right\">分组倍率</th>")
                 .append("<th align=\"left\">上游倍率（原 → 新）</th>")
-                .append("<th align=\"left\">上游渠道</th>")
+                .append("<th align=\"left\">本平台账号</th>")
+                .append("<th align=\"left\">本平台分组（倍率）</th>")
                 .append("<th align=\"left\">是否受影响</th>")
                 .append("<th align=\"left\">内容</th>")
                 .append("</tr>");
 
         for (DisplayRow display : rows) {
             UpstreamChangeEventEntity event = display.event();
-            RateChangeImpactService.ImpactRow impact = display.impact();
-
-            String localKey = impact == null ? "—" : impact.accountName();
-            String upstreamKey = impact == null ? singleUpstreamKeyLabel(event) : impact.upstreamKeyName();
-            String groupName = impact == null ? channelName(event) : impact.groupName();
-            String groupRatio = impact == null ? decimal(event.getGroupRatio()) : decimal(impact.groupRatio());
-            String upstreamChannel = impact == null || impact.upstreamChannel() == null
-                    || impact.upstreamChannel().isBlank()
-                    ? channelName(event)
-                    : impact.upstreamChannel();
-            String upstreamChange = impact == null ? channelName(event) : dash(upstreamChannel);
-            String upstreamRatioChange = upstreamRatioChange(display);
-            String affected = impact == null ? "—" : (impact.affected() ? "是（倒挂）" : "否");
 
             html.append("<tr>")
                     .append("<td>").append(MailFormat.formatTime(event.getDetectedAt())).append("</td>")
                     .append("<td>").append(MailFormat.escape(severityLabel(event.getSeverity()))).append("</td>")
                     .append("<td>").append(MailFormat.escape(
                             accountNameResolver.platformName(event.getAccountId(), platformNames))).append("</td>")
-                    .append("<td>").append(MailFormat.escape(dash(localKey))).append("</td>")
-                    .append("<td>").append(MailFormat.escape(dash(upstreamKey))).append("</td>")
-                    .append("<td>").append(MailFormat.escape(dash(groupName))).append("</td>")
-                    .append("<td align=\"right\">").append(MailFormat.escape(groupRatio)).append("</td>")
-                    .append("<td>").append(MailFormat.escape(upstreamRatioChange)).append("</td>")
-                    .append("<td>").append(MailFormat.escape(dash(upstreamChange))).append("</td>")
-                    .append("<td>").append(MailFormat.escape(affected)).append("</td>")
+                    .append("<td>").append(MailFormat.escape(
+                            accountNameResolver.accountName(event.getAccountId(), accountNames))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(upstreamChannel(display))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(upstreamKey(display))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(upstreamRatioChange(display))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(localAccount(display))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(localGroup(display))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(affectedText(display))).append("</td>")
                     .append("<td>").append(MailFormat.escape(contentText(event))).append("</td>")
                     .append("</tr>");
         }
@@ -224,8 +249,99 @@ public class ChannelChangeAlertService {
         return html.toString();
     }
 
+    /**
+     * 上游渠道（分组）名：发生变化的那个渠道。
+     *
+     * <p>影响行里带的是评估时的渠道名，取不到就退回事件自身的渠道名 ——
+     * 这一列永远是「上游改价的那个渠道」，不会再和本平台分组混在一起。</p>
+     */
+    private static String upstreamChannel(DisplayRow display) {
+        RateChangeImpactService.ImpactRow impact = display.impact();
+        String name = impact != null && impact.upstreamChannel() != null && !impact.upstreamChannel().isBlank()
+                ? impact.upstreamChannel()
+                : channelName(display.event());
+        return withEntityId(name, display.event());
+    }
+
+    /**
+     * 渠道名后面带上游 ID。
+     *
+     * <p>以前 ID 只出现在「内容」列的「倍率变化: 36」里 —— 光给一个数字，
+     * 收件人既不知道它是渠道 ID，也容易误读成倍率值。挪到渠道名旁边，含义一目了然。</p>
+     */
+    private static String withEntityId(String name, UpstreamChangeEventEntity event) {
+        String id = event.getEntityKey();
+        if (name == null || name.isBlank() || id == null || id.isBlank() || name.contains(id)) {
+            return name;
+        }
+        return name + "（ID " + id + "）";
+    }
+
+    /** 上游 Key：有影响行时就是绑定的那把 Key，否则退回事件自己的 Key（多为「—」）。 */
+    private static String upstreamKey(DisplayRow display) {
+        RateChangeImpactService.ImpactRow impact = display.impact();
+        if (impact != null && impact.upstreamKeyName() != null && !impact.upstreamKeyName().isBlank()) {
+            return impact.upstreamKeyName();
+        }
+        String single = singleUpstreamKeyLabel(display.event());
+        if (single != null && !single.isBlank()) {
+            return single;
+        }
+        return rateChange(display.event()) ? "未匹配到上游 Key" : "—";
+    }
+
+    /** 是否倍率事件 —— 「对不上本平台账号」这类话只在倍率事件里说。 */
+    private static boolean rateChange(UpstreamChangeEventEntity event) {
+        String changeType = event.getChangeType();
+        return "RATE_CHANGED".equals(changeType) || "BASE_RATE_CHANGED".equals(changeType);
+    }
+
+    /**
+     * 本平台账号（号池账号名）。
+     *
+     * <p>只有「上游 Key 分组 == 变更渠道」时才拿得到账号名；对不上就如实写「未匹配到」，
+     * 不退回账号级的聚合 Key 列表 —— 那会把别的渠道的账号也算进来，告警里看着像
+     * 自己一堆账号都被波及了。分组名只是被上游改过（加后缀）的情况由
+     * {@code RateChangeImpactService#scopeKeys} 兜住，正常能对上。</p>
+     */
+    private static String localAccount(DisplayRow display) {
+        RateChangeImpactService.ImpactRow impact = display.impact();
+        if (impact != null && impact.accountName() != null && !impact.accountName().isBlank()) {
+            return impact.accountName();
+        }
+        return rateChange(display.event()) ? "未匹配到本平台账号" : "—";
+    }
+
+    /** 本平台分组：分组名 + 分组所属平台 + 分组倍率。 */
+    private static String localGroup(DisplayRow display) {
+        RateChangeImpactService.ImpactRow impact = display.impact();
+        if (impact == null) {
+            return "—";
+        }
+        String name = impact.groupName() == null || impact.groupName().isBlank() ? "未知分组" : impact.groupName();
+        String ratio = decimal(impact.groupRatio());
+        String platform = impact.groupPlatform();
+        return platform == null || platform.isBlank()
+                ? name + "（倍率 " + ratio + "）"
+                : name + "（" + platform + " · 倍率 " + ratio + "）";
+    }
+
+    /** 上游新倍率是否已超过本平台分组倍率（倒挂）。 */
+    private static String affectedText(DisplayRow display) {
+        RateChangeImpactService.ImpactRow impact = display.impact();
+        if (impact == null) {
+            return "—";
+        }
+        return impact.affected() ? "是（倒挂）" : "否";
+    }
+
     /** 一条事件的普通说明；倍率变化的具体旧值/新值放在“上游倍率”列里逐行展示。 */
     private static String contentText(UpstreamChangeEventEntity event) {
+        // 倍率事件的 message 只有「倍率变化: 36」这种渠道 ID，渠道名和 ID 都在
+        // 「上游渠道（分组）」列里了，这里只说清是哪种变化。
+        if (rateChange(event)) {
+            return changeLabel(event.getChangeType());
+        }
         String message = event.getMessage();
         if (message != null && !message.isBlank()) {
             return message.replaceAll("\\s+", " ").trim();
@@ -280,10 +396,6 @@ public class ChannelChangeAlertService {
 
     private static String decimal(BigDecimal value) {
         return value == null ? "—" : value.stripTrailingZeros().toPlainString();
-    }
-
-    private static String dash(String value) {
-        return value == null || value.isBlank() ? "—" : value;
     }
 
     private static String severityLabel(String severity) {

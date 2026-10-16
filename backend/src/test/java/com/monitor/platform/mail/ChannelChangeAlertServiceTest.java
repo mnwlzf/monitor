@@ -55,14 +55,15 @@ class ChannelChangeAlertServiceTest {
                 .thenReturn(List.of(recipient()));
         when(smtpConfigProvider.load()).thenReturn(smtpConfig());
         when(accountNameResolver.platformName(eq(7), any())).thenReturn("平台A");
+        when(accountNameResolver.accountName(eq(7), any())).thenReturn("上游账号A");
         when(rateChangeImpactService.impactOf(event)).thenReturn(List.of(
                 new RateChangeImpactService.ImpactRow(
-                        "本平台 Key A", 11L, "上游 Key A", "分组 A",
+                        "本平台账号 A", 11L, "上游 Key A", "分组 A", "openai",
                         new BigDecimal("1.20"), "Ic渠道",
                         new BigDecimal("1.10"), new BigDecimal("1.30"),
                         new BigDecimal("18.18"), false, "WARNING"),
                 new RateChangeImpactService.ImpactRow(
-                        "本平台 Key B", 12L, "上游 Key B", "分组 B",
+                        "本平台账号 B", 12L, "上游 Key B", "分组 B", "anthropic",
                         new BigDecimal("1.00"), "Ic渠道",
                         new BigDecimal("1.10"), new BigDecimal("1.30"),
                         new BigDecimal("18.18"), true, "CRITICAL")));
@@ -73,19 +74,27 @@ class ChannelChangeAlertServiceTest {
         verify(mailService).send(any(SmtpConfig.class), anyList(), anyString(), body.capture());
 
         assertThat(body.getValue())
-                .contains("<td>本平台 Key A</td>")
+                .contains("<th align=\"left\">上游平台</th>")
+                .contains("<th align=\"left\">上游账号</th>")
+                .contains("<th align=\"left\">上游渠道（分组）</th>")
+                .contains("<th align=\"left\">本平台账号</th>")
+                .contains("<th align=\"left\">本平台分组（倍率）</th>")
+                .contains("<td>上游账号A</td>")
+                .contains("<td>本平台账号 A</td>")
                 .contains("<td>上游 Key A</td>")
-                .contains("<td>分组 A</td>")
-                .contains("<td>本平台 Key B</td>")
+                .contains("<td>分组 A（openai &middot; 倍率 1.2）</td>")
+                .contains("<td>本平台账号 B</td>")
                 .contains("<td>上游 Key B</td>")
-                .contains("<td>分组 B</td>")
+                .contains("<td>分组 B（anthropic &middot; 倍率 1）</td>")
                 .contains("<th align=\"left\">上游倍率（原 → 新）</th>")
                 .contains("<td>1.1 &rarr; 1.3</td>")
-                .contains("<td>Ic渠道</td>")
+                .contains("<td>Ic渠道（ID group-1）</td>")
                 .doesNotContain("<td>Ic渠道（1.1")
                 .doesNotContain("聚合上游 Key A、聚合上游 Key B")
                 .doesNotContain("聚合本平台 Key A、聚合本平台 Key B")
-                .doesNotContain("大模型总结");
+                .doesNotContain("大模型总结")
+                // 有上调时必须点名「上调」，成本口径不能含糊
+                .contains("其中 <b>1</b> 条为 <b>上调</b>");
     }
 
     @Test
@@ -99,6 +108,7 @@ class ChannelChangeAlertServiceTest {
                 .thenReturn(List.of(recipient()));
         when(smtpConfigProvider.load()).thenReturn(smtpConfig());
         when(accountNameResolver.platformName(eq(7), any())).thenReturn("平台A");
+        when(accountNameResolver.accountName(eq(7), any())).thenReturn("上游账号A");
         when(rateChangeImpactService.impactOf(event)).thenReturn(List.of());
 
         service.notifyInUseRateChanges(OffsetDateTime.now().minusMinutes(1));
@@ -108,7 +118,35 @@ class ChannelChangeAlertServiceTest {
         assertThat(body.getValue())
                 .contains("<th align=\"left\">上游倍率（原 → 新）</th>")
                 .contains("<td>0.3 &rarr; 0.6</td>")
-                .contains("<td>Ic渠道</td>");
+                .contains("<td>Ic渠道（ID group-1）</td>")
+                // 对不上分组时如实写「未匹配到」，不再回退成聚合的 Key 列表
+                .contains("<td>未匹配到本平台账号</td>")
+                .doesNotContain("聚合本平台 Key A、聚合本平台 Key B");
+    }
+
+    @Test
+    void shouldSayEverythingIsPriceCutWhenNoEventRises() {
+        UpstreamChangeEventEntity event = rateEvent();
+        event.setOldValue("0.3");
+        event.setNewValue("0.23");
+        when(changeEventRepository.findInUseGroupRateEventsSince(any(), anyInt()))
+                .thenReturn(List.of(event));
+        when(mailRecipientRepository.findByScene(MailScene.CHANNEL_ALERT))
+                .thenReturn(List.of(recipient()));
+        when(smtpConfigProvider.load()).thenReturn(smtpConfig());
+        when(accountNameResolver.platformName(eq(7), any())).thenReturn("平台A");
+        when(accountNameResolver.accountName(eq(7), any())).thenReturn("上游账号A");
+        when(rateChangeImpactService.impactOf(event)).thenReturn(List.of());
+
+        service.notifyInUseRateChanges(OffsetDateTime.now().minusMinutes(1));
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(mailService).send(any(SmtpConfig.class), anyList(), subject.capture(), body.capture());
+        assertThat(subject.getValue()).contains("全部为下调");
+        assertThat(body.getValue())
+                .contains("本次 <b>全部为下调</b>，成本不会因此上升")
+                .doesNotContain("会直接推高成本");
     }
 
     private UpstreamChangeEventEntity rateEvent() {

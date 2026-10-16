@@ -127,7 +127,10 @@ export interface ChangeImpact {
   externalAccountId: number | null
   /** 上游 Key 名（account_api_keys.key_name，绑定关系匹配到的那把）。 */
   upstreamKeyName: string
+  /** 本平台账号所属分组名。 */
   groupName: string
+  /** 本平台分组所属平台（openai / anthropic …）。 */
+  groupPlatform: string
   groupRatio: number | null
   oldRatio: number | null
   newRatio: number | null

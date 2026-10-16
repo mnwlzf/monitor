@@ -269,6 +269,7 @@ function toChangeImpact(row: ChangeImpactDto): ChangeImpact {
     externalAccountId: row.externalAccountId ?? null,
     upstreamKeyName: row.upstreamKeyName || '',
     groupName: row.groupName || '',
+    groupPlatform: row.groupPlatform || '',
     groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
     oldRatio: row.oldRatio == null ? null : Number(row.oldRatio),
     newRatio: row.newRatio == null ? null : Number(row.newRatio),
@@ -367,6 +368,7 @@ interface ChangeImpactDto {
   externalAccountId?: number | null
   upstreamKeyName?: string
   groupName?: string
+  groupPlatform?: string
   groupRatio?: string | number | null
   oldRatio?: string | number | null
   newRatio?: string | number | null

@@ -99,6 +99,23 @@ class RateChangeImpactServiceTest {
     }
 
     @Test
+    void matchesChannelWhoseGroupNameWasRenamedUpstream() {
+        // Key 上记着的分组名停在旧名字上（官Key-不降智），上游把渠道改成了
+        // 官Key-不降智-无6.1sol —— 只做严格相等就永远对不上，账号名整列空白。
+        List<RateChangeImpactService.ImpactRow> rows =
+                service.impactOf(event("RATE_CHANGED", "渠道A-无6.1sol", "0.30", "0.23"));
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows).extracting(RateChangeImpactService.ImpactRow::accountName)
+                .containsOnly("满血");
+        assertThat(rows).extracting(RateChangeImpactService.ImpactRow::upstreamKeyName)
+                .containsOnly("star-key-企业级");
+        // 分组所属平台要带出来，邮件里「本平台分组」一列才说得清是哪个平台的分组
+        assertThat(rows).extracting(RateChangeImpactService.ImpactRow::groupPlatform)
+                .containsExactlyInAnyOrder("openai", "openai");
+    }
+
+    @Test
     void returnsEmptyWhenNoKeyBelongsToTheChangedChannel() {
         // 变更发生在一个「该账号下没有采集到 Key」的渠道上：无法判断影响谁，就不猜
         assertThat(service.impactOf(event("RATE_CHANGED", "官Key-企业级（可蒸馏）", "0.70", "0.35"))).isEmpty();

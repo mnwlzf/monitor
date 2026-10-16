@@ -257,7 +257,7 @@ public class MonitorChatTools {
                         Comparator.nullsLast(Comparator.reverseOrder())));
         List<PlatformChange> shown = matched.subList(0, Math.min(size, matched.size()));
 
-        // 一行一个变化：渠道倍率事件按「本平台账号 × 所属分组」展开成多行，不做任何合并
+        // 一行一个变化：渠道倍率事件按「本平台账号 × 本平台分组」展开成多行，不做任何合并
         List<BotReport.Row> rows = new ArrayList<>();
         for (PlatformChange item : shown) {
             UpstreamChangeEventResponse event = item.event();
@@ -267,7 +267,8 @@ public class MonitorChatTools {
                         ReportFormats.time(event.detectedAt()),
                         levelText(event),
                         item.platform(),
-                        "—",
+                        blankToDash(event.accountName()),
+                        "未匹配到本平台账号",
                         "—",
                         "—",
                         "—",
@@ -281,6 +282,7 @@ public class MonitorChatTools {
                         ReportFormats.time(event.detectedAt()),
                         levelText(event),
                         item.platform(),
+                        blankToDash(event.accountName()),
                         blankToDash(impact.accountName()),
                         blankToDash(impact.upstreamKeyName()),
                         blankToDash(impact.groupName()),
@@ -296,10 +298,11 @@ public class MonitorChatTools {
                 + (keyword.isEmpty() ? "（警告优先）" : "（筛选：" + filter + "）"), List.of(
                 BotReport.Col.left("时间"),
                 BotReport.Col.left("级别"),
-                BotReport.Col.left("平台"),
-                BotReport.Col.left("本平台 Key"),
+                BotReport.Col.left("上游平台"),
+                BotReport.Col.left("上游账号"),
+                BotReport.Col.left("本平台账号"),
                 BotReport.Col.left("上游 Key"),
-                BotReport.Col.left("所属分组"),
+                BotReport.Col.left("本平台分组"),
                 BotReport.Col.right("分组倍率"),
                 BotReport.Col.left("上游渠道（原 → 新）"),
                 BotReport.Col.left("是否受影响"),

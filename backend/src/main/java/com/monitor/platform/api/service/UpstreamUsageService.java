@@ -307,6 +307,7 @@ public class UpstreamUsageService {
                 row.externalAccountId(),
                 row.upstreamKeyName(),
                 row.groupName(),
+                row.groupPlatform(),
                 row.groupRatio(),
                 row.oldRatio(),
                 row.newRatio(),

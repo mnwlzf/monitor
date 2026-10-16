@@ -57,7 +57,8 @@ public record UpstreamChangeEventResponse(
      * @param accountName       本平台号池账号名（= 我自己平台的 Key 名）
      * @param externalAccountId 本平台号池账号 ID
      * @param upstreamKeyName   上游 Key 名（account_api_keys.key_name）
-     * @param groupName         所属分组名
+     * @param groupName         本平台分组名
+     * @param groupPlatform     本平台分组所属平台（openai / anthropic …）
      * @param groupRatio        分组倍率
      * @param oldRatio          上游原倍率
      * @param newRatio          上游新倍率
@@ -70,6 +71,7 @@ public record UpstreamChangeEventResponse(
             Long externalAccountId,
             String upstreamKeyName,
             String groupName,
+            String groupPlatform,
             BigDecimal groupRatio,
             BigDecimal oldRatio,
             BigDecimal newRatio,

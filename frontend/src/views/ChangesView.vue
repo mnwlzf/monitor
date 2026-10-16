@@ -58,20 +58,20 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="本平台 Key" min-width="150" show-overflow-tooltip>
+        <el-table-column label="本平台账号" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.impact?.accountName || '—' }}</template>
         </el-table-column>
 
-        <el-table-column label="上游 Key" min-width="170" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.impact?.upstreamKeyName || '—' }}</template>
-        </el-table-column>
-
-        <el-table-column label="所属分组" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.impact?.groupName || '—' }}</template>
+        <el-table-column label="本平台分组" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ groupLabel(row.impact) }}</template>
         </el-table-column>
 
         <el-table-column label="分组倍率" width="100" align="right">
           <template #default="{ row }">{{ row.impact ? formatRatio(row.impact.groupRatio) : '—' }}</template>
+        </el-table-column>
+
+        <el-table-column label="上游 Key" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.impact?.upstreamKeyName || '—' }}</template>
         </el-table-column>
 
 
@@ -178,7 +178,7 @@
               <tr v-for="impact in changeDetail.impacts" :key="`${impact.externalAccountId}-${impact.groupName}`" :class="{ 'is-affected': impact.affected }">
                 <td>{{ impact.accountName || '—' }}</td>
                 <td>{{ impact.upstreamKeyName || '—' }}</td>
-                <td>{{ impact.groupName || '—' }}</td>
+                <td>{{ groupLabel(impact) }}</td>
                 <td>{{ formatRatio(impact.groupRatio) }}</td>
                 <td>{{ formatRatio(impact.oldRatio) }} → {{ formatRatio(impact.newRatio) }}</td>
                 <td>{{ impact.increasePercent == null ? '—' : `${formatRatio(impact.increasePercent)}%` }}</td>
@@ -455,6 +455,16 @@ function impactLevelLabel(level: ChangeImpact['level']) {
   if (level === 'CRITICAL') return '严重'
   if (level === 'WARNING') return '警告'
   return '信息'
+}
+
+/**
+ * 本平台分组的展示名：分组名 + 所属平台。
+ *
+ * 这列只讲「我自己的哪个分组」，上游渠道在「上游渠道 / 密钥」列里，两边不再混着写。
+ */
+function groupLabel(impact: ChangeImpact | null) {
+  if (!impact || !impact.groupName) return '—'
+  return impact.groupPlatform ? `${impact.groupName} · ${impact.groupPlatform}` : impact.groupName
 }
 
 function severityType(severity: ChangeEvent['severity']) {
