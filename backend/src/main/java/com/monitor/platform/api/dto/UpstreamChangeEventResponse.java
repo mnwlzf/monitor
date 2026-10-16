@@ -17,6 +17,8 @@ import java.time.OffsetDateTime;
  * @param keyName      上游密钥名（只有 API_KEY 事件有，按 account_id + external_key_id 匹配）
  * @param keyStatus    上游密钥当前状态（只有 API_KEY 事件有）：ACTIVE = 上游标为「活跃」
  * @param upstreamKeyNames 受影响的「上游账号 Key」名字，多个用「、」连接（渠道事件按同分组匹配）
+ * @param channelKeyNames  变更渠道下的上游 Key 名称（渠道事件，严格按渠道名匹配；没有则 null）
+ * @param channelPoolAccounts 绑定了这些 Key 的本平台号池账号名（渠道事件；没有则 null）
  * @param localKeyNames    对应的「本平台 Key」名字（号池账号名），多个用「、」连接
  * @param groupRatio   所在分组的当前倍率（渠道事件）
  * @param groupActive  渠道当前是否在售（上游启用，渠道事件）：true 表示「活跃」，
@@ -43,6 +45,8 @@ public record UpstreamChangeEventResponse(
         String keyName,
         String keyStatus,
         String upstreamKeyNames,
+        String channelKeyNames,
+        String channelPoolAccounts,
         String localKeyNames,
         BigDecimal groupRatio,
         Boolean groupActive,

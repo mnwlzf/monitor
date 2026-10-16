@@ -138,15 +138,17 @@ public class RateChangeImpactService {
         return result;
     }
 
-    /** 上游 Key 名；没采集到名字时退回脱敏值 / 上游 key ID，至少能对上号。 */
+    /**
+     * 上游 Key <strong>名称</strong>。
+     *
+     * <p>这里只要名字：脱敏密钥（{@code sk-xxx****}）看着像密钥内容，不是名字，不拿来充数；
+     * 没采到名字时退回带前缀的上游 ID，至少能对上号。</p>
+     */
     private static String keyName(AccountApiKeyEntity key) {
         if (key.getKeyName() != null && !key.getKeyName().isBlank()) {
             return key.getKeyName();
         }
-        if (key.getKeyMasked() != null && !key.getKeyMasked().isBlank()) {
-            return key.getKeyMasked();
-        }
-        return key.getExternalKeyId() == null ? "—" : key.getExternalKeyId();
+        return key.getExternalKeyId() == null ? "—" : "上游 ID " + key.getExternalKeyId();
     }
 
     private static boolean isRateChange(UpstreamChangeEventEntity event) {

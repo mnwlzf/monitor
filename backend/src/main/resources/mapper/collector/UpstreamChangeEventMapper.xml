@@ -15,6 +15,8 @@
         <result column="key_name" property="keyName"/>
         <result column="key_status" property="keyStatus"/>
         <result column="upstream_key_names" property="upstreamKeyNames"/>
+        <result column="channel_key_names" property="channelKeyNames"/>
+        <result column="channel_pool_accounts" property="channelPoolAccounts"/>
         <result column="local_key_names" property="localKeyNames"/>
         <result column="group_ratio" property="groupRatio"/>
         <result column="group_active" property="groupActive"/>
@@ -52,10 +54,10 @@
         g.current_ratio AS group_ratio,
         -- 渠道当前是否在售（上游启用）：页面据此标「活跃」，与「使用中」（我绑定了）分开
         (g.is_active AND lower(COALESCE(g.status, '')) = 'active') AS group_active,
-        -- 受影响的「上游账号 Key」：密钥事件按本地主键 / 上游 key 匹配，渠道事件按同分组匹配。
-        -- key_name 为空的上游很常见，退回脱敏值与上游 ID，避免整列空白。
+        -- 受影响的「上游账号 Key」名称：密钥事件按本地主键 / 上游 key 匹配，渠道事件按同分组匹配。
+        -- 只取名称，不拿脱敏密钥充数（那看着像密钥内容，其实不是名字）；没名字时标上游 ID。
         COALESCE(
-            (SELECT string_agg(COALESCE(NULLIF(k.key_name, ''), k.key_masked, k.external_key_id), '、' ORDER BY k.id)
+            (SELECT string_agg(COALESCE(NULLIF(k.key_name, ''), '上游 ID ' || k.external_key_id), '、' ORDER BY k.id)
                FROM account_api_keys k
               WHERE k.account_id = e.account_id
                 AND ((e.entity_type = 'API_KEY'
@@ -63,7 +65,7 @@
                   OR (e.entity_type = 'GROUP'
                       AND (g.group_name IS NULL OR k.group_name = g.group_name)))),
             -- 分组对不上（渠道改名 / 还没采到该分组的 Key）时，退回该账号仍在用的 Key
-            (SELECT string_agg(COALESCE(NULLIF(k.key_name, ''), k.key_masked, k.external_key_id), '、' ORDER BY k.id)
+            (SELECT string_agg(COALESCE(NULLIF(k.key_name, ''), '上游 ID ' || k.external_key_id), '、' ORDER BY k.id)
                FROM account_api_keys k
               WHERE k.account_id = e.account_id
                 AND k.is_active = TRUE),
@@ -85,7 +87,21 @@
               WHERE k.account_id = e.account_id
                 AND k.is_active = TRUE),
             '未绑定本平台 Key'
-        ) AS local_key_names
+        ) AS local_key_names,
+        -- 这个渠道下的上游 Key 名称（严格按渠道名匹配，不做账号级兜底）。
+        -- 影响评估算不出来时（例如号池账号还没归属任何分组），邮件至少要报得出是哪个 Key。
+        (SELECT string_agg(COALESCE(NULLIF(k.key_name, ''), '上游 ID ' || k.external_key_id), '、' ORDER BY k.id)
+           FROM account_api_keys k
+          WHERE k.account_id = e.account_id
+            AND g.group_name IS NOT NULL
+            AND k.group_name = g.group_name) AS channel_key_names,
+        -- 绑定了上面这些 Key 的本平台号池账号（就是「我在用」的那几个）
+        (SELECT string_agg(COALESCE(NULLIF(pa.name, ''), '号池账号 ' || pa.external_account_id), '、' ORDER BY pa.id)
+           FROM account_api_keys k
+           JOIN pool_accounts pa ON pa.bound_key_id = k.id
+          WHERE k.account_id = e.account_id
+            AND g.group_name IS NOT NULL
+            AND k.group_name = g.group_name) AS channel_pool_accounts
     </sql>
 
     <!-- 变更事件要带出渠道名：页面和邮件上只有渠道名，光给 ID 运维没法对号入座 -->

@@ -90,6 +90,17 @@ public class UpstreamChangeEventEntity {
     /** 受影响的「上游账号 Key」名字，多个用「、」连接（渠道事件按同分组匹配）。 */
     @TableField(exist = false)
     private String upstreamKeyNames;
+    /**
+     * 变更渠道下的上游 Key <strong>名称</strong>（只有 GROUP 事件有，严格按渠道名匹配）。
+     *
+     * <p>不是本表的列：给「影响评估算不出来」的场景兜底用 —— 至少报得出这个渠道里
+     * 是哪把（哪几把）上游 Key，而不是只写「未匹配到」。</p>
+     */
+    @TableField(exist = false)
+    private String channelKeyNames;
+    /** 绑定了 {@link #channelKeyNames} 的本平台号池账号名，多个用「、」连接。 */
+    @TableField(exist = false)
+    private String channelPoolAccounts;
     /** 对应的「本平台 Key」名字（号池账号名），多个用「、」连接。 */
     @TableField(exist = false)
     private String localKeyNames;
@@ -128,6 +139,10 @@ public class UpstreamChangeEventEntity {
     public void setKeyName(String keyName) { this.keyName = keyName; }
     public String getKeyStatus() { return keyStatus; }
     public void setKeyStatus(String keyStatus) { this.keyStatus = keyStatus; }
+    public String getChannelKeyNames() { return channelKeyNames; }
+    public void setChannelKeyNames(String channelKeyNames) { this.channelKeyNames = channelKeyNames; }
+    public String getChannelPoolAccounts() { return channelPoolAccounts; }
+    public void setChannelPoolAccounts(String channelPoolAccounts) { this.channelPoolAccounts = channelPoolAccounts; }
     public String getUpstreamKeyNames() { return upstreamKeyNames; }
     public void setUpstreamKeyNames(String upstreamKeyNames) { this.upstreamKeyNames = upstreamKeyNames; }
     public String getLocalKeyNames() { return localKeyNames; }

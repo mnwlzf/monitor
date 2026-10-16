@@ -268,8 +268,8 @@ public class MonitorChatTools {
                         levelText(event),
                         item.platform(),
                         blankToDash(event.accountName()),
-                        "未匹配到本平台账号",
-                        "—",
+                        firstNonBlank(event.channelPoolAccounts()),
+                        firstNonBlank(event.channelKeyNames()),
                         "—",
                         "—",
                         entityName(event),
@@ -283,8 +283,8 @@ public class MonitorChatTools {
                         levelText(event),
                         item.platform(),
                         blankToDash(event.accountName()),
-                        blankToDash(impact.accountName()),
-                        blankToDash(impact.upstreamKeyName()),
+                        firstNonBlank(impact.accountName(), event.channelPoolAccounts()),
+                        firstNonBlank(impact.upstreamKeyName(), event.channelKeyNames()),
                         blankToDash(impact.groupName()),
                         ReportFormats.decimal(impact.groupRatio()),
                         entityName(event) + "（" + ReportFormats.decimal(impact.oldRatio())
@@ -301,7 +301,7 @@ public class MonitorChatTools {
                 BotReport.Col.left("上游平台"),
                 BotReport.Col.left("上游账号"),
                 BotReport.Col.left("本平台账号"),
-                BotReport.Col.left("上游 Key"),
+                BotReport.Col.left("上游 Key 名称"),
                 BotReport.Col.left("本平台分组"),
                 BotReport.Col.right("分组倍率"),
                 BotReport.Col.left("上游渠道（原 → 新）"),
@@ -316,6 +316,20 @@ public class MonitorChatTools {
         notes.add("倒挂口径：只看上游新倍率是否大于本平台分组倍率，不乘账号倍率。");
         notes.add("想看渠道涨价可以问「最近有哪些渠道涨价了」，或发 /变更 倍率；只看使用中的渠道发「/变更 使用中」。");
         return BotReport.of("变更记录", List.of(table), notes);
+    }
+
+    /**
+     * 取第一个非空值，全空给「—」。
+     *
+     * <p>用于「上游 Key 名称 / 本平台账号」两列：影响评估算不出来时退回事件自带的渠道级绑定信息。</p>
+     */
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "—";
     }
 
     /** 一条变更 + 它属于哪个平台。 */

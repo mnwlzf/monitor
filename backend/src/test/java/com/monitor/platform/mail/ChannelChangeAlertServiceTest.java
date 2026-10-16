@@ -78,6 +78,7 @@ class ChannelChangeAlertServiceTest {
                 .contains("<th align=\"left\">上游账号</th>")
                 .contains("<th align=\"left\">上游渠道（分组）</th>")
                 .contains("<th align=\"left\">本平台账号</th>")
+                .contains("<th align=\"left\">上游 Key 名称</th>")
                 .contains("<th align=\"left\">本平台分组（倍率）</th>")
                 .contains("<td>上游账号A</td>")
                 .contains("<td>本平台账号 A</td>")
@@ -122,6 +123,36 @@ class ChannelChangeAlertServiceTest {
                 // 对不上分组时如实写「未匹配到」，不再回退成聚合的 Key 列表
                 .contains("<td>未匹配到本平台账号</td>")
                 .doesNotContain("聚合本平台 Key A、聚合本平台 Key B");
+    }
+
+    /**
+     * 影响评估算不出来（例如号池账号还没归属任何 Sub2API 分组）时，
+     * 至少要退回「这个渠道里的上游 Key 名称 + 绑定了它的本平台账号」——
+     * 只写一句「未匹配到」等于没给任何可用信息。
+     */
+    @Test
+    void shouldFallBackToChannelBindingWhenImpactIsEmpty() {
+        UpstreamChangeEventEntity event = rateEvent();
+        event.setChannelKeyNames("企业组");
+        event.setChannelPoolAccounts("玩具AI-企业组");
+        when(changeEventRepository.findInUseGroupRateEventsSince(any(), anyInt()))
+                .thenReturn(List.of(event));
+        when(mailRecipientRepository.findByScene(MailScene.CHANNEL_ALERT))
+                .thenReturn(List.of(recipient()));
+        when(smtpConfigProvider.load()).thenReturn(smtpConfig());
+        when(accountNameResolver.platformName(eq(7), any())).thenReturn("平台A");
+        when(accountNameResolver.accountName(eq(7), any())).thenReturn("上游账号A");
+        when(rateChangeImpactService.impactOf(event)).thenReturn(List.of());
+
+        service.notifyInUseRateChanges(OffsetDateTime.now().minusMinutes(1));
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(mailService).send(any(SmtpConfig.class), anyList(), anyString(), body.capture());
+        assertThat(body.getValue())
+                .contains("<td>企业组</td>")
+                .contains("<td>玩具AI-企业组</td>")
+                .doesNotContain("未匹配到上游 Key 名称")
+                .doesNotContain("未匹配到本平台账号");
     }
 
     @Test

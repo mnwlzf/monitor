@@ -217,7 +217,7 @@ public class ChannelChangeAlertService {
                 .append("<th align=\"left\">上游平台</th>")
                 .append("<th align=\"left\">上游账号</th>")
                 .append("<th align=\"left\">上游渠道（分组）</th>")
-                .append("<th align=\"left\">上游 Key</th>")
+                .append("<th align=\"left\">上游 Key 名称</th>")
                 .append("<th align=\"left\">上游倍率（原 → 新）</th>")
                 .append("<th align=\"left\">本平台账号</th>")
                 .append("<th align=\"left\">本平台分组（倍率）</th>")
@@ -277,17 +277,26 @@ public class ChannelChangeAlertService {
         return name + "（ID " + id + "）";
     }
 
-    /** 上游 Key：有影响行时就是绑定的那把 Key，否则退回事件自己的 Key（多为「—」）。 */
+    /**
+     * 上游 Key <strong>名称</strong>（名字，不是密钥内容）。
+     *
+     * <p>有影响行时用绑定的那把；影响评估算不出来时退回事件自带的「这个渠道里的 Key 名称」
+     * （{@code channel_key_names}）—— 至少能报出是哪个 Key，而不是笼统一句「未匹配到」。</p>
+     */
     private static String upstreamKey(DisplayRow display) {
         RateChangeImpactService.ImpactRow impact = display.impact();
         if (impact != null && impact.upstreamKeyName() != null && !impact.upstreamKeyName().isBlank()) {
             return impact.upstreamKeyName();
         }
+        String channelKeys = display.event().getChannelKeyNames();
+        if (channelKeys != null && !channelKeys.isBlank()) {
+            return channelKeys;
+        }
         String single = singleUpstreamKeyLabel(display.event());
         if (single != null && !single.isBlank()) {
             return single;
         }
-        return rateChange(display.event()) ? "未匹配到上游 Key" : "—";
+        return rateChange(display.event()) ? "未匹配到上游 Key 名称" : "—";
     }
 
     /** 是否倍率事件 —— 「对不上本平台账号」这类话只在倍率事件里说。 */
@@ -308,6 +317,11 @@ public class ChannelChangeAlertService {
         RateChangeImpactService.ImpactRow impact = display.impact();
         if (impact != null && impact.accountName() != null && !impact.accountName().isBlank()) {
             return impact.accountName();
+        }
+        // 影响评估要「号池账号 × 分组」才算得出；账号还没归属任何分组时，退回绑定关系算出的账号名
+        String boundAccounts = display.event().getChannelPoolAccounts();
+        if (boundAccounts != null && !boundAccounts.isBlank()) {
+            return boundAccounts;
         }
         return rateChange(display.event()) ? "未匹配到本平台账号" : "—";
     }

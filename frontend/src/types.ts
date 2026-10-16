@@ -97,6 +97,10 @@ export interface ChangeEvent {
   keyStatus: string
   /** 受影响的「上游账号 Key」名字（多个用「、」连接）。 */
   upstreamKeyNames: string
+  /** 变更渠道下的上游 Key 名称（渠道事件，严格按渠道名匹配；取不到为 null）。 */
+  channelKeyNames: string | null
+  /** 绑定了这些 Key 的本平台号池账号名（渠道事件；取不到为 null）。 */
+  channelPoolAccounts: string | null
   /** 对应的「本平台 Key」名字（号池账号名，多个用「、」连接）。 */
   localKeyNames: string
   /** 所在分组的当前倍率（渠道事件）。 */

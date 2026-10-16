@@ -77,8 +77,8 @@
           <template #default="{ row }">{{ row.impact ? formatRatio(row.impact.groupRatio) : '—' }}</template>
         </el-table-column>
 
-        <el-table-column label="上游 Key" min-width="170" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.impact?.upstreamKeyName || '—' }}</template>
+        <el-table-column label="上游 Key 名称" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ upstreamKeyLabel(row) }}</template>
         </el-table-column>
 
 
@@ -349,12 +349,23 @@ function usageTag(change: ChangeEvent): UsageTag | null {
     : null
 }
 
-/** 本平台账号：优先取影响评估命中的号池账号；密钥事件取绑定关系算出的号池账号。 */
+/**
+ * 本平台账号：影响评估命中优先；算不出来时退回绑定关系算出的号池账号
+ * （渠道事件 = 该渠道里绑定的账号，密钥事件 = 绑定了这把 Key 的账号）。
+ */
 function localAccountLabel(row: unknown) {
   const current = row as ChangeRow
   if (current.impact?.accountName) return current.impact.accountName
+  if (current.change.channelPoolAccounts) return current.change.channelPoolAccounts
   if (current.change.entityType === 'API_KEY' && current.change.inUse) return current.change.localKeyNames || '—'
   return '—'
+}
+
+/** 上游 Key 名称：影响评估命中优先，其次取事件自带的「这个渠道里的 Key 名称」。 */
+function upstreamKeyLabel(row: unknown) {
+  const current = row as ChangeRow
+  if (current.impact?.upstreamKeyName) return current.impact.upstreamKeyName
+  return current.change.channelKeyNames || '—'
 }
 
 /** 正在使用（我自己的平台在用）的变更整行高亮，便于快速定位。 */

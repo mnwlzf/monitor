@@ -309,6 +309,8 @@ interface ChangeEventDto {
   keyName?: string
   keyStatus?: string
   upstreamKeyNames?: string
+  channelKeyNames?: string | null
+  channelPoolAccounts?: string | null
   localKeyNames?: string
   groupRatio?: string | number | null
   groupActive?: boolean | null
@@ -354,6 +356,8 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
     accountName: row.accountName || '',
     keyStatus: row.keyStatus || '',
     upstreamKeyNames: row.upstreamKeyNames || '',
+    channelKeyNames: row.channelKeyNames ?? null,
+    channelPoolAccounts: row.channelPoolAccounts ?? null,
     localKeyNames: row.localKeyNames || '',
     groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
     groupActive: row.groupActive ?? null,
