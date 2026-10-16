@@ -106,7 +106,9 @@ public class MonitorChatTools {
             + "倒挂口径只看本平台分组倍率：上游渠道新倍率 > 本平台分组倍率 即为倒挂；"
             + "不要乘账号倍率，也不要因为缺少账号倍率而说无法计算。"
             + "filter 可选：填「倍率」只看渠道倍率变化（上调会标成 WARNING，直接关系成本），"
-            + "也可填渠道名或账号名做关键字过滤，留空看全部。limit 为返回条数，默认 5，最多 20")
+            + "也可填渠道名或账号名做关键字过滤，留空看全部。limit 为返回条数，默认 5，最多 20。"
+            + "返回的表格一行一个「本平台账号 × 分组」，回答时保留这些列原样展示，"
+            + "不要把多个分组或倍率合并进同一个单元格，也不要把多条变更合并成一行")
     public String recentChanges(String filter, int limit) {
         return changesReport(filter, limit).toPlainText();
     }
