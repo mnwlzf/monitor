@@ -101,6 +101,8 @@ export interface ChangeEvent {
   localKeyNames: string
   /** 所在分组的当前倍率（渠道事件）。 */
   groupRatio: number | null
+  /** 渠道当前是否在售（上游启用，渠道事件）：true = 上游标为「活跃」。 */
+  groupActive: boolean | null
   /** 渠道倍率变化对我平台的影响（一行 = 本平台账号 × 分组）；非倍率事件为空。 */
   impacts: ChangeImpact[]
   field: string
@@ -110,10 +112,10 @@ export interface ChangeEvent {
   detectedAt: string
   message: string
   /**
-   * 变更是否涉及「我正在使用」的对象。
+   * 变更是否涉及「我正在使用」的对象（密钥与渠道同口径）。
    *
-   * 密钥 = 本平台号池账号绑定了这把上游 Key（上游自己启用只是「活跃」）；
-   * 渠道 = 上游把渠道标成启用（在售）。
+   * 密钥 = 本平台号池账号绑定了这把上游 Key；渠道 = 这个渠道里有我绑定的 Key。
+   * 上游自己把 Key / 渠道标成启用只是「活跃」（见 keyStatus / groupActive）。
    */
   inUse: boolean
 }

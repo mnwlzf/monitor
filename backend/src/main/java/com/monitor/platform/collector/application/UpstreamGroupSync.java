@@ -55,6 +55,8 @@ public class UpstreamGroupSync {
     public void sync(AccountEntity account, String platformType, Long collectionRunId,
                      List<GroupSnapshot> groups, String platformLabel) {
         Map<String, UpstreamGroupEntity> existing = activeGroupMap(account.getId());
+        // 「我正在使用」的渠道：渠道里有本平台号池账号绑定的 Key（一次查完，逐条判定不再打库）
+        Set<String> inUseChannelNames = changeRecorder.inUseChannelNames(account.getId());
         Set<String> activeExternalIds = new HashSet<>();
         OffsetDateTime now = OffsetDateTime.now();
         int added = 0;
@@ -74,7 +76,7 @@ public class UpstreamGroupSync {
             if (!isNew) {
                 changed = recordGroupChanges(account, platformType, collectionRunId, entity,
                         externalGroupId, group.ratio(), group.baseRatio(), group.status(),
-                        group.name(), group.platform(), group.description());
+                        group.name(), group.platform(), group.description(), inUseChannelNames);
             }
 
             entity.setGroupName(group.name());
@@ -95,7 +97,7 @@ public class UpstreamGroupSync {
                 added++;
                 changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
                         UpstreamChangeTypes.GROUP_ADDED, null, null, group.rawData(),
-                        "渠道新增: " + group.name());
+                        "渠道新增: " + group.name(), inUseChannelNames);
             } else if (changed) {
                 updated++;
             }
@@ -105,7 +107,7 @@ public class UpstreamGroupSync {
         }
 
         int removed = deactivateMissingGroups(account, platformType, collectionRunId,
-                existing, activeExternalIds, now);
+                existing, activeExternalIds, now, inUseChannelNames);
         log.info("{} 分组同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
                 platformLabel, account.getId(), groups.size(), added, updated, removed);
     }
@@ -146,7 +148,8 @@ public class UpstreamGroupSync {
                                         Long collectionRunId,
                                         Map<String, UpstreamGroupEntity> existing,
                                         Set<String> activeExternalIds,
-                                        OffsetDateTime now) {
+                                        OffsetDateTime now,
+                                        Set<String> inUseChannelNames) {
         int removed = 0;
         for (UpstreamGroupEntity group : existing.values()) {
             if (activeExternalIds.contains(group.getExternalGroupId())) {
@@ -157,7 +160,7 @@ public class UpstreamGroupSync {
             groupRepository.save(group);
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, group,
                     UpstreamChangeTypes.GROUP_REMOVED, "is_active", true, false,
-                    "渠道已下线: " + group.getGroupName());
+                    "渠道已下线: " + group.getGroupName(), inUseChannelNames);
             saveGroupSnapshot(group, collectionRunId, group.getCurrentRatio(),
                     group.getCurrentBaseRatio(), group.getStatus(), false, "{}");
             removed++;
@@ -174,42 +177,43 @@ public class UpstreamGroupSync {
                                        Long collectionRunId, UpstreamGroupEntity entity,
                                        String externalGroupId, BigDecimal ratio,
                                        BigDecimal baseRatio, String status,
-                                       String groupName, String platform, String description) {
+                                       String groupName, String platform, String description,
+                                       Set<String> inUseChannelNames) {
         boolean changed = false;
         if (CollectionValues.different(entity.getCurrentRatio(), ratio)) {
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
                     UpstreamChangeTypes.RATE_CHANGED, "ratio", entity.getCurrentRatio(), ratio,
-                    "倍率变化: " + externalGroupId);
+                    "倍率变化: " + externalGroupId, inUseChannelNames);
             changed = true;
         }
         if (CollectionValues.different(entity.getCurrentBaseRatio(), baseRatio)) {
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
                     UpstreamChangeTypes.BASE_RATE_CHANGED, "base_ratio", entity.getCurrentBaseRatio(),
-                    baseRatio, "基础倍率变化: " + externalGroupId);
+                    baseRatio, "基础倍率变化: " + externalGroupId, inUseChannelNames);
             changed = true;
         }
         if (!Objects.equals(entity.getStatus(), status)) {
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
                     UpstreamChangeTypes.STATUS_CHANGED, "status", entity.getStatus(), status,
-                    "状态变化: " + externalGroupId);
+                    "状态变化: " + externalGroupId, inUseChannelNames);
             changed = true;
         }
         if (!Objects.equals(entity.getGroupName(), groupName)) {
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
                     UpstreamChangeTypes.GROUP_UPDATED, "name", entity.getGroupName(), groupName,
-                    "渠道名称变化: " + externalGroupId);
+                    "渠道名称变化: " + externalGroupId, inUseChannelNames);
             changed = true;
         }
         if (!Objects.equals(entity.getPlatform(), platform)) {
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
                     UpstreamChangeTypes.GROUP_UPDATED, "platform", entity.getPlatform(), platform,
-                    "渠道平台变化: " + externalGroupId);
+                    "渠道平台变化: " + externalGroupId, inUseChannelNames);
             changed = true;
         }
         if (!Objects.equals(entity.getDescription(), description)) {
             changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
                     UpstreamChangeTypes.GROUP_UPDATED, "description", entity.getDescription(),
-                    description, "渠道描述变化: " + externalGroupId);
+                    description, "渠道描述变化: " + externalGroupId, inUseChannelNames);
             changed = true;
         }
         return changed;

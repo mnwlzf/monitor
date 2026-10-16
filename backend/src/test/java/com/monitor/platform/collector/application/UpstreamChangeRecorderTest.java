@@ -1,9 +1,9 @@
 package com.monitor.platform.collector.application;
 
-import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,38 +50,28 @@ class UpstreamChangeRecorderTest {
     }
 
     /**
-     * 「使用中」= 上游仍然存在（is_active）且状态为启用（active / ACTIVE）。
+     * 「使用中」= 我自己的平台在用它：这个渠道里有本平台号池账号绑定的上游 Key。
      *
-     * <p>只按 status 判是不够的：已从上游移除的渠道 status 可能还写着 active，
-     * 但你已经用不到它了，不该进实时告警。</p>
+     * <p>上游把渠道标成启用只是在售（页面标「活跃」），不代表我在用 ——
+     * 所以判定只看绑定关系，不看上游 status。</p>
      */
     @Test
-    void shouldMarkGroupChangeInUseOnlyWhenStillActive() {
-        UpstreamGroupEntity group = new UpstreamGroupEntity();
-        group.setIsActive(true);
+    void shouldMarkChannelInUseOnlyWhenBoundKeyIsInIt() {
+        Set<String> inUseChannels = Set.of("官Key-不降智-无6.1sol");
 
-        group.setStatus("active");
-        assertTrue(UpstreamChangeRecorder.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
-
-        group.setStatus("ACTIVE");
-        assertTrue(UpstreamChangeRecorder.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
-
-        group.setStatus("disabled");
-        assertFalse(UpstreamChangeRecorder.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
+        assertTrue(UpstreamChangeRecorder.groupInUse("官Key-不降智-无6.1sol", "ratio", inUseChannels));
+        // 上游改过渠道名、Key 上还写着旧名字：前缀兜底仍然算同一个渠道
+        assertTrue(UpstreamChangeRecorder.groupInUse("官Key-不降智", "ratio",
+                Set.of("官Key-不降智-无6.1sol")));
+        // 渠道里没有我绑定的 Key（哪怕上游是 active）不算使用中
+        assertFalse(UpstreamChangeRecorder.groupInUse("没人用的渠道", "ratio", inUseChannels));
+        assertFalse(UpstreamChangeRecorder.groupInUse("官Key-不降智-无6.1sol", "ratio", Set.of()));
     }
 
-    /** 上游已移除的渠道（is_active = false）不算使用中。 */
+    /** 上游已移除的渠道不算使用中：此刻已经用不到了。 */
     @Test
     void shouldNotMarkInUseWhenGroupRemovedFromUpstream() {
-        UpstreamGroupEntity group = new UpstreamGroupEntity();
-        group.setStatus("active");
-        group.setIsActive(false);
-
-        assertFalse(UpstreamChangeRecorder.groupInUse(group, "ratio", new BigDecimal("1.0"), new BigDecimal("2.0")));
-
-        // 移除事件本身也不算 —— 此刻已经用不到了
-        group.setIsActive(true);
-        assertFalse(UpstreamChangeRecorder.groupInUse(group, "is_active", true, false));
+        assertFalse(UpstreamChangeRecorder.groupInUse("官Key-不降智", "is_active", Set.of("官Key-不降智")));
     }    /** 值不可比较时（缺值、非数字）保守处理：不误报警告。 */
     @Test
     void shouldNotWarnWhenValuesAreNotComparable() {

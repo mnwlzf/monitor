@@ -5,6 +5,7 @@ import com.monitor.platform.collector.repository.UpstreamGroupRepository;
 import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
+import com.monitor.platform.common.util.ChannelNameMatcher;
 import com.monitor.platform.pool.repository.PoolAccountRepository;
 import org.springframework.stereotype.Service;
 
@@ -17,7 +18,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -211,10 +211,10 @@ public class RateChangeImpactService {
         // 分组名一模一样才对得上当然最准，但上游改分组名是常态：例如「官Key-不降智」
         // 改成「官Key-不降智-无6.1sol」后，Key 上记着的分组名还是旧的那串，
         // 严格相等就永远匹配不上，邮件里「本平台账号」整列变成「—」。
-        // 这里退一步按「改名前后」认：两个名字任一是另一个的前缀就算同一个分组。
+        // 这里退一步按「改名前后」认（ChannelNameMatcher 与「使用中」判定共用同一口径）。
         // 仍然不做「该账号全部 Key」的兜底 —— 那会把别的渠道的账号算进来（线上踩过）。
         return keys.stream()
-                .filter(key -> renamedGroup(key.getGroupName(), needle))
+                .filter(key -> ChannelNameMatcher.sameChannel(key.getGroupName(), needle))
                 .toList();
     }
 
@@ -223,23 +223,11 @@ public class RateChangeImpactService {
         return keyGroupName != null && channel.equalsIgnoreCase(keyGroupName.trim());
     }
 
-    /**
-     * 分组名是否只是被上游改过（例如加了后缀）：两个名字任一是另一个的前缀。
-     *
-     * <p>只认前缀不认「包含」：包含太松，Key 上的「pro」会命中渠道「Codex-pro-不降」，
-     * 把不属于这个渠道的号池账号算进来。</p>
+    /*
+     * 「上游改过分组名」的兜底统一走 ChannelNameMatcher：只认前缀不认「包含」——
+     * 包含太松，Key 上的「pro」会命中渠道「Codex-pro-不降」，把不属于这个渠道的
+     * 号池账号算进来。
      */
-    private static boolean renamedGroup(String keyGroupName, String channel) {
-        if (keyGroupName == null) {
-            return false;
-        }
-        String left = keyGroupName.trim().toLowerCase(Locale.ROOT);
-        String right = channel.toLowerCase(Locale.ROOT);
-        if (left.isEmpty() || right.isEmpty() || left.equals(right)) {
-            return false;
-        }
-        return left.startsWith(right) || right.startsWith(left);
-    }
 
     private List<ImpactRow> buildRows(UpstreamChangeEventEntity event, List<AccountApiKeyEntity> scoped,
                                       Map<Long, PoolAccountView> poolByKey,

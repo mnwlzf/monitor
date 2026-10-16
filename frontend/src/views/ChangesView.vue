@@ -291,7 +291,7 @@ const displayRows = computed<ChangeRow[]>(() => {
   for (const change of filteredChanges.value) {
     const impacts = change.impacts ?? []
     if (!impacts.length) {
-      rows.push({ key: change.id, change, impact: null, tag: usageTag(change, null) })
+      rows.push({ key: change.id, change, impact: null, tag: usageTag(change) })
       continue
     }
     impacts.forEach((impact, index) => {
@@ -299,7 +299,7 @@ const displayRows = computed<ChangeRow[]>(() => {
         key: `${change.id}-${impact.externalAccountId ?? 'x'}-${impact.groupName}-${index}`,
         change,
         impact,
-        tag: usageTag(change, impact),
+        tag: usageTag(change),
       })
     })
   }
@@ -307,50 +307,46 @@ const displayRows = computed<ChangeRow[]>(() => {
 })
 
 /**
- * 「使用中 / 活跃」标签的口径。
+ * 「使用中 / 活跃」标签的口径 —— 密钥与渠道完全一致：
  *
- * - 密钥：使用中 = 本平台号池账号绑定了这把上游 Key（我自己的平台在用它）；
- *   上游自己把 Key 标成 ACTIVE 只是「活跃」，不代表我在用。
- * - 渠道：使用中 = 这个渠道下有本平台号池账号在用的 Key（影响评估命中）；
- *   上游渠道处于启用（在售）只是「活跃」。
+ * - 使用中：我自己的平台在用它。密钥 = 号池账号绑定了这把上游 Key；
+ *   渠道 = 这个渠道里有我绑定的 Key（后端 in_use 就是这么算的）。
+ * - 活跃：上游自己标成启用，但我在用不上它。密钥看 keyStatus，渠道看 groupActive。
  */
-function usageTag(change: ChangeEvent, impact: ChangeImpact | null): UsageTag | null {
+function usageTag(change: ChangeEvent): UsageTag | null {
+  if (change.inUse) {
+    return change.entityType === 'API_KEY'
+      ? {
+          text: '使用中',
+          type: 'danger',
+          effect: 'dark',
+          hint: '本平台号池账号已绑定这把上游 Key（我正在使用）',
+        }
+      : {
+          text: '使用中',
+          type: 'danger',
+          effect: 'dark',
+          hint: '这个渠道里有本平台号池账号在用的 Key（我正在使用）',
+        }
+  }
   if (change.entityType === 'API_KEY') {
-    if (change.inUse) {
-      return {
-        text: '使用中',
-        type: 'danger',
-        effect: 'dark',
-        hint: '本平台号池账号已绑定这把上游 Key（我正在使用）',
-      }
-    }
-    if (change.keyStatus === 'ACTIVE') {
-      return {
+    return change.keyStatus === 'ACTIVE'
+      ? {
+          text: '活跃',
+          type: 'success',
+          effect: 'plain',
+          hint: '上游把这把 Key 标成启用（活跃），本平台没有绑定使用',
+        }
+      : null
+  }
+  return change.groupActive === true
+    ? {
         text: '活跃',
         type: 'success',
         effect: 'plain',
-        hint: '上游把这把 Key 标成启用（活跃），本平台没有绑定使用',
+        hint: '上游渠道仍在售（启用），本平台没有在用它',
       }
-    }
-    return null
-  }
-  if (impact) {
-    return {
-      text: '使用中',
-      type: 'danger',
-      effect: 'dark',
-      hint: '该渠道下有本平台号池账号在用的 Key',
-    }
-  }
-  if (change.inUse) {
-    return {
-      text: '活跃',
-      type: 'success',
-      effect: 'plain',
-      hint: '上游渠道处于启用（在售）状态，本平台没有在用它',
-    }
-  }
-  return null
+    : null
 }
 
 /** 本平台账号：优先取影响评估命中的号池账号；密钥事件取绑定关系算出的号池账号。 */

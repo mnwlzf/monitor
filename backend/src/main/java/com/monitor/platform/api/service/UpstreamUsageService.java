@@ -294,7 +294,7 @@ public class UpstreamUsageService {
                 entity.getEntityType(), entity.getEntityKey(), entity.getGroupName(), entity.getAccountName(),
                 entity.getKeyName(), entity.getKeyStatus(),
                 entity.getUpstreamKeyNames(), entity.getLocalKeyNames(),
-                entity.getGroupRatio(), entity.getChangeType(),
+                entity.getGroupRatio(), entity.getGroupActive(), entity.getChangeType(),
                 entity.getFieldName(), entity.getOldValue(), entity.getNewValue(),
                 entity.getSeverity(), entity.getMessage(), entity.getDetectedAt(),
                 Boolean.TRUE.equals(entity.getInUse()),

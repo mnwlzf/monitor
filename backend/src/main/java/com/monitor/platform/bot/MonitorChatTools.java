@@ -366,10 +366,10 @@ public class MonitorChatTools {
         }
         return event.entityKey() == null || event.entityKey().isBlank() ? "—" : event.entityKey();
     }    /**
-     * 变更是否发生在「使用中」的对象上。
+     * 变更是否发生在我正在使用的对象上。
      *
-     * <p>采集侧写入：密钥按「本平台号池账号有没有绑定它」判定，渠道按「上游是否启用」判定
-     * （见 V14 / V30 迁移）。</p>
+     * <p>采集侧写入，两条链路同口径：密钥按「号池账号有没有绑定它」、渠道按「这个渠道里
+     * 有没有我绑定的 Key」判定（见 V30 / V31 迁移）；上游自身是否启用只是「活跃」。</p>
      */
     private static boolean inUse(UpstreamChangeEventResponse event) {
         return Boolean.TRUE.equals(event.inUse());

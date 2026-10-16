@@ -5,19 +5,26 @@ import com.monitor.platform.collector.repository.entity.AccountApiKeyEntity;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import com.monitor.platform.collector.repository.entity.UpstreamGroupEntity;
+import com.monitor.platform.common.util.ChannelNameMatcher;
+import com.monitor.platform.pool.repository.PoolAccountRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.Set;
 
 /**
  * 上游变更事件记录。
  *
  * <p>把「渠道 / 密钥发生了变化」落成 {@link UpstreamChangeEventEntity}，并顺带判定事件的
- * 级别（{@link #groupChangeSeverity}）与「是否发生在正在使用的对象上」（{@link #groupInUse}）——
+ * 级别（{@link #groupChangeSeverity}）与「是否发生在我正在使用的对象上」（{@link #groupInUse}）——
  * 这两项决定了后续邮件是实时告警还是每日汇总里的一条。</p>
+ *
+ * <p><strong>「使用中」= 我自己的平台在用它</strong>，两条链路都是这个口径：
+ * 密钥看号池账号有没有绑定它（{@code V30}），渠道看这个渠道里有没有我绑定的 Key（{@code V31}）。
+ * 上游自己把渠道 / Key 标成启用只是「活跃」，不代表我在用。</p>
  *
  * <p>从 {@code CollectionService} 抽出：采集流程负责「发现变化」，本类只负责「把变化写成事件」，
  * 两边职责分开后，改告警口径不必再动采集主流程。</p>
@@ -30,24 +37,36 @@ public class UpstreamChangeRecorder {
     private static final String ENTITY_TYPE_GROUP = "GROUP";
     private static final String ENTITY_TYPE_API_KEY = "API_KEY";
 
-    /** 渠道状态：启用（渠道 in_use 的判定依据）。newapi 给的是 {@code ACTIVE}，sub2api 是 {@code active}。 */
-    private static final String GROUP_STATUS_ACTIVE = "active";
-
     private final UpstreamChangeEventRepository changeEventRepository;
     private final CollectionJson json;
+    private final PoolAccountRepository poolAccountRepository;
 
-    public UpstreamChangeRecorder(UpstreamChangeEventRepository changeEventRepository, CollectionJson json) {
+    public UpstreamChangeRecorder(UpstreamChangeEventRepository changeEventRepository,
+                                  CollectionJson json,
+                                  PoolAccountRepository poolAccountRepository) {
         this.changeEventRepository = changeEventRepository;
         this.json = json;
+        this.poolAccountRepository = poolAccountRepository;
+    }
+
+    /**
+     * 该上游账号下「我正在使用」的渠道名：渠道里有本平台号池账号绑定的上游 Key。
+     *
+     * <p>一次采集查一次，之后逐条判定只看内存。</p>
+     */
+    public Set<String> inUseChannelNames(Integer accountId) {
+        return poolAccountRepository.findInUseChannelNames(accountId);
     }
 
     /**
      * 记录一条渠道变更事件。
+     *
+     * @param inUseChannelNames 该账号下「我正在使用」的渠道名（见 {@link #inUseChannelNames}）
      */
     public void recordGroupChange(AccountEntity account, String platformType, Long collectionRunId,
                                   UpstreamGroupEntity entity, String changeType,
                                   String fieldName, Object oldValue, Object newValue,
-                                  String message) {
+                                  String message, Set<String> inUseChannelNames) {
         UpstreamChangeEventEntity event = new UpstreamChangeEventEntity();
         event.setAccountId(account.getId());
         event.setPlatformType(platformType);
@@ -60,7 +79,7 @@ public class UpstreamChangeRecorder {
         event.setOldValue(json.toJson(oldValue));
         event.setNewValue(json.toJson(newValue));
         event.setSeverity(groupChangeSeverity(changeType, oldValue, newValue));
-        event.setInUse(groupInUse(entity, fieldName, oldValue, newValue));
+        event.setInUse(groupInUse(entity.getGroupName(), fieldName, inUseChannelNames));
         event.setMessage(message);
         event.setDetectedAt(OffsetDateTime.now());
         event.setMetadata("{}");
@@ -145,30 +164,21 @@ public class UpstreamChangeRecorder {
     }
 
     /**
-     * 这条渠道变更是否发生在「使用中」的渠道上。
+     * 这条渠道变更是否发生在「我正在使用」的渠道上。
      *
-     * <p>渠道的口径是<strong>上游把它标成启用</strong>（状态 {@code active} / {@code ACTIVE}），
-     * 也就是「这个渠道上游还在售」。注意这和密钥不同：密钥的「使用中」看的是我自己的号池账号
-     * 有没有绑定它（见 {@code V30__bind_in_use_key_changes.sql}），上游是否启用只是「活跃」。</p>
+     * <p>口径：<strong>这个渠道里有本平台号池账号绑定的上游 Key</strong>，也就是
+     * 「我自己的平台在用它」。上游把渠道标成启用只是在售（页面上标「活跃」），不代表我在用；
+     * 上游改过分组名（Key 上还是旧名字）由 {@link ChannelNameMatcher} 兜住。</p>
      *
      * <p>为什么必须补上：渠道事件以前根本没设过 {@code in_use}，仓库默认填 false ——
-     * 结果「正在使用的渠道涨价」和「一个早就下架的渠道改名」在数据里完全一样，
+     * 结果「我正在用的渠道涨价」和「一个早就下架的渠道改名」在数据里完全一样，
      * 邮件只能全发，全是噪声。</p>
      */
-    static boolean groupInUse(UpstreamGroupEntity entity, String fieldName,
-                              Object oldValue, Object newValue) {
-        if (entity == null) {
-            return false;
-        }
+    static boolean groupInUse(String groupName, String fieldName, Set<String> inUseChannelNames) {
         if ("is_active".equals(fieldName)) {
-            // 渠道被移除：上游已经没有它了，不算「正在使用」
+            // 渠道被移除：上游已经没有它了，不算「我正在使用」
             return false;
         }
-        // 其余变更：渠道仍然在上游（is_active）且状态为启用，才算使用中
-        return Boolean.TRUE.equals(entity.getIsActive()) && isGroupActive(entity.getStatus());
-    }
-
-    private static boolean isGroupActive(Object status) {
-        return status != null && GROUP_STATUS_ACTIVE.equalsIgnoreCase(String.valueOf(status).trim());
+        return ChannelNameMatcher.matchesAny(inUseChannelNames, groupName);
     }
 }

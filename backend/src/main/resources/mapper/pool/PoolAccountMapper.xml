@@ -140,4 +140,16 @@
             #{keyId}
         </foreach>
     </select>
+
+    <!--
+        「我正在使用」的渠道：渠道里有本平台号池账号绑定的上游 Key。
+        与「上游把渠道标成启用（在售）」是两件事，后者在页面上标「活跃」。
+    -->
+    <select id="selectInUseChannelNames" resultType="string">
+        SELECT DISTINCT k.group_name
+        FROM account_api_keys k
+        JOIN pool_accounts pa ON pa.bound_key_id = k.id
+        WHERE k.account_id = #{accountId}
+          AND k.group_name IS NOT NULL
+    </select>
 </mapper>

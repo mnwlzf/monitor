@@ -46,10 +46,12 @@ public class UpstreamChangeEventEntity {
     /** 发现时间。 */
     private OffsetDateTime detectedAt;
     /**
-     * 变更是否涉及「正在使用」的对象，仅 API_KEY 与渠道事件有意义。
+     * 变更是否涉及「我正在使用」的对象，仅 API_KEY 与渠道事件有意义。
      *
-     * <p>密钥：本平台号池账号绑定了这把上游 Key（见 {@code V30__bind_in_use_key_changes.sql}）；
-     * 渠道：上游把渠道标成启用 —— 也就是「上游还在售」，页面标签上是「活跃」。</p>
+     * <p>两条链路口径一致 —— <strong>我自己的平台在用它</strong>：密钥看号池账号有没有
+     * 绑定它（{@code V30__bind_in_use_key_changes.sql}），渠道看这个渠道里有没有我绑定的
+     * Key（{@code V31__bind_in_use_channel_changes.sql}）。上游自己把 Key / 渠道标成启用
+     * 只是「活跃」，页面上单独标。</p>
      */
     private Boolean inUse;
     /**
@@ -94,6 +96,14 @@ public class UpstreamChangeEventEntity {
     /** 所在分组的当前倍率（渠道事件取 upstream_groups.current_ratio）。 */
     @TableField(exist = false)
     private java.math.BigDecimal groupRatio;
+    /**
+     * 渠道当前是否在售（上游把渠道标成启用，只有 GROUP 事件有）。
+     *
+     * <p>不是本表的列，查询时由 upstream_groups 算出来。页面据此标「活跃」——
+     * 与「使用中」（这个渠道里有我绑定的 Key）是两件事。</p>
+     */
+    @TableField(exist = false)
+    private Boolean groupActive;
     /** 扩展元数据，JSON 文本。 */
     @TableField(typeHandler = JsonbStringTypeHandler.class)
     private String metadata;
@@ -122,6 +132,8 @@ public class UpstreamChangeEventEntity {
     public void setUpstreamKeyNames(String upstreamKeyNames) { this.upstreamKeyNames = upstreamKeyNames; }
     public String getLocalKeyNames() { return localKeyNames; }
     public void setLocalKeyNames(String localKeyNames) { this.localKeyNames = localKeyNames; }
+    public Boolean getGroupActive() { return groupActive; }
+    public void setGroupActive(Boolean groupActive) { this.groupActive = groupActive; }
     public java.math.BigDecimal getGroupRatio() { return groupRatio; }
     public void setGroupRatio(java.math.BigDecimal groupRatio) { this.groupRatio = groupRatio; }
     public String getEntityKey() { return entityKey; }

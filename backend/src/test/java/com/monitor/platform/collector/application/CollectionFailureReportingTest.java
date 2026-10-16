@@ -62,8 +62,8 @@ class CollectionFailureReportingTest {
 
         Executor synchronousExecutor = Runnable::run;
         CollectionJson json = new CollectionJson(new ObjectMapper());
-        UpstreamChangeRecorder changeRecorder =
-                new UpstreamChangeRecorder(mock(UpstreamChangeEventRepository.class), json);
+        UpstreamChangeRecorder changeRecorder = new UpstreamChangeRecorder(
+                mock(UpstreamChangeEventRepository.class), json, mock(PoolAccountRepository.class));
         AccountSnapshotWriter snapshots = new AccountSnapshotWriter(
                 mock(AccountMetricSnapshotRepository.class),
                 mock(AccountUsageDashboardSnapshotRepository.class),

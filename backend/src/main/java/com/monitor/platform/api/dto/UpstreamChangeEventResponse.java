@@ -19,6 +19,8 @@ import java.time.OffsetDateTime;
  * @param upstreamKeyNames 受影响的「上游账号 Key」名字，多个用「、」连接（渠道事件按同分组匹配）
  * @param localKeyNames    对应的「本平台 Key」名字（号池账号名），多个用「、」连接
  * @param groupRatio   所在分组的当前倍率（渠道事件）
+ * @param groupActive  渠道当前是否在售（上游启用，渠道事件）：true 表示「活跃」，
+ *                     与「使用中」（这个渠道里有我绑定的 Key）不是一回事
  * @param impacts      渠道倍率变化对本平台的影响（一行 = 本平台账号 × 分组）；其它事件为空
  * @param changeType   变更类型
  * @param fieldName    发生变化的字段
@@ -27,8 +29,8 @@ import java.time.OffsetDateTime;
  * @param severity     事件级别
  * @param message      可读说明
  * @param detectedAt   发现时间
- * @param inUse        变更是否涉及「本平台号池账号正在使用」的对象：密钥按绑定关系判定，
- *                     渠道按上游是否启用判定（渠道上游启用在页面上标「活跃」）
+ * @param inUse        变更是否涉及「我正在使用」的对象：密钥按号池账号绑定判定，
+ *                     渠道按该渠道里有没有我绑定的 Key 判定；上游自身是否启用只是「活跃」
  */
 public record UpstreamChangeEventResponse(
         Long id,
@@ -43,6 +45,7 @@ public record UpstreamChangeEventResponse(
         String upstreamKeyNames,
         String localKeyNames,
         BigDecimal groupRatio,
+        Boolean groupActive,
         String changeType,
         String fieldName,
         String oldValue,

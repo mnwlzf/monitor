@@ -17,6 +17,7 @@
         <result column="upstream_key_names" property="upstreamKeyNames"/>
         <result column="local_key_names" property="localKeyNames"/>
         <result column="group_ratio" property="groupRatio"/>
+        <result column="group_active" property="groupActive"/>
         <result column="change_type" property="changeType"/>
         <result column="field_name" property="fieldName"/>
         <result column="old_value" property="oldValue" typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
@@ -49,6 +50,8 @@
           ORDER BY k.id DESC
           LIMIT 1) AS key_status,
         g.current_ratio AS group_ratio,
+        -- 渠道当前是否在售（上游启用）：页面据此标「活跃」，与「使用中」（我绑定了）分开
+        (g.is_active AND lower(COALESCE(g.status, '')) = 'active') AS group_active,
         -- 受影响的「上游账号 Key」：密钥事件按本地主键 / 上游 key 匹配，渠道事件按同分组匹配。
         -- key_name 为空的上游很常见，退回脱敏值与上游 ID，避免整列空白。
         COALESCE(

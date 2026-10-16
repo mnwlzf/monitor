@@ -55,4 +55,7 @@ public interface PoolAccountMapper {
 
     /** 查询这批本地上游 Key 主键里，哪些已被号池账号绑定（= 我自己的平台正在使用）。 */
     List<Long> selectBoundKeyIds(@Param("keyIds") Collection<Long> keyIds);
+
+    /** 查询该账号下「我正在使用」的渠道名：这些渠道里有号池账号绑定的上游 Key。 */
+    List<String> selectInUseChannelNames(@Param("accountId") Integer accountId);
 }

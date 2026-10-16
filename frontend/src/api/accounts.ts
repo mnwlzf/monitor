@@ -311,6 +311,7 @@ interface ChangeEventDto {
   upstreamKeyNames?: string
   localKeyNames?: string
   groupRatio?: string | number | null
+  groupActive?: boolean | null
   impacts?: ChangeImpactDto[]
   fieldName?: string
   oldValue?: string
@@ -355,6 +356,7 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
     upstreamKeyNames: row.upstreamKeyNames || '',
     localKeyNames: row.localKeyNames || '',
     groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
+    groupActive: row.groupActive ?? null,
     impacts: (row.impacts ?? []).map(toChangeImpact),
     field: row.fieldName || '',
     oldValue: row.oldValue || 'null',

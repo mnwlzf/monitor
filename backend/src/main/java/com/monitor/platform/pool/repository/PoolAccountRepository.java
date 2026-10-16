@@ -90,4 +90,16 @@ public class PoolAccountRepository {
         List<Long> ids = keyIds.stream().filter(Objects::nonNull).distinct().toList();
         return ids.isEmpty() ? Set.of() : new LinkedHashSet<>(poolAccountMapper.selectBoundKeyIds(ids));
     }
+
+    /**
+     * 该账号下「我正在使用」的渠道名：这些渠道里有号池账号绑定的上游 Key。
+     *
+     * <p>渠道的「使用中」口径用它 —— 上游把渠道标成启用只是在售（页面标签「活跃」）。</p>
+     */
+    public Set<String> findInUseChannelNames(Integer accountId) {
+        if (accountId == null) {
+            return Set.of();
+        }
+        return new LinkedHashSet<>(poolAccountMapper.selectInUseChannelNames(accountId));
+    }
 }
