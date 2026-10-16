@@ -14,8 +14,11 @@ import java.util.Map;
 /**
  * 正在使用密钥的变更提醒服务。
  *
- * <p>密钥采集任务结束后调用：汇总本轮采集过程中「正在使用（启用）」密钥发生的变更，
+ * <p>密钥采集任务结束后调用：汇总本轮采集过程中「正在使用」密钥发生的变更，
  * 向页面维护的密钥变更收件人发送提醒邮件。</p>
+ *
+ * <p>这里的「正在使用」= <strong>本平台号池账号绑定了这把上游 Key</strong>（我自己的平台在用），
+ * 不是「上游把它标成 active」—— 后者只是「活跃」（见 {@code V30__bind_in_use_key_changes.sql}）。</p>
  *
  * <p>只发送本轮新产生的变更：以任务开始时间为界，避免同一批变更被重复提醒。
  * 该方法不会抛出异常：发信失败只记录日志，避免影响采集任务本身的执行状态。</p>
@@ -93,13 +96,15 @@ public class ApiKeyChangeAlertService {
                              Map<Integer, String> accountNames,
                              Map<Integer, String> platformNames) {
         StringBuilder html = new StringBuilder();
-        html.append("<p>以下 <strong>正在使用</strong> 的密钥发生了变更，请及时确认是否为预期操作。</p>");
+        html.append("<p>以下 <strong>正在使用</strong> 的密钥（已绑定到本平台号池账号）发生了变更，"
+                + "请及时确认是否为预期操作。</p>");
         html.append("<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" ")
                 .append("style=\"border-collapse:collapse;font-size:13px\">");
         html.append("<tr style=\"background:#f5f5f5\">")
                 .append("<th align=\"left\">时间</th>")
                 .append("<th align=\"left\">平台</th>")
                 .append("<th align=\"left\">账号</th>")
+                .append("<th align=\"left\">本平台账号</th>")
                 .append("<th align=\"left\">类型</th>")
                 .append("<th align=\"left\">变化</th>")
                 .append("<th align=\"left\">说明</th>")
@@ -112,6 +117,7 @@ public class ApiKeyChangeAlertService {
                     .append("</td>")
                     .append("<td>").append(MailFormat.escape(
                             accountNameResolver.accountName(event.getAccountId(), accountNames))).append("</td>")
+                    .append("<td>").append(MailFormat.escape(localAccount(event))).append("</td>")
                     .append("<td>").append(MailFormat.escape(changeLabel(event.getChangeType()))).append("</td>")
                     .append("<td>").append(changeDescription(event)).append("</td>")
                     .append("<td>").append(MailFormat.escape(event.getMessage())).append("</td>")
@@ -120,6 +126,20 @@ public class ApiKeyChangeAlertService {
         html.append("</table>");
         html.append("<p style=\"color:#888;font-size:12px\">本邮件由 Monitor 密钥采集任务自动发送。</p>");
         return html.toString();
+    }
+
+    /**
+     * 正在使用这把密钥的本平台号池账号（页面上的「本平台账号」）。
+     *
+     * <p>事件查询已按绑定关系算好（{@code local_key_names}），口径就是 in_use 那一套，
+     * 所以只要发了这封邮件，这里正常都能拿到账号名。</p>
+     */
+    private static String localAccount(UpstreamChangeEventEntity event) {
+        String names = event.getLocalKeyNames();
+        if (names == null || names.isBlank() || "未绑定本平台 Key".equals(names)) {
+            return "—";
+        }
+        return names;
     }
 
     /**

@@ -365,7 +365,12 @@ public class MonitorChatTools {
             return event.groupName();
         }
         return event.entityKey() == null || event.entityKey().isBlank() ? "—" : event.entityKey();
-    }    /** 变更是否发生在「使用中」的渠道/密钥上（由采集侧按状态判定，见 V14 迁移）。 */
+    }    /**
+     * 变更是否发生在「使用中」的对象上。
+     *
+     * <p>采集侧写入：密钥按「本平台号池账号有没有绑定它」判定，渠道按「上游是否启用」判定
+     * （见 V14 / V30 迁移）。</p>
+     */
     private static boolean inUse(UpstreamChangeEventResponse event) {
         return Boolean.TRUE.equals(event.inUse());
     }

@@ -173,7 +173,7 @@
         <div class="admin-card-header">
           <div>
             <h3>密钥变更提醒</h3>
-            <p>正在使用（启用）的密钥发生变更时发送邮件提醒</p>
+            <p>已绑定到本平台号池账号的密钥发生变更时发送邮件提醒</p>
           </div>
         </div>
       </template>

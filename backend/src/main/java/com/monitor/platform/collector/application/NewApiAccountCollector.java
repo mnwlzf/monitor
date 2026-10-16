@@ -172,6 +172,8 @@ public class NewApiAccountCollector implements AccountCollector {
         }
 
         Map<String, AccountApiKeyEntity> existing = apiKeySync.activeApiKeyMap(account.getId());
+        // 「使用中」= 被本平台号池账号绑定；一次查完，后面逐条判定不再打库
+        Set<Long> inUseKeyIds = apiKeySync.inUseKeyIds(existing.values());
         Set<String> activeExternalIds = new HashSet<>();
         OffsetDateTime now = OffsetDateTime.now();
         int added = 0;
@@ -199,7 +201,7 @@ public class NewApiAccountCollector implements AccountCollector {
             boolean changed = isNew || rotated;
             if (!isNew) {
                 changed = apiKeySync.recordApiKeyChanges(account, platformType, collectionRunId, entity,
-                        item.name(), status, item.group()) || changed;
+                        item.name(), status, item.group(), inUseKeyIds) || changed;
             }
 
             entity.setKeyName(item.name());
@@ -230,12 +232,12 @@ public class NewApiAccountCollector implements AccountCollector {
                 added++;
                 recordKeyChange(account, platformType, collectionRunId, entity,
                         UpstreamChangeTypes.API_KEY_ADDED, null, entity.getRawData(),
-                        "密钥新增: " + apiKeySync.displayKeyName(entity));
+                        "密钥新增: " + apiKeySync.displayKeyName(entity), inUseKeyIds);
             } else if (rotated) {
                 updated++;
                 recordKeyChange(account, platformType, collectionRunId, entity,
                         UpstreamChangeTypes.API_KEY_ROTATED, "key", null,
-                        "密钥已轮换: " + apiKeySync.displayKeyName(entity));
+                        "密钥已轮换: " + apiKeySync.displayKeyName(entity), inUseKeyIds);
             } else if (changed) {
                 updated++;
             }
@@ -244,17 +246,18 @@ public class NewApiAccountCollector implements AccountCollector {
         }
 
         int removed = apiKeySync.deactivateMissingApiKeys(account, platformType, collectionRunId,
-                existing, activeExternalIds, now);
+                existing, activeExternalIds, now, inUseKeyIds);
         log.info("New API 密钥同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
                 account.getId(), items.size(), added, updated, removed);
     }
 
     private void recordKeyChange(AccountEntity account, String platformType, Long collectionRunId,
                                  AccountApiKeyEntity entity, String changeType,
-                                 String fieldName, Object newValue, String message) {
+                                 String fieldName, Object newValue, String message,
+                                 Set<Long> inUseKeyIds) {
         // 这里走 changeRecorder 的统一入口，保持与其它事件一致（含脱敏与使用中判定）
         apiKeySync.recordKeyChange(account, platformType, collectionRunId, entity, changeType,
-                fieldName, newValue, message);
+                fieldName, newValue, message, inUseKeyIds);
     }
 
     /**

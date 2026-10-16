@@ -30,7 +30,7 @@ public class UpstreamChangeRecorder {
     private static final String ENTITY_TYPE_GROUP = "GROUP";
     private static final String ENTITY_TYPE_API_KEY = "API_KEY";
 
-    /** 渠道状态：启用（即「使用中」）。newapi 给的是 {@code ACTIVE}，sub2api 是 {@code active}。 */
+    /** 渠道状态：启用（渠道 in_use 的判定依据）。newapi 给的是 {@code ACTIVE}，sub2api 是 {@code active}。 */
     private static final String GROUP_STATUS_ACTIVE = "active";
 
     private final UpstreamChangeEventRepository changeEventRepository;
@@ -147,9 +147,9 @@ public class UpstreamChangeRecorder {
     /**
      * 这条渠道变更是否发生在「使用中」的渠道上。
      *
-     * <p>口径与密钥的 {@code isKeyInUse} 对齐（见 {@code V14__mark_in_use_key_changes.sql}）：
-     * <strong>变更前后任一时刻处于启用，就算使用中</strong>。渠道对应的「启用」就是状态为
-     * {@code active} / {@code ACTIVE}。</p>
+     * <p>渠道的口径是<strong>上游把它标成启用</strong>（状态 {@code active} / {@code ACTIVE}），
+     * 也就是「这个渠道上游还在售」。注意这和密钥不同：密钥的「使用中」看的是我自己的号池账号
+     * 有没有绑定它（见 {@code V30__bind_in_use_key_changes.sql}），上游是否启用只是「活跃」。</p>
      *
      * <p>为什么必须补上：渠道事件以前根本没设过 {@code in_use}，仓库默认填 false ——
      * 结果「正在使用的渠道涨价」和「一个早就下架的渠道改名」在数据里完全一样，

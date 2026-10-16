@@ -13,6 +13,7 @@
         <result column="group_name" property="groupName"/>
         <result column="account_name" property="accountName"/>
         <result column="key_name" property="keyName"/>
+        <result column="key_status" property="keyStatus"/>
         <result column="upstream_key_names" property="upstreamKeyNames"/>
         <result column="local_key_names" property="localKeyNames"/>
         <result column="group_ratio" property="groupRatio"/>
@@ -40,6 +41,13 @@
             AND k.external_key_id = e.entity_key
           ORDER BY k.id DESC
           LIMIT 1) AS key_name,
+        -- 上游密钥当前状态：页面用它标「活跃」（上游自己启用），与「使用中」（我绑定）分开
+        (SELECT k.status
+           FROM account_api_keys k
+          WHERE k.account_id = e.account_id
+            AND (k.id = e.entity_id OR k.external_key_id = e.entity_key)
+          ORDER BY k.id DESC
+          LIMIT 1) AS key_status,
         g.current_ratio AS group_ratio,
         -- 受影响的「上游账号 Key」：密钥事件按本地主键 / 上游 key 匹配，渠道事件按同分组匹配。
         -- key_name 为空的上游很常见，退回脱敏值与上游 ID，避免整列空白。

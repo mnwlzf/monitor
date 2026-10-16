@@ -23,7 +23,7 @@
           <el-option label="警告" value="WARNING" />
           <el-option label="严重" value="CRITICAL" />
         </el-select>
-        <el-checkbox v-model="onlyInUse" label="只看使用中的密钥变更" />
+        <el-checkbox v-model="onlyInUse" label="只看使用中（已绑定号池）的密钥变更" />
         <el-button v-if="hasActiveFilter" link type="primary" :icon="RefreshLeft" @click="resetFilters">重置筛选</el-button>
       </div>
     </el-card>
@@ -54,12 +54,19 @@
         <el-table-column label="类型" min-width="170">
           <template #default="{ row }">
             <el-tag :type="severityType(row.change.severity)" effect="light">{{ changeLabel(row.change.type) }}</el-tag>
-            <el-tag v-if="row.change.inUse" size="small" type="danger" effect="dark" class="admin-change-inuse-tag">使用中</el-tag>
+            <el-tooltip v-if="row.tag" :content="row.tag.hint" placement="top">
+              <el-tag
+                size="small"
+                :type="row.tag.type"
+                :effect="row.tag.effect"
+                class="admin-change-inuse-tag"
+              >{{ row.tag.text }}</el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
 
         <el-table-column label="本平台账号" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.impact?.accountName || '—' }}</template>
+          <template #default="{ row }">{{ localAccountLabel(row) }}</template>
         </el-table-column>
 
         <el-table-column label="本平台分组" min-width="170" show-overflow-tooltip>
@@ -221,11 +228,20 @@ const onlyInUse = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 
+/** 「使用中 / 活跃」标签：使用中 = 我自己的平台（号池账号）在用；活跃 = 上游自己标成启用。 */
+interface UsageTag {
+  text: '使用中' | '活跃'
+  type: 'danger' | 'success'
+  effect: 'dark' | 'plain'
+  hint: string
+}
+
 /** 表格行：一个「变化 × 影响分组」= 一行，完全不做合并。 */
 interface ChangeRow {
   key: string
   change: ChangeEvent
   impact: ChangeImpact | null
+  tag: UsageTag | null
 }
 
 /** 是否处于筛选中（用于显示「重置筛选」）。 */
@@ -275,7 +291,7 @@ const displayRows = computed<ChangeRow[]>(() => {
   for (const change of filteredChanges.value) {
     const impacts = change.impacts ?? []
     if (!impacts.length) {
-      rows.push({ key: change.id, change, impact: null })
+      rows.push({ key: change.id, change, impact: null, tag: usageTag(change, null) })
       continue
     }
     impacts.forEach((impact, index) => {
@@ -283,15 +299,71 @@ const displayRows = computed<ChangeRow[]>(() => {
         key: `${change.id}-${impact.externalAccountId ?? 'x'}-${impact.groupName}-${index}`,
         change,
         impact,
+        tag: usageTag(change, impact),
       })
     })
   }
   return rows
 })
 
-/** 正在使用密钥的变更整行高亮，便于快速定位。 */
+/**
+ * 「使用中 / 活跃」标签的口径。
+ *
+ * - 密钥：使用中 = 本平台号池账号绑定了这把上游 Key（我自己的平台在用它）；
+ *   上游自己把 Key 标成 ACTIVE 只是「活跃」，不代表我在用。
+ * - 渠道：使用中 = 这个渠道下有本平台号池账号在用的 Key（影响评估命中）；
+ *   上游渠道处于启用（在售）只是「活跃」。
+ */
+function usageTag(change: ChangeEvent, impact: ChangeImpact | null): UsageTag | null {
+  if (change.entityType === 'API_KEY') {
+    if (change.inUse) {
+      return {
+        text: '使用中',
+        type: 'danger',
+        effect: 'dark',
+        hint: '本平台号池账号已绑定这把上游 Key（我正在使用）',
+      }
+    }
+    if (change.keyStatus === 'ACTIVE') {
+      return {
+        text: '活跃',
+        type: 'success',
+        effect: 'plain',
+        hint: '上游把这把 Key 标成启用（活跃），本平台没有绑定使用',
+      }
+    }
+    return null
+  }
+  if (impact) {
+    return {
+      text: '使用中',
+      type: 'danger',
+      effect: 'dark',
+      hint: '该渠道下有本平台号池账号在用的 Key',
+    }
+  }
+  if (change.inUse) {
+    return {
+      text: '活跃',
+      type: 'success',
+      effect: 'plain',
+      hint: '上游渠道处于启用（在售）状态，本平台没有在用它',
+    }
+  }
+  return null
+}
+
+/** 本平台账号：优先取影响评估命中的号池账号；密钥事件取绑定关系算出的号池账号。 */
+function localAccountLabel(row: unknown) {
+  const current = row as ChangeRow
+  if (current.impact?.accountName) return current.impact.accountName
+  if (current.change.entityType === 'API_KEY' && current.change.inUse) return current.change.localKeyNames || '—'
+  return '—'
+}
+
+/** 正在使用（我自己的平台在用）的变更整行高亮，便于快速定位。 */
 function changeRowClass({ row }: { row: ChangeRow }) {
-  return row.change.inUse ? 'admin-change-in-use-row' : ''
+  return row.tag?.text === '使用中' ? 'admin-change-in-use-row' : ''
 }
 
 /** 当前页展示的行。 */

@@ -292,7 +292,8 @@ public class UpstreamUsageService {
         return new UpstreamChangeEventResponse(
                 entity.getId(), entity.getAccountId(), entity.getPlatformType(),
                 entity.getEntityType(), entity.getEntityKey(), entity.getGroupName(), entity.getAccountName(),
-                entity.getKeyName(), entity.getUpstreamKeyNames(), entity.getLocalKeyNames(),
+                entity.getKeyName(), entity.getKeyStatus(),
+                entity.getUpstreamKeyNames(), entity.getLocalKeyNames(),
                 entity.getGroupRatio(), entity.getChangeType(),
                 entity.getFieldName(), entity.getOldValue(), entity.getNewValue(),
                 entity.getSeverity(), entity.getMessage(), entity.getDetectedAt(),

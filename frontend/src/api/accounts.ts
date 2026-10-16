@@ -307,6 +307,7 @@ interface ChangeEventDto {
   entityKey?: string
   groupName?: string
   keyName?: string
+  keyStatus?: string
   upstreamKeyNames?: string
   localKeyNames?: string
   groupRatio?: string | number | null
@@ -350,6 +351,7 @@ export async function listChangeRecords(platform: Platform): Promise<ChangeEvent
     entityName: row.keyName || row.groupName || row.entityKey || '',
     accountId: Number(row.accountId ?? 0),
     accountName: row.accountName || '',
+    keyStatus: row.keyStatus || '',
     upstreamKeyNames: row.upstreamKeyNames || '',
     localKeyNames: row.localKeyNames || '',
     groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),

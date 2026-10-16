@@ -18,6 +18,7 @@ import com.monitor.platform.collector.repository.entity.CollectionRunEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import com.monitor.platform.collector.security.CredentialCipher;
 import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.pool.repository.PoolAccountRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -76,7 +77,8 @@ class CollectionFailureReportingTest {
                 mock(AccountApiKeyRepository.class),
                 mock(AccountApiKeySnapshotRepository.class),
                 changeRecorder,
-                mock(CredentialCipher.class));
+                mock(CredentialCipher.class),
+                mock(PoolAccountRepository.class));
         service = new CollectionService(
                 accountRepository,
                 platformRepository,

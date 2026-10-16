@@ -190,6 +190,8 @@ public class Sub2ApiAccountCollector implements AccountCollector {
         List<Sub2KeysResponse.KeyItem> items = sub2ApiAdapter.fetchAllKeys(baseUrl, email, password);
         Map<String, Sub2ApiKeysUsageResponse.Stat> usageStats = fetchKeyUsage(baseUrl, email, password, items);
         Map<String, AccountApiKeyEntity> existing = apiKeySync.activeApiKeyMap(account.getId());
+        // 「使用中」= 被本平台号池账号绑定；一次查完，后面逐条判定不再打库
+        Set<Long> inUseKeyIds = apiKeySync.inUseKeyIds(existing.values());
         Set<String> activeExternalIds = new HashSet<>();
         OffsetDateTime now = OffsetDateTime.now();
         int added = 0;
@@ -216,7 +218,8 @@ public class Sub2ApiAccountCollector implements AccountCollector {
             boolean changed = isNew || rotated;
             if (!isNew) {
                 changed = apiKeySync.recordApiKeyChanges(account, platformType, collectionRunId, entity,
-                        item.name(), status, item.group() == null ? null : item.group().name()) || changed;
+                        item.name(), status, item.group() == null ? null : item.group().name(),
+                        inUseKeyIds) || changed;
             }
 
             entity.setKeyName(item.name());
@@ -247,12 +250,12 @@ public class Sub2ApiAccountCollector implements AccountCollector {
                 added++;
                 apiKeySync.recordKeyChange(account, platformType, collectionRunId, entity,
                         UpstreamChangeTypes.API_KEY_ADDED, null, entity.getRawData(),
-                        "密钥新增: " + apiKeySync.displayKeyName(entity));
+                        "密钥新增: " + apiKeySync.displayKeyName(entity), inUseKeyIds);
             } else if (rotated) {
                 updated++;
                 apiKeySync.recordKeyChange(account, platformType, collectionRunId, entity,
                         UpstreamChangeTypes.API_KEY_ROTATED, "key", null,
-                        "密钥已轮换: " + apiKeySync.displayKeyName(entity));
+                        "密钥已轮换: " + apiKeySync.displayKeyName(entity), inUseKeyIds);
             } else if (changed) {
                 updated++;
             }
@@ -261,7 +264,7 @@ public class Sub2ApiAccountCollector implements AccountCollector {
         }
 
         int removed = apiKeySync.deactivateMissingApiKeys(account, platformType, collectionRunId,
-                existing, activeExternalIds, now);
+                existing, activeExternalIds, now, inUseKeyIds);
         log.info("Sub2API 密钥同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
                 account.getId(), items.size(), added, updated, removed);
     }

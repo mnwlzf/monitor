@@ -52,4 +52,7 @@ public interface PoolAccountMapper {
 
     /** 查询存在号池账号的平台 ID，供定时采集遍历。 */
     List<Integer> selectDistinctPlatformIds();
+
+    /** 查询这批本地上游 Key 主键里，哪些已被号池账号绑定（= 我自己的平台正在使用）。 */
+    List<Long> selectBoundKeyIds(@Param("keyIds") Collection<Long> keyIds);
 }

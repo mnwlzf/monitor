@@ -6,8 +6,11 @@ import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 号池账号持久化仓储。
@@ -72,5 +75,19 @@ public class PoolAccountRepository {
     /** 查询存在号池账号的平台 ID。 */
     public List<Integer> findDistinctPlatformIds() {
         return poolAccountMapper.selectDistinctPlatformIds();
+    }
+
+    /**
+     * 这批本地上游 Key 里，哪些正被号池账号绑定。
+     *
+     * <p>「我自己的平台在用它」的判定依据就是这条绑定关系 —— 密钥变更的
+     * 「使用中」口径用它，而不是「上游把它标成 active」（那只是「活跃」）。</p>
+     */
+    public Set<Long> findBoundKeyIds(Collection<Long> keyIds) {
+        if (keyIds == null || keyIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> ids = keyIds.stream().filter(Objects::nonNull).distinct().toList();
+        return ids.isEmpty() ? Set.of() : new LinkedHashSet<>(poolAccountMapper.selectBoundKeyIds(ids));
     }
 }

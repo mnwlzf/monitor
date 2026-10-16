@@ -127,4 +127,17 @@
         FROM pool_accounts
         ORDER BY platform_id
     </select>
+
+    <!--
+        「使用中」的口径：本平台号池账号绑定了这把上游 Key。
+        上游自己把 Key 标成 active 只是「活跃」，与「我在使用」是两件事（见 V30 迁移）。
+    -->
+    <select id="selectBoundKeyIds" resultType="long">
+        SELECT DISTINCT bound_key_id
+        FROM pool_accounts
+        WHERE bound_key_id IN
+        <foreach collection="keyIds" item="keyId" open="(" separator="," close=")">
+            #{keyId}
+        </foreach>
+    </select>
 </mapper>

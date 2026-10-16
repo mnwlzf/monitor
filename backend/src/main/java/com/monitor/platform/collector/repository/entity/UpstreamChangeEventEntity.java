@@ -45,7 +45,12 @@ public class UpstreamChangeEventEntity {
     private String message;
     /** 发现时间。 */
     private OffsetDateTime detectedAt;
-    /** 变更是否涉及正在使用（启用）的密钥，仅 API_KEY 事件有意义。 */
+    /**
+     * 变更是否涉及「正在使用」的对象，仅 API_KEY 与渠道事件有意义。
+     *
+     * <p>密钥：本平台号池账号绑定了这把上游 Key（见 {@code V30__bind_in_use_key_changes.sql}）；
+     * 渠道：上游把渠道标成启用 —— 也就是「上游还在售」，页面标签上是「活跃」。</p>
+     */
     private Boolean inUse;
     /**
      * 变更对应的渠道名（只有 GROUP 事件有）。
@@ -71,6 +76,15 @@ public class UpstreamChangeEventEntity {
      */
     @TableField(exist = false)
     private String keyName;
+    /**
+     * 上游密钥当前状态（只有 API_KEY 事件有）。
+     *
+     * <p>不是本表的列，查询时用 account_id + 密钥 ID 从 account_api_keys 带出来。
+     * 页面据此标「活跃」（上游自己把它标成启用）—— 与「使用中」（本平台号池账号绑定了它）
+     * 是两件事，别混在一起看。</p>
+     */
+    @TableField(exist = false)
+    private String keyStatus;
     /** 受影响的「上游账号 Key」名字，多个用「、」连接（渠道事件按同分组匹配）。 */
     @TableField(exist = false)
     private String upstreamKeyNames;
@@ -102,6 +116,8 @@ public class UpstreamChangeEventEntity {
     public void setAccountName(String accountName) { this.accountName = accountName; }
     public String getKeyName() { return keyName; }
     public void setKeyName(String keyName) { this.keyName = keyName; }
+    public String getKeyStatus() { return keyStatus; }
+    public void setKeyStatus(String keyStatus) { this.keyStatus = keyStatus; }
     public String getUpstreamKeyNames() { return upstreamKeyNames; }
     public void setUpstreamKeyNames(String upstreamKeyNames) { this.upstreamKeyNames = upstreamKeyNames; }
     public String getLocalKeyNames() { return localKeyNames; }

@@ -93,6 +93,8 @@ export interface ChangeEvent {
   accountId: number
   /** 变更所属账号名（上游账号）。 */
   accountName: string
+  /** 上游密钥当前状态（仅密钥事件）：ACTIVE = 上游把 Key 标成「活跃」。 */
+  keyStatus: string
   /** 受影响的「上游账号 Key」名字（多个用「、」连接）。 */
   upstreamKeyNames: string
   /** 对应的「本平台 Key」名字（号池账号名，多个用「、」连接）。 */
@@ -107,7 +109,12 @@ export interface ChangeEvent {
   severity: 'INFO' | 'WARNING' | 'CRITICAL'
   detectedAt: string
   message: string
-  /** 是否为「正在使用（启用）」密钥发生的变更，仅 API_KEY 事件有意义。 */
+  /**
+   * 变更是否涉及「我正在使用」的对象。
+   *
+   * 密钥 = 本平台号池账号绑定了这把上游 Key（上游自己启用只是「活跃」）；
+   * 渠道 = 上游把渠道标成启用（在售）。
+   */
   inUse: boolean
 }
 
