@@ -4,12 +4,16 @@ import com.monitor.platform.api.dto.MailRecipientRequest;
 import com.monitor.platform.api.dto.MailRecipientResponse;
 import com.monitor.platform.api.dto.NotificationSettingsRequest;
 import com.monitor.platform.api.dto.NotificationSettingsResponse;
+import com.monitor.platform.api.dto.QqRecipientRequest;
+import com.monitor.platform.api.dto.QqRecipientResponse;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.mail.MailRecipientEntity;
 import com.monitor.platform.mail.MailRecipientRepository;
 import com.monitor.platform.mail.MailScene;
 import com.monitor.platform.mail.NotificationSettingsEntity;
 import com.monitor.platform.mail.NotificationSettingsRepository;
+import com.monitor.platform.notify.QqRecipientEntity;
+import com.monitor.platform.notify.QqRecipientRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,20 +21,25 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 /**
- * 邮件通知设置管理服务。
+ * 通知设置管理服务。
  *
- * <p>负责余额提醒开关/阈值/间隔，以及按事件场景维护收件人（一个或多个）。</p>
+ * <p>负责余额提醒开关/阈值/间隔，以及按事件场景维护<strong>两个通道</strong>的接收人：
+ * 邮件收件人（{@code mail_recipients}）与 QQ 消息接收人（{@code qq_recipients}）。
+ * 两者互不依赖 —— 只配 QQ 也能收到提醒。</p>
  */
 @Service
 public class NotificationAdminService {
 
     private final NotificationSettingsRepository notificationSettingsRepository;
     private final MailRecipientRepository mailRecipientRepository;
+    private final QqRecipientRepository qqRecipientRepository;
 
     public NotificationAdminService(NotificationSettingsRepository notificationSettingsRepository,
-                                    MailRecipientRepository mailRecipientRepository) {
+                                    MailRecipientRepository mailRecipientRepository,
+                                    QqRecipientRepository qqRecipientRepository) {
         this.notificationSettingsRepository = notificationSettingsRepository;
         this.mailRecipientRepository = mailRecipientRepository;
+        this.qqRecipientRepository = qqRecipientRepository;
     }
 
     /** 读取通知设置。 */
@@ -84,6 +93,36 @@ public class NotificationAdminService {
         mailRecipientRepository.deleteById(recipientId);
     }
 
+    /** 查询指定事件场景下配置的 QQ 消息接收人。 */
+    public List<QqRecipientResponse> listQqRecipients(MailScene scene) {
+        return qqRecipientRepository.findByScene(scene).stream().map(this::toResponse).toList();
+    }
+
+    /** 新增 QQ 消息接收人，同一场景下同一个群 / 私聊不可重复。 */
+    @Transactional
+    public QqRecipientResponse addQqRecipient(QqRecipientRequest request) {
+        qqRecipientRepository.findBySceneAndTarget(request.scene(), request.targetType(), request.targetId())
+                .ifPresent(existing -> {
+                    throw BusinessException.of("该事件下已经配置过这个接收人: "
+                            + request.targetType().label() + " " + request.targetId());
+                });
+
+        QqRecipientEntity entity = new QqRecipientEntity();
+        entity.setScene(request.scene().name());
+        entity.setTargetType(request.targetType().name());
+        entity.setTargetId(request.targetId());
+        entity.setName(trimToNull(request.name()));
+        entity.setCreatedAt(OffsetDateTime.now());
+        qqRecipientRepository.save(entity);
+        return toResponse(entity);
+    }
+
+    /** 删除 QQ 消息接收人。 */
+    @Transactional
+    public void deleteQqRecipient(Long recipientId) {
+        qqRecipientRepository.deleteById(recipientId);
+    }
+
     private NotificationSettingsResponse toResponse(NotificationSettingsEntity entity) {
         return new NotificationSettingsResponse(
                 Boolean.TRUE.equals(entity.getBalanceAlertEnabled()),
@@ -101,6 +140,16 @@ public class NotificationAdminService {
                 entity.getId(),
                 entity.getScene(),
                 entity.getEmail(),
+                entity.getName(),
+                entity.getCreatedAt());
+    }
+
+    private QqRecipientResponse toResponse(QqRecipientEntity entity) {
+        return new QqRecipientResponse(
+                entity.getId(),
+                entity.getScene(),
+                entity.getTargetType(),
+                entity.getTargetId(),
                 entity.getName(),
                 entity.getCreatedAt());
     }

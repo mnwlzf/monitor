@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Configuration;
         "com.monitor.platform.query.repository",
         "com.monitor.platform.scheduler",
         "com.monitor.platform.mail",
+        "com.monitor.platform.notify",
         "com.monitor.platform.pool",
         "com.monitor.platform.bot"
 })

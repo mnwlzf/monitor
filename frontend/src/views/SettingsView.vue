@@ -103,7 +103,7 @@
         <div class="admin-card-header">
           <div>
             <h3>余额不足提醒</h3>
-            <p>余额采集完成后，平台账号余额合计低于阈值时发送邮件提醒</p>
+            <p>余额采集完成后，平台账号余额合计低于阈值时发送邮件与 QQ 消息提醒</p>
           </div>
           <el-button v-if="canWrite !== false" type="primary" :loading="savingNotification" @click="saveNotification">保存</el-button>
         </div>
@@ -113,7 +113,7 @@
         <div class="admin-form-grid">
           <el-form-item label="启用余额提醒">
             <el-switch v-model="notification.balanceAlertEnabled" :disabled="canWrite === false" />
-            <small class="admin-form-hint">关闭后不再发送余额提醒邮件。</small>
+            <small class="admin-form-hint">关闭后余额提醒的邮件与 QQ 消息都不再发送。</small>
           </el-form-item>
           <el-form-item label="余额阈值（USD）">
             <el-input-number
@@ -141,8 +141,15 @@
         </div>
       </el-form>
 
-      <el-divider content-position="left">该事件的收件人</el-divider>
+      <el-divider content-position="left">该事件的邮件收件人</el-divider>
       <RecipientEditor scene="BALANCE_ALERT" :can-write="canWrite" />
+
+      <el-divider content-position="left">该事件的 QQ 消息接收人</el-divider>
+      <small class="admin-form-hint">
+        余额提醒除邮件外，还会通过 QQ 机器人推送到这里配置的群 / 私聊；只配 QQ 不配邮件也能收到提醒。
+        OneBot 没接通（monitor.bot.enabled / api-base-url / webhook-token）时只发邮件。
+      </small>
+      <QqRecipientEditor scene="BALANCE_ALERT" :can-write="canWrite" />
     </el-card>
 
     <el-card shadow="never" class="admin-card">
@@ -399,6 +406,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RecipientEditor from '../components/RecipientEditor.vue'
+import QqRecipientEditor from '../components/QqRecipientEditor.vue'
 import {
   addBotAdmin,
   deleteBotAdmin,

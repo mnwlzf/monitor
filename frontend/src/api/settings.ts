@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotAdmin, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NotificationSettings } from '../types'
+import type { BotAdmin, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NotificationSettings, QqRecipient, QqTargetType } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -85,6 +85,33 @@ export async function addMailRecipient(input: MailRecipientInput): Promise<MailR
 /** 删除余额提醒收件人。 */
 export async function deleteMailRecipient(id: number): Promise<void> {
   await apiRequest<void>(`/api/v1/settings/notification/recipients/${id}`, { method: 'DELETE' })
+}
+
+/** 新增 QQ 消息接收人的表单载荷。 */
+export interface QqRecipientInput {
+  scene: MailScene
+  targetType: QqTargetType
+  /** 群号或 QQ 号。 */
+  targetId: number
+  name: string
+}
+
+/** 查询指定事件场景配置的 QQ 消息接收人。 */
+export async function listQqRecipients(scene: MailScene): Promise<QqRecipient[]> {
+  return apiRequest<QqRecipient[]>(`/api/v1/settings/notification/qq-recipients?scene=${scene}`)
+}
+
+/** 新增指定事件的 QQ 消息接收人。 */
+export async function addQqRecipient(input: QqRecipientInput): Promise<QqRecipient> {
+  return apiRequest<QqRecipient>('/api/v1/settings/notification/qq-recipients', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+/** 删除 QQ 消息接收人。 */
+export async function deleteQqRecipient(id: number): Promise<void> {
+  await apiRequest<void>(`/api/v1/settings/notification/qq-recipients/${id}`, { method: 'DELETE' })
 }
 
 /** 保存 QQ 机器人设置的表单载荷。 */

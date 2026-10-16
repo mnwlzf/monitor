@@ -263,6 +263,24 @@ export interface MailRecipient {
   createdAt: string | null
 }
 
+/** QQ 消息接收对象类型：群 / 私聊。 */
+export type QqTargetType = 'GROUP' | 'PRIVATE'
+
+/**
+ * QQ 消息接收人（按事件场景区分）。
+ *
+ * 与邮件收件人各自独立：余额提醒会同时往「邮件收件人 + 这里配置的群 / 私聊」发。
+ */
+export interface QqRecipient {
+  id: number
+  scene: MailScene
+  targetType: QqTargetType
+  /** 群号或 QQ 号。 */
+  targetId: number
+  name: string | null
+  createdAt: string | null
+}
+
 /**
  * 号池监控：账号健康状态与时间窗聚合指标。
  *

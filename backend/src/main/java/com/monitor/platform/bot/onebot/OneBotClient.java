@@ -36,12 +36,18 @@ public class OneBotClient {
                 .build();
     }
 
-    public void sendGroupMessage(long groupId, String text) {
-        send("/send_group_msg", "group_id", groupId, text);
+    /**
+     * 发文本到群。
+     *
+     * @return 是否发送成功；false 时调用方（例如主动推送）可据此决定要不要重试
+     */
+    public boolean sendGroupMessage(long groupId, String text) {
+        return send("/send_group_msg", "group_id", groupId, text);
     }
 
-    public void sendPrivateMessage(long userId, String text) {
-        send("/send_private_msg", "user_id", userId, text);
+    /** 发文本到私聊；返回值含义同上。 */
+    public boolean sendPrivateMessage(long userId, String text) {
+        return send("/send_private_msg", "user_id", userId, text);
     }
 
     /**
@@ -202,8 +208,8 @@ public class OneBotClient {
         static ProbeResult failed(String error) {
             return new ProbeResult(true, false, false, null, null, error);
         }
-    }    private void send(String path, String idField, long id, String text) {
-        dispatch(path, idField, id, text, text);
+    }    private boolean send(String path, String idField, long id, String text) {
+        return dispatch(path, idField, id, text, text);
     }
 
     private boolean sendImage(String path, String idField, long id, byte[] png) {

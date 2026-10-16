@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.notify.QqRecipientMapper">
+
+    <resultMap id="QqRecipientResultMap" type="com.monitor.platform.notify.QqRecipientEntity">
+        <id column="id" property="id"/>
+        <result column="scene" property="scene"/>
+        <result column="target_type" property="targetType"/>
+        <result column="target_id" property="targetId"/>
+        <result column="name" property="name"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <select id="selectByScene" resultMap="QqRecipientResultMap">
+        SELECT id, scene, target_type, target_id, name, created_at
+        FROM qq_recipients
+        WHERE scene = #{scene}
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectBySceneAndTarget" resultMap="QqRecipientResultMap">
+        SELECT id, scene, target_type, target_id, name, created_at
+        FROM qq_recipients
+        WHERE scene = #{scene}
+          AND target_type = #{targetType}
+          AND target_id = #{targetId}
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO qq_recipients (scene, target_type, target_id, name, created_at)
+        VALUES (#{scene}, #{targetType}, #{targetId}, #{name}, #{createdAt})
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM qq_recipients WHERE id = #{id}
+    </delete>
+</mapper>

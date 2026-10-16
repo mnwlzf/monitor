@@ -4,6 +4,8 @@ import com.monitor.platform.api.dto.MailRecipientRequest;
 import com.monitor.platform.api.dto.MailRecipientResponse;
 import com.monitor.platform.api.dto.NotificationSettingsRequest;
 import com.monitor.platform.api.dto.NotificationSettingsResponse;
+import com.monitor.platform.api.dto.QqRecipientRequest;
+import com.monitor.platform.api.dto.QqRecipientResponse;
 import com.monitor.platform.api.service.NotificationAdminService;
 import com.monitor.platform.common.response.ApiResponse;
 import com.monitor.platform.mail.MailScene;
@@ -21,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 邮件通知设置接口（余额提醒开关/阈值/间隔，以及按事件区分的收件人）。
+ * 通知设置接口（余额提醒开关/阈值/间隔，以及按事件区分的邮件 / QQ 接收人）。
  *
  * <p>仅 ADMIN 可访问（见 {@code SecurityConfig} 的 {@code /api/v1/settings/**} 规则）。</p>
  */
@@ -65,6 +67,26 @@ public class NotificationController {
     @DeleteMapping("/recipients/{recipientId}")
     public ApiResponse<Void> deleteRecipient(@PathVariable Long recipientId) {
         notificationAdminService.deleteRecipient(recipientId);
+        return ApiResponse.of(null, null);
+    }
+
+    /** 查询指定事件场景的 QQ 消息接收人。 */
+    @GetMapping("/qq-recipients")
+    public ApiResponse<List<QqRecipientResponse>> listQqRecipients(@RequestParam MailScene scene) {
+        return ApiResponse.of(notificationAdminService.listQqRecipients(scene), null);
+    }
+
+    /** 新增指定事件的 QQ 消息接收人。 */
+    @PostMapping("/qq-recipients")
+    public ApiResponse<QqRecipientResponse> addQqRecipient(
+            @Valid @RequestBody QqRecipientRequest request) {
+        return ApiResponse.of(notificationAdminService.addQqRecipient(request), null);
+    }
+
+    /** 删除 QQ 消息接收人。 */
+    @DeleteMapping("/qq-recipients/{recipientId}")
+    public ApiResponse<Void> deleteQqRecipient(@PathVariable Long recipientId) {
+        notificationAdminService.deleteQqRecipient(recipientId);
         return ApiResponse.of(null, null);
     }
 }
