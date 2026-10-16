@@ -182,7 +182,8 @@ public class ChannelChangeAlertService {
                 .append("<th align=\"left\">上游 Key</th>")
                 .append("<th align=\"left\">所属分组</th>")
                 .append("<th align=\"right\">分组倍率</th>")
-                .append("<th align=\"left\">上游渠道（原 → 新）</th>")
+                .append("<th align=\"left\">上游倍率（原 → 新）</th>")
+                .append("<th align=\"left\">上游渠道</th>")
                 .append("<th align=\"left\">是否受影响</th>")
                 .append("<th align=\"left\">内容</th>")
                 .append("</tr>");
@@ -199,10 +200,8 @@ public class ChannelChangeAlertService {
                     || impact.upstreamChannel().isBlank()
                     ? channelName(event)
                     : impact.upstreamChannel();
-            String upstreamChange = impact == null
-                    ? channelName(event)
-                    : dash(upstreamChannel) + "（" + decimal(impact.oldRatio())
-                    + " → " + decimal(impact.newRatio()) + "）";
+            String upstreamChange = impact == null ? channelName(event) : dash(upstreamChannel);
+            String upstreamRatioChange = upstreamRatioChange(display);
             String affected = impact == null ? "—" : (impact.affected() ? "是（倒挂）" : "否");
 
             html.append("<tr>")
@@ -214,6 +213,7 @@ public class ChannelChangeAlertService {
                     .append("<td>").append(MailFormat.escape(dash(upstreamKey))).append("</td>")
                     .append("<td>").append(MailFormat.escape(dash(groupName))).append("</td>")
                     .append("<td align=\"right\">").append(MailFormat.escape(groupRatio)).append("</td>")
+                    .append("<td>").append(MailFormat.escape(upstreamRatioChange)).append("</td>")
                     .append("<td>").append(MailFormat.escape(dash(upstreamChange))).append("</td>")
                     .append("<td>").append(MailFormat.escape(affected)).append("</td>")
                     .append("<td>").append(MailFormat.escape(contentText(event))).append("</td>")
@@ -224,7 +224,7 @@ public class ChannelChangeAlertService {
         return html.toString();
     }
 
-    /** 一条事件的普通说明；倍率变化的具体旧值/新值放在“上游渠道”列里逐行展示。 */
+    /** 一条事件的普通说明；倍率变化的具体旧值/新值放在“上游倍率”列里逐行展示。 */
     private static String contentText(UpstreamChangeEventEntity event) {
         String message = event.getMessage();
         if (message != null && !message.isBlank()) {
@@ -236,6 +236,46 @@ public class ChannelChangeAlertService {
     /** 无法拿到影响评估时，只展示事件自己的单个上游 Key，绝不展示聚合列表。 */
     private static String singleUpstreamKeyLabel(UpstreamChangeEventEntity event) {
         return event.getKeyName();
+    }
+
+    /** 上游渠道倍率的变化；优先使用影响评估，缺失时回退到事件自身的原/新值。 */
+    private static String upstreamRatioChange(DisplayRow display) {
+        RateChangeImpactService.ImpactRow impact = display.impact();
+        if (impact != null && (impact.oldRatio() != null || impact.newRatio() != null)) {
+            return ratioChange(impact.oldRatio(), impact.newRatio());
+        }
+
+        String changeType = display.event().getChangeType();
+        if (!"RATE_CHANGED".equals(changeType) && !"BASE_RATE_CHANGED".equals(changeType)) {
+            return "—";
+        }
+        BigDecimal oldRatio = decimal(display.event().getOldValue());
+        BigDecimal newRatio = decimal(display.event().getNewValue());
+        return oldRatio == null && newRatio == null ? "—" : ratioChange(oldRatio, newRatio);
+    }
+
+    private static String ratioChange(BigDecimal oldRatio, BigDecimal newRatio) {
+        return decimal(oldRatio) + " → " + decimal(newRatio);
+    }
+
+    /** 解析事件里 JSON 形式的倍率，例如 0.3 或 "0.3"。 */
+    private static BigDecimal decimal(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String text = raw.trim();
+        // 34 是双引号；事件值可能是 JSON 字符串 "0.3"。
+        if (text.length() >= 2 && text.charAt(0) == 34 && text.charAt(text.length() - 1) == 34) {
+            text = text.substring(1, text.length() - 1);
+        }
+        if (text.isEmpty() || text.startsWith("{") || text.startsWith("[")) {
+            return null;
+        }
+        try {
+            return new BigDecimal(text);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private static String decimal(BigDecimal value) {

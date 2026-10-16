@@ -79,9 +79,36 @@ class ChannelChangeAlertServiceTest {
                 .contains("<td>本平台 Key B</td>")
                 .contains("<td>上游 Key B</td>")
                 .contains("<td>分组 B</td>")
+                .contains("<th align=\"left\">上游倍率（原 → 新）</th>")
+                .contains("<td>1.1 &rarr; 1.3</td>")
+                .contains("<td>Ic渠道</td>")
+                .doesNotContain("<td>Ic渠道（1.1")
                 .doesNotContain("聚合上游 Key A、聚合上游 Key B")
                 .doesNotContain("聚合本平台 Key A、聚合本平台 Key B")
                 .doesNotContain("大模型总结");
+    }
+
+    @Test
+    void shouldShowUpstreamRatioWhenNoImpactRows() {
+        UpstreamChangeEventEntity event = rateEvent();
+        event.setOldValue("0.3");
+        event.setNewValue("0.6");
+        when(changeEventRepository.findInUseGroupRateEventsSince(any(), anyInt()))
+                .thenReturn(List.of(event));
+        when(mailRecipientRepository.findByScene(MailScene.CHANNEL_ALERT))
+                .thenReturn(List.of(recipient()));
+        when(smtpConfigProvider.load()).thenReturn(smtpConfig());
+        when(accountNameResolver.platformName(eq(7), any())).thenReturn("平台A");
+        when(rateChangeImpactService.impactOf(event)).thenReturn(List.of());
+
+        service.notifyInUseRateChanges(OffsetDateTime.now().minusMinutes(1));
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(mailService).send(any(SmtpConfig.class), anyList(), anyString(), body.capture());
+        assertThat(body.getValue())
+                .contains("<th align=\"left\">上游倍率（原 → 新）</th>")
+                .contains("<td>0.3 &rarr; 0.6</td>")
+                .contains("<td>Ic渠道</td>");
     }
 
     private UpstreamChangeEventEntity rateEvent() {
