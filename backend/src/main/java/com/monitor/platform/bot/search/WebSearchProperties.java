@@ -13,20 +13,15 @@ import java.time.Duration;
  *
  * <p>不配 {@code api-key} 时 {@link #isConfigured()} 为 false，工具只回一句「未启用」，
  * 不会发起任何请求。</p>
+ *
+ * <p><strong>谁可以用</strong>不在这里：管理员默认可用；普通人由页面
+ * {@code bot_settings.web_search_for_non_admin} 控制（保存即生效，不用重启）。</p>
  */
 @ConfigurationProperties(prefix = "monitor.web-search")
 public class WebSearchProperties {
 
     /** 是否启用联网搜索。 */
     private boolean enabled = true;
-
-    /**
-     * 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索。
-     *
-     * <p>默认关闭：联网搜索按次计费，且手机号/群聊场景容易被刷。只有本项为 true
-     * <strong>且配好了 api-key</strong> 时才会把工具挂给非管理员人设。</p>
-     */
-    private boolean allowNonAdmin = false;
 
     /** DeepSeek API 根地址。 */
     private String baseUrl = "https://api.deepseek.com";
@@ -60,14 +55,6 @@ public class WebSearchProperties {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
-    }
-
-    public boolean isAllowNonAdmin() {
-        return allowNonAdmin;
-    }
-
-    public void setAllowNonAdmin(boolean allowNonAdmin) {
-        this.allowNonAdmin = allowNonAdmin;
     }
 
     public String getBaseUrl() {

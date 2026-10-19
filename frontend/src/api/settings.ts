@@ -125,6 +125,8 @@ export interface BotSettingsInput {
   commandPrefix: string
   maxReplyLength: number
   memoryWindow: number
+  /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索。 */
+  webSearchForNonAdmin: boolean
 }
 
 /** 读取 QQ 机器人设置。 */

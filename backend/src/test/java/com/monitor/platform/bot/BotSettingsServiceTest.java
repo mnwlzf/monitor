@@ -44,7 +44,7 @@ class BotSettingsServiceTest {
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
         BotSettingsResponse saved = service.save(new BotSettingsRequest(
-                true, List.of("785724309"), List.of("2696775653"), List.of("785724309"), true, "/", 900, 10));
+                true, List.of("785724309"), List.of("2696775653"), List.of("785724309"), true, "/", 900, 10, false));
 
         assertEquals(Set.of("785724309"), saved.allowedGroups());
         assertEquals(Set.of("785724309"), saved.platformGroups());
@@ -62,7 +62,7 @@ class BotSettingsServiceTest {
         when(repository.find()).thenReturn(existing());
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
-        service.save(new BotSettingsRequest(true, List.of(), List.of(), List.of(), true, "/", 900, 10));
+        service.save(new BotSettingsRequest(true, List.of(), List.of(), List.of(), true, "/", 900, 10, false));
 
         assertTrue(service.current().isGroupAllowed(1L));
         assertTrue(service.current().isUserAllowed(2L));
@@ -77,7 +77,7 @@ class BotSettingsServiceTest {
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
         BotSettingsResponse saved = service.save(new BotSettingsRequest(
-                true, List.of(" 111 ", "", "222"), null, null, null, "   ", 999999, 1));
+                true, List.of(" 111 ", "", "222"), null, null, null, "   ", 999999, 1, null));
 
         assertEquals(Set.of("111", "222"), saved.allowedGroups());
         assertEquals(Set.of(), saved.platformGroups());
@@ -95,7 +95,21 @@ class BotSettingsServiceTest {
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
         assertThrows(BusinessException.class, () -> service.save(new BotSettingsRequest(
-                true, List.of("111"), List.of(), List.of("111", "999"), true, "/", 900, 10)));
+                true, List.of("111"), List.of(), List.of("111", "999"), true, "/", 900, 10, false)));
+    }
+
+    /** 页面开关：普通人是否可用联网搜索，保存后内存快照立即生效。 */
+    @Test
+    void shouldPersistWebSearchForNonAdminFlag() {
+        BotSettingsRepository repository = mock(BotSettingsRepository.class);
+        when(repository.find()).thenReturn(existing());
+        BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
+
+        BotSettingsResponse saved = service.save(new BotSettingsRequest(
+                true, List.of("111"), List.of(), List.of(), true, "/", 900, 10, true));
+
+        assertTrue(saved.webSearchForNonAdmin());
+        assertTrue(service.current().webSearchForNonAdmin());
     }
 
     @Test

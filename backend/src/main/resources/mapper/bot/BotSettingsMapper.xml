@@ -12,12 +12,13 @@
         <result column="command_prefix" property="commandPrefix"/>
         <result column="max_reply_length" property="maxReplyLength"/>
         <result column="memory_window" property="memoryWindow"/>
+        <result column="web_search_for_non_admin" property="webSearchForNonAdmin"/>
         <result column="updated_at" property="updatedAt"/>
     </resultMap>
 
     <select id="selectSettings" resultMap="BotSettingsResultMap">
         SELECT id, enabled, allowed_groups, allowed_users, platform_groups, require_mention,
-               command_prefix, max_reply_length, memory_window, updated_at
+               command_prefix, max_reply_length, memory_window, web_search_for_non_admin, updated_at
         FROM bot_settings
         WHERE id = 1
     </select>
@@ -25,10 +26,10 @@
     <insert id="upsertSettings">
         INSERT INTO bot_settings (
             id, enabled, allowed_groups, allowed_users, platform_groups, require_mention,
-            command_prefix, max_reply_length, memory_window, updated_at
+            command_prefix, max_reply_length, memory_window, web_search_for_non_admin, updated_at
         ) VALUES (
             1, #{enabled}, #{allowedGroups}, #{allowedUsers}, #{platformGroups}, #{requireMention},
-            #{commandPrefix}, #{maxReplyLength}, #{memoryWindow}, #{updatedAt}
+            #{commandPrefix}, #{maxReplyLength}, #{memoryWindow}, #{webSearchForNonAdmin}, #{updatedAt}
         )
         ON CONFLICT (id) DO UPDATE SET
             enabled = EXCLUDED.enabled,
@@ -39,6 +40,7 @@
             command_prefix = EXCLUDED.command_prefix,
             max_reply_length = EXCLUDED.max_reply_length,
             memory_window = EXCLUDED.memory_window,
+            web_search_for_non_admin = EXCLUDED.web_search_for_non_admin,
             updated_at = EXCLUDED.updated_at
     </insert>
 </mapper>

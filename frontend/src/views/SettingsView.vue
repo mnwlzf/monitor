@@ -308,6 +308,14 @@
           <span class="admin-form-hint" style="margin-left: 10px">保留最近几条对话，用于「那 30 天呢？」这类追问</span>
         </el-form-item>
 
+        <el-form-item label="普通人可用联网搜索">
+          <el-switch v-model="botForm.webSearchForNonAdmin" />
+          <span class="admin-form-hint" style="margin-left: 10px">
+            平台普通用户 / 陌生人是否能用联网搜索；需要服务端已配置 DeepSeek 官方 Key（MONITOR_WEB_SEARCH_API_KEY）。
+            保存后立即生效，不用重启
+          </span>
+        </el-form-item>
+
         <el-form-item>
           <el-button type="primary" :loading="botSaving" @click="saveBotSettingsForm">保存</el-button>
           <span v-if="botUpdatedAt" class="admin-form-hint" style="margin-left: 12px">上次保存：{{ botUpdatedAt }}</span>
@@ -568,6 +576,7 @@ const botForm = reactive<BotSettingsInput>({
   commandPrefix: '/',
   maxReplyLength: 900,
   memoryWindow: 10,
+  webSearchForNonAdmin: false,
 })
 
 function applyBotSettings(settings: BotSettings) {
@@ -580,6 +589,7 @@ function applyBotSettings(settings: BotSettings) {
     commandPrefix: settings.commandPrefix || '/',
     maxReplyLength: settings.maxReplyLength || 900,
     memoryWindow: settings.memoryWindow || 10,
+    webSearchForNonAdmin: settings.webSearchForNonAdmin === true,
   })
   botUpdatedAt.value = settings.updatedAt ? new Date(settings.updatedAt).toLocaleString('zh-CN') : ''
 }

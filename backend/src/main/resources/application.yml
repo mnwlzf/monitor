@@ -123,10 +123,9 @@ monitor:
 
   # 联网搜索（DeepSeek 官方 Search / Fetch；按成功请求计费，各 5 元 / 1000 次，QPS 各 5）。
   # 需要 api.deepseek.com 的 Key；不配则工具只回「未启用」，不会发起请求。
-  # 管理员始终可用；普通人是否可用由 allow-non-admin 控制（默认关，防止被刷）。
+  # 管理员始终可用；普通人是否可用在页面「QQ 机器人」里控制（bot_settings，保存即生效）。
   web-search:
     enabled: ${MONITOR_WEB_SEARCH_ENABLED:true}
-    allow-non-admin: ${MONITOR_WEB_SEARCH_ALLOW_NON_ADMIN:false}
     base-url: ${MONITOR_WEB_SEARCH_BASE_URL:https://api.deepseek.com}
     api-key: ${MONITOR_WEB_SEARCH_API_KEY:}
     timeout: ${MONITOR_WEB_SEARCH_TIMEOUT:15s}

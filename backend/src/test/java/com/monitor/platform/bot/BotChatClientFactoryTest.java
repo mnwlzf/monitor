@@ -20,9 +20,8 @@ import static org.mockito.Mockito.when;
 /**
  * 人设与客户端工厂。
  *
- * <p>「只有管理员人设挂平台工具」是安全约束（陌生人绝不能拿到平台数据），
- * 这里固定住它；联网搜索是否挂给普通人由 {@link WebSearchProperties#isAllowNonAdmin()}
- * 控制，也在这里固定住。</p>
+ * <p>「只有管理员人设挂平台工具」是安全约束（陌生人绝不能拿到平台数据），这里固定住它；
+ * 联网搜索是否挂给普通人由页面设置 {@link BotSettings#webSearchForNonAdmin()} 控制。</p>
  */
 class BotChatClientFactoryTest {
 
@@ -48,8 +47,9 @@ class BotChatClientFactoryTest {
         return builder;
     }
 
-    private BotSettings settings() {
-        return new BotSettings(true, Set.of(), Set.of(), Set.of(), true, "/", 900, 10);
+    private BotSettings settings(boolean webSearchForNonAdmin) {
+        return new BotSettings(true, Set.of(), Set.of(), Set.of(), true, "/", 900, 10,
+                webSearchForNonAdmin);
     }
 
     @Test
@@ -64,42 +64,54 @@ class BotChatClientFactoryTest {
     void adminGetsWebSearchWheneverEnabled() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_ADMIN, settings());
+        factory(builder).get(BotChatClientFactory.Persona.MONITOR_ADMIN, settings(false));
 
         verify(builder).defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools);
     }
 
-    /** 普通人默认不挂联网搜索。 */
+    /** 普通人：页面开关默认关闭，不挂联网搜索。 */
     @Test
     void nonAdminDoesNotGetWebSearchByDefault() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings());
+        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings(false));
 
         verify(builder).defaultTools(weatherTools);
     }
 
-    /** 配置 allow-non-admin=true 且配好 Key 之后，普通人才挂联网搜索。 */
+    /** 页面开关打开 + 配好 Key 后，普通人才挂联网搜索。 */
     @Test
-    void nonAdminGetsWebSearchWhenAllowedAndConfigured() {
-        webSearchProperties.setAllowNonAdmin(true);
+    void nonAdminGetsWebSearchWhenEnabledOnPageAndConfigured() {
         webSearchProperties.setApiKey("test-key");
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.CHAT, settings());
+        factory(builder).get(BotChatClientFactory.Persona.CHAT, settings(true));
 
         verify(builder).defaultTools(weatherTools, webSearchTools);
     }
 
-    /** 只开了 allow-non-admin、没配 Key：不发请求，也不要把「去配 Key」这种运维提示暴露给普通人。 */
+    /** 页面开关打开、但服务端没配 Key：不挂（避免把「去配 Key」的运维提示暴露给普通人）。 */
     @Test
     void nonAdminDoesNotGetUnconfiguredWebSearch() {
-        webSearchProperties.setAllowNonAdmin(true);
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings());
+        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings(true));
 
         verify(builder).defaultTools(weatherTools);
+    }
+
+    /** 页面开关变化后要重建客户端，不能只按记忆窗口缓存。 */
+    @Test
+    void rebuildsClientWhenWebSearchToggleChanges() {
+        webSearchProperties.setApiKey("test-key");
+        ChatClient.Builder builder = fluentBuilder();
+        BotChatClientFactory factory = factory(builder);
+
+        factory.get(BotChatClientFactory.Persona.MONITOR_USER, settings(false));
+        factory.get(BotChatClientFactory.Persona.MONITOR_USER, settings(true));
+
+        verify(builder).defaultTools(weatherTools);
+        verify(builder).defaultTools(weatherTools, webSearchTools);
     }
 
     @Test
@@ -107,7 +119,7 @@ class BotChatClientFactoryTest {
         BotChatClientFactory factory = factory(null);
 
         assertThat(factory.available()).isFalse();
-        assertThat(factory.get(BotChatClientFactory.Persona.CHAT, settings())).isNull();
+        assertThat(factory.get(BotChatClientFactory.Persona.CHAT, settings(false))).isNull();
         // 一次确认不可用后保持不可用，不必反复探测
         assertThat(factory.available()).isFalse();
     }

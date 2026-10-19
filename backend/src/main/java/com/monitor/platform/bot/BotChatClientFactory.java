@@ -154,7 +154,7 @@ public class BotChatClientFactory {
         }
     }
 
-    private record CachedClient(ChatClient client, int window) {
+    private record CachedClient(ChatClient client, int window, boolean webSearch) {
     }
 
     /**
@@ -168,13 +168,15 @@ public class BotChatClientFactory {
             return null;
         }
         int window = Math.max(2, settings.memoryWindow());
+        // 联网搜索开关来自页面设置（bot_settings），变了要重建客户端，不能只按记忆窗口缓存
+        boolean attachWebSearch = shouldAttachWebSearch(persona, settings);
         CachedClient cached = clients.get(persona);
-        if (cached != null && cached.window() == window) {
+        if (cached != null && cached.window() == window && cached.webSearch() == attachWebSearch) {
             return cached.client();
         }
         synchronized (this) {
             cached = clients.get(persona);
-            if (cached != null && cached.window() == window) {
+            if (cached != null && cached.window() == window && cached.webSearch() == attachWebSearch) {
                 return cached.client();
             }
             ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
@@ -189,12 +191,6 @@ public class BotChatClientFactory {
                             MessageWindowChatMemory.builder().maxMessages(window).build())
                             .build());
             // 天气与平台无关，三种人设都能用（含陌生人）。
-            // 联网搜索会花钱（5 元/1000 次）：
-            //   * 管理员：只要功能启用就挂（没配 Key 时工具会提示他去配，便于运维）；
-            //   * 普通人：默认不挂，allow-non-admin=true 且配好 Key 才挂。
-            boolean attachWebSearch = persona.usesTools()
-                    ? webSearchProperties.isEnabled()
-                    : webSearchProperties.isAllowNonAdmin() && webSearchProperties.isConfigured();
             if (persona.usesTools()) {
                 configured = attachWebSearch
                         ? configured.defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools)
@@ -205,11 +201,26 @@ public class BotChatClientFactory {
                         : configured.defaultTools(weatherTools);
             }
             ChatClient built = configured.build();
-            clients.put(persona, new CachedClient(built, window));
+            clients.put(persona, new CachedClient(built, window, attachWebSearch));
             log.info("QQ 机器人人设已就绪: persona={}, 记忆窗口={} 条, 平台工具={}, 联网搜索={}",
                     persona, window, persona.usesTools(), attachWebSearch);
             return built;
         }
+    }
+
+    /**
+     * 是否把联网搜索挂给这个人设。
+     *
+     * <p>管理员：功能启用就挂（没配 Key 时工具会提示运维去配）；
+     * 普通人：<strong>页面开关</strong> {@code bot_settings.web_search_for_non_admin} 打开且已配 Key
+     * 才挂 —— 不把「去配 Key」这类运维提示暴露给普通用户。</p>
+     */
+    private boolean shouldAttachWebSearch(Persona persona, BotSettings settings) {
+        if (!webSearchProperties.isEnabled()) {
+            return false;
+        }
+        return persona.usesTools()
+                || (settings.webSearchForNonAdmin() && webSearchProperties.isConfigured());
     }
 
     /** 大模型是否可用（供「机器人状态」页展示）。 */

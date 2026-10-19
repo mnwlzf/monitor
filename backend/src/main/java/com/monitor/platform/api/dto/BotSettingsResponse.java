@@ -14,6 +14,7 @@ import java.util.Set;
  * @param commandPrefix   命令前缀
  * @param maxReplyLength  单条回复最大字符数
  * @param memoryWindow    每个会话保留的历史消息条数
+ * @param webSearchForNonAdmin 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索
  * @param updatedAt       最后保存时间
  */
 public record BotSettingsResponse(
@@ -25,6 +26,7 @@ public record BotSettingsResponse(
         String commandPrefix,
         int maxReplyLength,
         int memoryWindow,
+        boolean webSearchForNonAdmin,
         OffsetDateTime updatedAt
 ) {
 }

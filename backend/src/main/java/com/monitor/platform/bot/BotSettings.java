@@ -19,7 +19,9 @@ public record BotSettings(
         boolean requireMention,
         String commandPrefix,
         int maxReplyLength,
-        int memoryWindow
+        int memoryWindow,
+        /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索（页面可配）。 */
+        boolean webSearchForNonAdmin
 ) {
 
     public boolean isGroupAllowed(Long groupId) {

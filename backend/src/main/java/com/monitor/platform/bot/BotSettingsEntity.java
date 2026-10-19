@@ -19,6 +19,8 @@ public class BotSettingsEntity {
     private String commandPrefix;
     private Integer maxReplyLength;
     private Integer memoryWindow;
+    /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索。 */
+    private Boolean webSearchForNonAdmin;
     private OffsetDateTime updatedAt;
 
     public Integer getId() { return id; }
@@ -39,6 +41,8 @@ public class BotSettingsEntity {
     public void setMaxReplyLength(Integer maxReplyLength) { this.maxReplyLength = maxReplyLength; }
     public Integer getMemoryWindow() { return memoryWindow; }
     public void setMemoryWindow(Integer memoryWindow) { this.memoryWindow = memoryWindow; }
+    public Boolean getWebSearchForNonAdmin() { return webSearchForNonAdmin; }
+    public void setWebSearchForNonAdmin(Boolean webSearchForNonAdmin) { this.webSearchForNonAdmin = webSearchForNonAdmin; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

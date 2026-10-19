@@ -440,6 +440,8 @@ export interface BotSettings {
   commandPrefix: string
   maxReplyLength: number
   memoryWindow: number
+  /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索。 */
+  webSearchForNonAdmin: boolean
   updatedAt: string | null
 }
 /** 监控项目侧登记的自定义管理员。 */

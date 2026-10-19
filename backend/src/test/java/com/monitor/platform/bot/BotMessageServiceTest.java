@@ -79,7 +79,7 @@ class BotMessageServiceTest {
         BotSettingsService settingsService = mock(BotSettingsService.class);
         when(settingsService.current()).thenReturn(new BotSettings(
                 true, java.util.Set.of("222", "333"), java.util.Set.of("999"), java.util.Set.of("222"),
-                true, "/", 900, 10));
+                true, "/", 900, 10, false));
 
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);

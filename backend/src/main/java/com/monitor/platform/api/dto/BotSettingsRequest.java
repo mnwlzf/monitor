@@ -19,6 +19,8 @@ public record BotSettingsRequest(
         Boolean requireMention,
         String commandPrefix,
         Integer maxReplyLength,
-        Integer memoryWindow
+        Integer memoryWindow,
+        /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索；空按 false。 */
+        Boolean webSearchForNonAdmin
 ) {
 }

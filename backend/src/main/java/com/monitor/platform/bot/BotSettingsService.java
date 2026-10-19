@@ -95,13 +95,14 @@ public class BotSettingsService {
         entity.setCommandPrefix(normalizePrefix(request.commandPrefix()));
         entity.setMaxReplyLength(clamp(request.maxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900));
         entity.setMemoryWindow(clamp(request.memoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10));
+        entity.setWebSearchForNonAdmin(Boolean.TRUE.equals(request.webSearchForNonAdmin()));
         entity.setUpdatedAt(OffsetDateTime.now());
         repository.save(entity);
 
         current = toSettings(entity);
-        log.info("机器人设置已更新: enabled={}, groups={}, platformGroups={}, users={}, requireMention={}",
+        log.info("机器人设置已更新: enabled={}, groups={}, platformGroups={}, users={}, requireMention={}, webSearchForNonAdmin={}",
                 current.enabled(), current.allowedGroups(), current.platformGroups(),
-                current.allowedUsers(), current.requireMention());
+                current.allowedUsers(), current.requireMention(), current.webSearchForNonAdmin());
         return toResponse(entity);
     }
 
@@ -140,6 +141,8 @@ public class BotSettingsService {
         entity.setCommandPrefix(normalizePrefix(properties.getCommandPrefix()));
         entity.setMaxReplyLength(clamp(properties.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900));
         entity.setMemoryWindow(clamp(properties.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10));
+        // 普通人联网搜索默认关闭，首次初始化后由页面维护
+        entity.setWebSearchForNonAdmin(false);
         entity.setUpdatedAt(OffsetDateTime.now());
         repository.save(entity);
         log.info("已用环境变量初始化机器人设置（之后请在页面上维护）: groups={}, users={}",
@@ -156,7 +159,8 @@ public class BotSettingsService {
                 properties.isRequireMention(),
                 normalizePrefix(properties.getCommandPrefix()),
                 clamp(properties.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
-                clamp(properties.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10));
+                clamp(properties.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10),
+                false);
     }
 
     private BotSettings toSettings(BotSettingsEntity entity) {
@@ -168,7 +172,8 @@ public class BotSettingsService {
                 !Boolean.FALSE.equals(entity.getRequireMention()),
                 normalizePrefix(entity.getCommandPrefix()),
                 clamp(entity.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
-                clamp(entity.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10));
+                clamp(entity.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10),
+                Boolean.TRUE.equals(entity.getWebSearchForNonAdmin()));
     }
 
     private BotSettingsResponse toResponse(BotSettingsEntity entity) {
@@ -181,6 +186,7 @@ public class BotSettingsService {
                 normalizePrefix(entity.getCommandPrefix()),
                 clamp(entity.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
                 clamp(entity.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10),
+                Boolean.TRUE.equals(entity.getWebSearchForNonAdmin()),
                 entity.getUpdatedAt());
     }
 
