@@ -1,6 +1,8 @@
 package com.monitor.platform.bot;
 
 import com.monitor.platform.bot.order.BotOrderTools;
+import com.monitor.platform.bot.search.WebSearchProperties;
+import com.monitor.platform.bot.search.WebSearchTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.weather.WeatherTools;
 import org.slf4j.Logger;
@@ -54,6 +56,10 @@ public class BotChatClientFactory {
                不要再乘账号倍率，也不要因为缺少账号倍率而说无法计算。
                工具返回的「是否受影响=是（倒挂）」直接作为结论。
             7. 工具查不到就直说查不到，不要猜测。
+            8. 只有需要外部实时信息（新闻、版本发布、价格、官方文档、事件等）时才用 webSearch；
+               摘要不够再用 webFetch 抓具体链接。问本系统/机器人的功能、命令、权限、账号、
+               余额、号池、变更记录时，直接依据这里的说明或平台工具回答，不要联网搜索，
+               也不要编造外部链接。
             """;
 
     private static final String MONITOR_USER_PROMPT = """
@@ -97,6 +103,8 @@ public class BotChatClientFactory {
     private final BotOrderTools orderTools;
     private final BotUsageTools usageTools;
     private final WeatherTools weatherTools;
+    private final WebSearchTools webSearchTools;
+    private final WebSearchProperties webSearchProperties;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
     /** 每种人设一个客户端；记忆窗口变了会重建。 */
@@ -107,11 +115,15 @@ public class BotChatClientFactory {
                                 BotOrderTools orderTools,
                                 BotUsageTools usageTools,
                                 WeatherTools weatherTools,
+                                WebSearchTools webSearchTools,
+                                WebSearchProperties webSearchProperties,
                                 ObjectProvider<ChatClient.Builder> chatClientBuilder) {
         this.tools = tools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
         this.weatherTools = weatherTools;
+        this.webSearchTools = webSearchTools;
+        this.webSearchProperties = webSearchProperties;
         this.chatClientBuilder = chatClientBuilder;
     }
     /**
@@ -176,14 +188,26 @@ public class BotChatClientFactory {
                     .defaultAdvisors(MessageChatMemoryAdvisor.builder(
                             MessageWindowChatMemory.builder().maxMessages(window).build())
                             .build());
-            // 天气与平台无关，三种人设都能用（含陌生人）
-            configured = persona.usesTools()
-                    ? configured.defaultTools(tools, orderTools, usageTools, weatherTools)
-                    : configured.defaultTools(weatherTools);
+            // 天气与平台无关，三种人设都能用（含陌生人）。
+            // 联网搜索会花钱（5 元/1000 次）：
+            //   * 管理员：只要功能启用就挂（没配 Key 时工具会提示他去配，便于运维）；
+            //   * 普通人：默认不挂，allow-non-admin=true 且配好 Key 才挂。
+            boolean attachWebSearch = persona.usesTools()
+                    ? webSearchProperties.isEnabled()
+                    : webSearchProperties.isAllowNonAdmin() && webSearchProperties.isConfigured();
+            if (persona.usesTools()) {
+                configured = attachWebSearch
+                        ? configured.defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools)
+                        : configured.defaultTools(tools, orderTools, usageTools, weatherTools);
+            } else {
+                configured = attachWebSearch
+                        ? configured.defaultTools(weatherTools, webSearchTools)
+                        : configured.defaultTools(weatherTools);
+            }
             ChatClient built = configured.build();
             clients.put(persona, new CachedClient(built, window));
-            log.info("QQ 机器人人设已就绪: persona={}, 记忆窗口={} 条, 平台工具={}",
-                    persona, window, persona.usesTools());
+            log.info("QQ 机器人人设已就绪: persona={}, 记忆窗口={} 条, 平台工具={}, 联网搜索={}",
+                    persona, window, persona.usesTools(), attachWebSearch);
             return built;
         }
     }

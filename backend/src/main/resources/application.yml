@@ -121,6 +121,18 @@ monitor:
     # 默认预报天数（0 表示只查当前天气）
     default-forecast-days: ${MONITOR_WEATHER_FORECAST_DAYS:3}
 
+  # 联网搜索（DeepSeek 官方 Search / Fetch；按成功请求计费，各 5 元 / 1000 次，QPS 各 5）。
+  # 需要 api.deepseek.com 的 Key；不配则工具只回「未启用」，不会发起请求。
+  # 管理员始终可用；普通人是否可用由 allow-non-admin 控制（默认关，防止被刷）。
+  web-search:
+    enabled: ${MONITOR_WEB_SEARCH_ENABLED:true}
+    allow-non-admin: ${MONITOR_WEB_SEARCH_ALLOW_NON_ADMIN:false}
+    base-url: ${MONITOR_WEB_SEARCH_BASE_URL:https://api.deepseek.com}
+    api-key: ${MONITOR_WEB_SEARCH_API_KEY:}
+    timeout: ${MONITOR_WEB_SEARCH_TIMEOUT:15s}
+    default-count: ${MONITOR_WEB_SEARCH_DEFAULT_COUNT:5}
+    max-count: ${MONITOR_WEB_SEARCH_MAX_COUNT:10}
+
   # 生图（OpenAI 兼容图片接口；与聊天模型共用同一个中转时，base-url 填中转根地址）。
   # 所有人都能用，但全局限频：不分人、不分群，一分钟合计最多 3 张 ——
   # 生图一次 20 秒以上且要花钱/耗额度，必须有总闸。
