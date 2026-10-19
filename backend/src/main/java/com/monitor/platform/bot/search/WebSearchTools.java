@@ -51,6 +51,12 @@ public class WebSearchTools {
     @Autowired
     public WebSearchTools(WebSearchProperties properties) {
         this(properties, buildRestClient(properties));
+        if (properties.isConfigured()) {
+            log.info("联网搜索已启用: baseUrl={}", trimTrailingSlash(properties.getBaseUrl()));
+        } else {
+            log.warn("联网搜索未就绪: enabled={}, apiKey={} —— 改完 .env 需要重启/重建容器才会生效",
+                    properties.isEnabled(), hasText(properties.getApiKey()) ? "已配置" : "空");
+        }
     }
 
     /** 供测试注入 MockRestServiceServer 绑定过的 RestClient。 */
@@ -243,6 +249,10 @@ public class WebSearchTools {
         return cleaned.substring(0, max) + "…";
     }
 
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
     private static String preview(String body) {
         if (body == null) {
             return "";
@@ -277,6 +287,7 @@ public class WebSearchTools {
     }
 
     private static final String NOT_CONFIGURED =
-            "联网搜索未启用：请在 .env 配置 MONITOR_WEB_SEARCH_API_KEY（api.deepseek.com 的官方 Key），"
-                    + "并把 MONITOR_WEB_SEARCH_ENABLED 设为 true。";
+            "联网搜索未启用：当前进程没有读到 MONITOR_WEB_SEARCH_API_KEY（或 MONITOR_WEB_SEARCH_ENABLED=false）。"
+                    + "改完 .env 后需要重启服务；用 docker compose 部署时请执行 docker compose up -d 重建容器"
+                    + "（docker restart 不会重新读取 env_file）。";
 }
