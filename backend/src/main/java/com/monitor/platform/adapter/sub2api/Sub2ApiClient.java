@@ -1,5 +1,7 @@
 package com.monitor.platform.adapter.sub2api;
 
+import com.monitor.platform.adapter.sub2api.model.Sub2CreateKeyRequest;
+import com.monitor.platform.adapter.sub2api.model.Sub2CreateKeyResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ApiKeysUsageResponse;
@@ -125,6 +127,22 @@ public class Sub2ApiClient {
                 .body(Map.of("api_key_ids", apiKeyIds))
                 .retrieve()
                 .body(Sub2ApiKeysUsageResponse.class);
+    }
+
+    /**
+     * 创建 API Key（当前登录账号）。
+     *
+     * <p>接口：{@code POST /api/v1/keys}。成功响应里的 {@code data} 是完整密钥。</p>
+     */
+    public Sub2CreateKeyResponse createKey(String baseUrl, String accessToken,
+                                           Sub2CreateKeyRequest request) {
+        return restClient.post()
+                .uri(baseUrl + KEYS_PATH)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(Sub2CreateKeyResponse.class);
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import com.monitor.platform.bot.key.Sub2KeyTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
@@ -30,6 +31,7 @@ class BotChatClientFactoryTest {
     private final BotUsageTools usageTools = mock(BotUsageTools.class);
     private final WeatherTools weatherTools = mock(WeatherTools.class);
     private final WebSearchTools webSearchTools = mock(WebSearchTools.class);
+    private final Sub2KeyTools sub2KeyTools = mock(Sub2KeyTools.class);
     private final WebSearchProperties webSearchProperties = new WebSearchProperties();
 
     @SuppressWarnings("unchecked")
@@ -38,7 +40,7 @@ class BotChatClientFactoryTest {
         when(provider.getIfAvailable()).thenReturn(builder);
         return new BotChatClientFactory(
                 tools, orderTools, usageTools, weatherTools,
-                webSearchTools, webSearchProperties, provider);
+                webSearchTools, sub2KeyTools, webSearchProperties, provider);
     }
 
     private ChatClient.Builder fluentBuilder() {
@@ -64,9 +66,23 @@ class BotChatClientFactoryTest {
     void adminGetsWebSearchWheneverEnabled() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_ADMIN, settings(false));
+        factory(builder).get(BotChatClientFactory.Persona.MONITOR_ADMIN, settings(false), true);
 
-        verify(builder).defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools);
+        verify(builder).defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools);
+    }
+
+    /**
+     * 管理员即使不在指定群（人设退化成 CHAT），联网搜索也照常可用。
+     *
+     * <p>这是之前的缺陷：按人设判断时，管理员在非指定群会被当成普通人，开关没开就没有联网搜索。</p>
+     */
+    @Test
+    void adminGetsWebSearchEvenWithChatPersona() {
+        ChatClient.Builder builder = fluentBuilder();
+
+        factory(builder).get(BotChatClientFactory.Persona.CHAT, settings(false), true);
+
+        verify(builder).defaultTools(weatherTools, webSearchTools);
     }
 
     /** 普通人：页面开关默认关闭，不挂联网搜索。 */
@@ -74,7 +90,7 @@ class BotChatClientFactoryTest {
     void nonAdminDoesNotGetWebSearchByDefault() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings(false));
+        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings(false), false);
 
         verify(builder).defaultTools(weatherTools);
     }
@@ -85,7 +101,7 @@ class BotChatClientFactoryTest {
         webSearchProperties.setApiKey("test-key");
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.CHAT, settings(true));
+        factory(builder).get(BotChatClientFactory.Persona.CHAT, settings(true), false);
 
         verify(builder).defaultTools(weatherTools, webSearchTools);
     }
@@ -95,7 +111,7 @@ class BotChatClientFactoryTest {
     void nonAdminDoesNotGetUnconfiguredWebSearch() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings(true));
+        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings(true), false);
 
         verify(builder).defaultTools(weatherTools);
     }
@@ -107,8 +123,8 @@ class BotChatClientFactoryTest {
         ChatClient.Builder builder = fluentBuilder();
         BotChatClientFactory factory = factory(builder);
 
-        factory.get(BotChatClientFactory.Persona.MONITOR_USER, settings(false));
-        factory.get(BotChatClientFactory.Persona.MONITOR_USER, settings(true));
+        factory.get(BotChatClientFactory.Persona.MONITOR_USER, settings(false), false);
+        factory.get(BotChatClientFactory.Persona.MONITOR_USER, settings(true), false);
 
         verify(builder).defaultTools(weatherTools);
         verify(builder).defaultTools(weatherTools, webSearchTools);
@@ -119,7 +135,7 @@ class BotChatClientFactoryTest {
         BotChatClientFactory factory = factory(null);
 
         assertThat(factory.available()).isFalse();
-        assertThat(factory.get(BotChatClientFactory.Persona.CHAT, settings(false))).isNull();
+        assertThat(factory.get(BotChatClientFactory.Persona.CHAT, settings(false), false)).isNull();
         // 一次确认不可用后保持不可用，不必反复探测
         assertThat(factory.available()).isFalse();
     }

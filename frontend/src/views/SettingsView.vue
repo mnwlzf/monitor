@@ -311,8 +311,9 @@
         <el-form-item label="普通人可用联网搜索">
           <el-switch v-model="botForm.webSearchForNonAdmin" />
           <span class="admin-form-hint" style="margin-left: 10px">
-            平台普通用户 / 陌生人是否能用联网搜索；需要服务端已配置 DeepSeek 官方 Key（MONITOR_WEB_SEARCH_API_KEY）。
-            保存后立即生效，不用重启
+            管理员始终可用（包括不在「指定群」里的群聊）；这个开关只控制<strong>平台普通用户 / 陌生人</strong>。
+            不受「指定群」限制 —— 群里、私聊都行，只受上面的「允许的群号 / 私聊 QQ」白名单约束。
+            需要服务端已配置 DeepSeek 官方 Key（MONITOR_WEB_SEARCH_API_KEY）；保存后立即生效，不用重启
           </span>
         </el-form-item>
 

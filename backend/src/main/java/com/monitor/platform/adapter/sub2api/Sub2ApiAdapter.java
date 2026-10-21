@@ -1,6 +1,8 @@
 package com.monitor.platform.adapter.sub2api;
 
 import cn.hutool.core.util.StrUtil;
+import com.monitor.platform.adapter.sub2api.model.Sub2CreateKeyRequest;
+import com.monitor.platform.adapter.sub2api.model.Sub2CreateKeyResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ApiKeysUsageResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
@@ -241,6 +243,39 @@ public class Sub2ApiAdapter {
                         ? Map.of() : response.data().stats();
         log.info("{} {} 获取密钥用量成功，共 {} 条", baseUrl, email, stats.size());
         return stats;
+    }
+
+    /**
+     * 创建 API Key（当前登录账号）。
+     *
+     * <p>登录令牌复用采集链路同一份 Redis 缓存；没有令牌时会用邮箱 / 密码登录。
+     * 日志只记录密钥 ID / 名称 / 分组，<strong>绝不打印明文 key</strong>。</p>
+     *
+     * @return 创建出的密钥（含明文 {@code key}，由调用方负责只回给管理员）
+     */
+    public Sub2KeysResponse.KeyItem createKey(String baseUrl, String email, String password,
+                                              String name, Long groupId, Double quota, Integer expiresInDays) {
+        String accessToken = resolveAccessToken(baseUrl, email, password);
+        Sub2CreateKeyRequest request = new Sub2CreateKeyRequest(name, groupId, quota, expiresInDays);
+
+        Sub2CreateKeyResponse response = sub2ApiClient.createKey(baseUrl, accessToken, request);
+        if (response == null) {
+            log.error("{} {} 创建密钥失败：响应为空", baseUrl, email);
+            throw new IllegalStateException("创建密钥失败：响应为空");
+        }
+        if (response.code() != SUCCESS_CODE) {
+            log.error("{} {} 创建密钥失败：code={}, message={}",
+                    baseUrl, email, response.code(), response.message());
+            clearTokenIfUnauthorized(baseUrl, email, response.code());
+            throw new IllegalStateException("创建密钥失败：" + response.message());
+        }
+        if (response.data() == null || StrUtil.isBlank(response.data().key())) {
+            log.error("{} {} 创建密钥失败：响应缺少密钥", baseUrl, email);
+            throw new IllegalStateException("创建密钥失败：响应缺少密钥");
+        }
+        log.info("{} {} 创建密钥成功: id={}, name={}, groupId={}",
+                baseUrl, email, response.data().id(), response.data().name(), response.data().groupId());
+        return response.data();
     }
 
     /**

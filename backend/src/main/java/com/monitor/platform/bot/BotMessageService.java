@@ -290,7 +290,7 @@ public class BotMessageService {
                                boolean platformFeature, BotChannel channel,
                                List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         BotChatClientFactory.Persona persona = personaOf(identity, platformFeature);
-        ChatClient chatClient = chatClients.get(persona, settings);
+        ChatClient chatClient = chatClients.get(persona, settings, identity.admin());
         if (chatClient == null) {
             String message = images.isEmpty()
                     ? "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + commandRouter.help(identity, platformFeature)

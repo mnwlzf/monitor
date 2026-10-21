@@ -11,6 +11,7 @@ import com.monitor.platform.bot.report.BotReportRenderer;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
 import com.monitor.platform.bot.vision.BotImageFetcher;
 import com.monitor.platform.bot.vision.BotVisionProperties;
+import com.monitor.platform.bot.key.Sub2KeyTools;
 import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
 import com.monitor.platform.bot.weather.WeatherTools;
@@ -88,7 +89,7 @@ class QqBotWebhookIntegrationTest {
         BotUserService botUserService = mock(BotUserService.class);
         ImageGenService imageGenService = mock(ImageGenService.class);
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, orderTools, usageTools, weatherTools,
-                mock(WebSearchTools.class), new WebSearchProperties(), provider);
+                mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
                 tools, orderTools, usageTools, channelStatusService, botUserService, weatherTools, bindings, userCache, imageGenService);
 

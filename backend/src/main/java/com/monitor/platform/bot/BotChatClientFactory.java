@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import com.monitor.platform.bot.key.Sub2KeyTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
@@ -104,11 +105,12 @@ public class BotChatClientFactory {
     private final BotUsageTools usageTools;
     private final WeatherTools weatherTools;
     private final WebSearchTools webSearchTools;
+    private final Sub2KeyTools sub2KeyTools;
     private final WebSearchProperties webSearchProperties;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
-    /** 每种人设一个客户端；记忆窗口变了会重建。 */
-    private final Map<Persona, CachedClient> clients = new ConcurrentHashMap<>();
+    /** 每种「人设 + 是否管理员」一个客户端；记忆窗口 / 联网搜索开关变了会重建。 */
+    private final Map<ClientKey, CachedClient> clients = new ConcurrentHashMap<>();
     private volatile boolean unavailable;
 
     public BotChatClientFactory(MonitorChatTools tools,
@@ -116,6 +118,7 @@ public class BotChatClientFactory {
                                 BotUsageTools usageTools,
                                 WeatherTools weatherTools,
                                 WebSearchTools webSearchTools,
+                                Sub2KeyTools sub2KeyTools,
                                 WebSearchProperties webSearchProperties,
                                 ObjectProvider<ChatClient.Builder> chatClientBuilder) {
         this.tools = tools;
@@ -123,6 +126,7 @@ public class BotChatClientFactory {
         this.usageTools = usageTools;
         this.weatherTools = weatherTools;
         this.webSearchTools = webSearchTools;
+        this.sub2KeyTools = sub2KeyTools;
         this.webSearchProperties = webSearchProperties;
         this.chatClientBuilder = chatClientBuilder;
     }
@@ -157,25 +161,30 @@ public class BotChatClientFactory {
     private record CachedClient(ChatClient client, int window, boolean webSearch) {
     }
 
+    /** 客户端缓存键：人设 + 是否管理员（管理员即使人设退化成 CHAT，也要有联网搜索）。 */
+    private record ClientKey(Persona persona, boolean admin) {
+    }
+
     /**
      * 构建（并按人设 + 记忆窗口缓存）ChatClient。
      *
      * <p>{@code ChatClient.Builder} 在 Spring AI 里是 prototype Bean，每次取都是新实例，
      * 因此不同人设之间不会互相带上对方的默认工具 —— 这点对「陌生人拿不到平台工具」是硬要求。</p>
      */
-    public ChatClient get(Persona persona, BotSettings settings) {
+    public ChatClient get(Persona persona, BotSettings settings, boolean admin) {
         if (unavailable) {
             return null;
         }
         int window = Math.max(2, settings.memoryWindow());
         // 联网搜索开关来自页面设置（bot_settings），变了要重建客户端，不能只按记忆窗口缓存
-        boolean attachWebSearch = shouldAttachWebSearch(persona, settings);
-        CachedClient cached = clients.get(persona);
+        boolean attachWebSearch = shouldAttachWebSearch(admin, settings);
+        ClientKey key = new ClientKey(persona, admin);
+        CachedClient cached = clients.get(key);
         if (cached != null && cached.window() == window && cached.webSearch() == attachWebSearch) {
             return cached.client();
         }
         synchronized (this) {
-            cached = clients.get(persona);
+            cached = clients.get(key);
             if (cached != null && cached.window() == window && cached.webSearch() == attachWebSearch) {
                 return cached.client();
             }
@@ -192,34 +201,37 @@ public class BotChatClientFactory {
                             .build());
             // 天气与平台无关，三种人设都能用（含陌生人）。
             if (persona.usesTools()) {
+                // 管理员专属：建密钥工具只挂管理员人设，普通人 / 陌生人拿不到
                 configured = attachWebSearch
-                        ? configured.defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools)
-                        : configured.defaultTools(tools, orderTools, usageTools, weatherTools);
+                        ? configured.defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools)
+                        : configured.defaultTools(tools, orderTools, usageTools, weatherTools, sub2KeyTools);
             } else {
                 configured = attachWebSearch
                         ? configured.defaultTools(weatherTools, webSearchTools)
                         : configured.defaultTools(weatherTools);
             }
             ChatClient built = configured.build();
-            clients.put(persona, new CachedClient(built, window, attachWebSearch));
-            log.info("QQ 机器人人设已就绪: persona={}, 记忆窗口={} 条, 平台工具={}, 联网搜索={}",
-                    persona, window, persona.usesTools(), attachWebSearch);
+            clients.put(key, new CachedClient(built, window, attachWebSearch));
+            log.info("QQ 机器人人设已就绪: persona={}, admin={}, 记忆窗口={} 条, 平台工具={}, 联网搜索={}",
+                    persona, admin, window, persona.usesTools(), attachWebSearch);
             return built;
         }
     }
 
     /**
-     * 是否把联网搜索挂给这个人设。
+     * 是否把联网搜索挂给这次请求。
      *
-     * <p>管理员：功能启用就挂（没配 Key 时工具会提示运维去配）；
-     * 普通人：<strong>页面开关</strong> {@code bot_settings.web_search_for_non_admin} 打开且已配 Key
-     * 才挂 —— 不把「去配 Key」这类运维提示暴露给普通用户。</p>
+     * <p>按<strong>说话的人</strong>判断，而不是按人设：管理员即使不在指定群（人设会退化成 CHAT），
+     * 联网搜索作为基础能力也照常可用；普通人由页面开关决定（且要求已配 Key，
+     * 避免把「去配 Key」这类运维提示暴露给普通用户）。</p>
+     *
+     * <p><strong>与群无关</strong>：不看「指定群」；是否响应仍由「允许的群号 / 私聊 QQ」白名单决定。</p>
      */
-    private boolean shouldAttachWebSearch(Persona persona, BotSettings settings) {
+    private boolean shouldAttachWebSearch(boolean admin, BotSettings settings) {
         if (!webSearchProperties.isEnabled()) {
             return false;
         }
-        return persona.usesTools()
+        return admin
                 || (settings.webSearchForNonAdmin() && webSearchProperties.isConfigured());
     }
 
