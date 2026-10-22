@@ -15,12 +15,14 @@ class BotBalanceToolsTest {
 
     @Test
     void shouldDelegateSearchAndPreview() {
-        when(service.search("alice")).thenReturn("user");
-        when(service.preview("alice", 10.0, "补款", "admin@example.com")).thenReturn("preview");
+        when(service.search("alice")).thenReturn("candidates");
+        when(service.candidatesForRecharge("alice", 10.0)).thenReturn("candidates-with-amount");
+        when(service.previewForUser(7L, 10.0, "补款", "admin@example.com")).thenReturn("preview");
 
         BotBalanceTools tools = new BotBalanceTools(service, "admin@example.com", "给 alice 充值 10");
-        assertEquals("user", tools.searchPlatformUsers("alice"));
-        assertEquals("preview", tools.requestBalanceIncrease("alice", 10.0, "补款"));
+        assertEquals("candidates", tools.searchPlatformUsers("alice"));
+        assertEquals("candidates-with-amount", tools.findBalanceRechargeCandidates("alice", 10.0));
+        assertEquals("preview", tools.previewBalanceIncreaseForUser(7L, 10.0, "补款"));
     }
 
     @Test

@@ -14,7 +14,6 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
@@ -49,18 +48,48 @@ class BotBalanceServiceTest {
     }
 
     @Test
-    void shouldPreviewThenAddBalanceWithIdempotency() {
+    void shouldAlwaysReturnCandidatesEvenForExactLookingUsername() {
+        Sub2AdminUser alice = user(7L, "alice", "alice@example.com", 10.5);
+        when(client.searchUsers("https://sub2.example.com", "admin-key", "alice", 20))
+                .thenReturn(List.of(alice));
+
+        String result = service.search("alice");
+
+        assertTrue(result.contains("匹配到候选用户"));
+        assertTrue(result.contains("ID 7"));
+        assertTrue(result.contains("选择用户 <ID>"));
+        assertTrue(!result.contains("确认码"));
+    }
+
+    @Test
+    void shouldReturnCandidatesForRechargeAndNotCreatePreview() {
+        when(client.searchUsers("https://sub2.example.com", "admin-key", "ali", 20))
+                .thenReturn(List.of(
+                        user(7L, "alice", "alice@example.com", 10.5),
+                        user(8L, "alina", "alina@example.com", 8.0)));
+
+        String result = service.candidatesForRecharge("ali", 5.0);
+
+        assertTrue(result.contains("充值金额：$5"));
+        assertTrue(result.contains("ID 7"));
+        assertTrue(result.contains("ID 8"));
+        assertTrue(result.contains("选择用户 <ID>"));
+        assertTrue(!result.contains("确认码"));
+        verify(client, never()).updateBalance(anyString(), anyString(), anyLong(),
+                any(), any(), any());
+    }
+
+    @Test
+    void shouldPreviewSelectedUserThenAddBalanceWithIdempotency() {
         Sub2AdminUser before = user(7L, "alice", "alice@example.com", 10.5);
         Sub2AdminUser after = user(7L, "alice", "alice@example.com", 23.0);
-        when(client.searchUsers("https://sub2.example.com", "admin-key", "alice", 20))
-                .thenReturn(List.of(before));
         when(client.findUserById("https://sub2.example.com", "admin-key", 7L))
                 .thenReturn(Optional.of(before));
         when(client.updateBalance(eq("https://sub2.example.com"), eq("admin-key"), eq(7L),
                 eq(new BigDecimal("12.50")), contains("admin@example.com"),
                 anyString())).thenReturn(after);
 
-        String preview = service.preview("alice", 12.5, "支付波动补款", "admin@example.com");
+        String preview = service.previewForUser(7L, 12.5, "支付波动补款", "admin@example.com");
         String code = code(preview);
 
         String result = service.confirm(code, "admin@example.com");
@@ -75,28 +104,27 @@ class BotBalanceServiceTest {
     }
 
     @Test
-    void shouldReturnCandidatesForFuzzySearchAndNotCreatePreview() {
-        when(client.searchUsers("https://sub2.example.com", "admin-key", "ali", 20))
-                .thenReturn(List.of(
-                        user(7L, "alice", "alice@example.com", 10.5),
-                        user(8L, "alina", "alina@example.com", 8.0)));
+    void shouldIncludeNumericIdAsCandidateWithoutAutoSelecting() {
+        Sub2AdminUser found = user(9L, "bob", "bob@example.com", 3.0);
+        when(client.searchUsers("https://sub2.example.com", "admin-key", "9", 20))
+                .thenReturn(List.of());
+        when(client.findUserById("https://sub2.example.com", "admin-key", 9L))
+                .thenReturn(Optional.of(found));
 
-        String preview = service.preview("ali", 5.0, null, "admin@example.com");
+        String result = service.search("9");
 
-        assertTrue(preview.contains("没有精确匹配"));
-        assertTrue(preview.contains("ID 7"));
-        assertTrue(preview.contains("ID 8"));
-        assertTrue(!preview.contains("确认码"));
-        verify(client, never()).findUserById(anyString(), anyString(), anyLong());
-        verify(client, never()).updateBalance(anyString(), anyString(), anyLong(),
-                any(), any(), any());
+        assertTrue(result.contains("ID 9"));
+        assertTrue(result.contains("选择用户 <ID>"));
+        assertTrue(!result.contains("确认码"));
+        verify(client).searchUsers("https://sub2.example.com", "admin-key", "9", 20);
+        verify(client).findUserById("https://sub2.example.com", "admin-key", 9L);
     }
 
     @Test
     void shouldRejectNonPositiveOrMoreThanTwoDecimalPlaces() {
-        assertTrue(service.preview("alice", 0.0, null, "admin@example.com")
+        assertTrue(service.candidatesForRecharge("alice", 0.0)
                 .contains("必须大于 0"));
-        assertTrue(service.preview("alice", 1.234, null, "admin@example.com")
+        assertTrue(service.candidatesForRecharge("alice", 1.234)
                 .contains("最多保留两位小数"));
         verifyNoInteractions(client);
     }
@@ -104,10 +132,9 @@ class BotBalanceServiceTest {
     @Test
     void shouldRejectConfirmationFromAnotherAdmin() {
         Sub2AdminUser before = user(7L, "alice", "alice@example.com", 10.5);
-        when(client.searchUsers("https://sub2.example.com", "admin-key", "alice", 20))
-                .thenReturn(List.of(before));
-        String preview = service.preview("alice", 5.0, null, "admin@example.com");
-        String code = code(preview);
+        when(client.findUserById("https://sub2.example.com", "admin-key", 7L))
+                .thenReturn(Optional.of(before));
+        String code = code(service.previewForUser(7L, 5.0, null, "admin@example.com"));
 
         String result = service.confirm(code, "other@example.com");
 
@@ -120,13 +147,11 @@ class BotBalanceServiceTest {
     void shouldReplayCompletedResultWithoutAddingTwice() {
         Sub2AdminUser before = user(7L, "alice", "alice@example.com", 10.5);
         Sub2AdminUser after = user(7L, "alice", "alice@example.com", 15.5);
-        when(client.searchUsers("https://sub2.example.com", "admin-key", "alice", 20))
-                .thenReturn(List.of(before));
         when(client.findUserById("https://sub2.example.com", "admin-key", 7L))
                 .thenReturn(Optional.of(before));
         when(client.updateBalance(anyString(), anyString(), eq(7L), eq(new BigDecimal("5.00")),
                 anyString(), anyString())).thenReturn(after);
-        String code = code(service.preview("alice", 5.0, null, "admin@example.com"));
+        String code = code(service.previewForUser(7L, 5.0, null, "admin@example.com"));
 
         String first = service.confirm(code, "admin@example.com");
         String second = service.confirm(code, "admin@example.com");
@@ -135,19 +160,6 @@ class BotBalanceServiceTest {
         assertTrue(second.contains("充值成功"));
         verify(client, times(1)).updateBalance(anyString(), anyString(), eq(7L),
                 any(), any(), any());
-    }
-
-    @Test
-    void shouldLookupByNumericIdWithoutFuzzySearch() {
-        Sub2AdminUser found = user(9L, "bob", "bob@example.com", 3.0);
-        when(client.findUserById("https://sub2.example.com", "admin-key", 9L))
-                .thenReturn(Optional.of(found));
-
-        String preview = service.preview("9", 1.0, null, "admin@example.com");
-
-        assertTrue(preview.contains("ID 9"));
-        assertTrue(preview.contains("确认码"));
-        verify(client, never()).searchUsers(anyString(), anyString(), anyString(), anyInt());
     }
 
     private static Sub2AdminUser user(long id, String username, String email, double balance) {

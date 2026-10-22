@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 管理员余额调整服务。
  *
  * <p>只允许增加余额，并强制两步确认：第一步解析用户、展示当前余额并生成一次性确认码；
- * 第二步由同一管理员在后续消息中明确回复「确认充值 &lt;确认码&gt;」后才调用 Sub2API。</p>
+ * 用户查询始终按模糊匹配返回候选；管理员选定候选用户后，再由同一管理员在后续消息中明确回复「确认充值 &lt;确认码&gt;」后才调用 Sub2API。</p>
  *
  * <p>确认码按管理员邮箱隔离，且带过期时间。真正调用 Sub2API 时携带固定幂等键，
  * 即使网络超时后重试同一确认码，也不会重复加余额。</p>
@@ -52,21 +52,40 @@ public class BotBalanceService {
         this.client = client;
     }
 
-    /** 查询平台用户；精确命中返回用户详情，模糊命中只返回候选。 */
+    /** 所有用户查询都按模糊匹配返回候选，不自动选定具体人员。 */
     public String search(String query) {
+        if (isBlank(query)) {
+            return "请输入用户 ID、邮箱或用户名。";
+        }
         Connection connection = connection();
         if (connection.error() != null) {
             return connection.error();
         }
-        Resolution resolution = resolve(connection, query);
-        if (resolution.user() != null) {
-            return formatUser(resolution.user());
-        }
-        return candidatesText(resolution.candidates(), resolution.error());
+        return candidatesText(fuzzyCandidates(connection, query), "匹配到候选用户：");
     }
 
-    /** 生成充值预览，不修改余额。 */
-    public String preview(String query, Double amountUsd, String reason, String operatorEmail) {
+    /** 查询充值候选；校验金额但不创建确认码，等管理员选定具体人员。 */
+    public String candidatesForRecharge(String query, Double amountUsd) {
+        if (isBlank(query)) {
+            return "请输入用户 ID、邮箱或用户名。";
+        }
+        BigDecimal amount;
+        try {
+            amount = normalizeAmount(amountUsd);
+        } catch (IllegalArgumentException ex) {
+            return ex.getMessage();
+        }
+
+        Connection connection = connection();
+        if (connection.error() != null) {
+            return connection.error();
+        }
+        List<Sub2AdminUser> candidates = fuzzyCandidates(connection, query);
+        return candidatesText(candidates, "充值金额：$" + money(amount) + "\n请确认具体人员：");
+    }
+
+    /** 管理员从候选列表选定具体用户后，生成充值预览。 */
+    public String previewForUser(long userId, Double amountUsd, String reason, String operatorEmail) {
         if (isBlank(operatorEmail)) {
             return "无法识别当前管理员邮箱，不能执行余额调整。";
         }
@@ -81,20 +100,20 @@ public class BotBalanceService {
         if (connection.error() != null) {
             return connection.error();
         }
-        Resolution resolution = resolve(connection, query);
-        if (resolution.user() == null) {
-            return candidatesText(resolution.candidates(), resolution.error());
+        Optional<Sub2AdminUser> user = client.findUserById(
+                connection.baseUrl(), connection.adminKey(), userId);
+        if (user.isEmpty()) {
+            return "没有找到 ID 为 " + userId + " 的平台用户。";
         }
 
-        Sub2AdminUser user = resolution.user();
+        Sub2AdminUser selected = user.get();
         String code = newCode();
         Instant now = Instant.now();
         PendingChange change = new PendingChange(
-                code, user.id(), operatorEmail.trim(), amount, normalizeReason(reason),
+                code, selected.id(), operatorEmail.trim(), amount, normalizeReason(reason),
                 now.plus(CONFIRMATION_TTL));
         pending.put(code, change);
-
-        return formatPreview(user, change);
+        return formatPreview(selected, change);
     }
 
     /**
@@ -172,48 +191,26 @@ public class BotBalanceService {
         }
     }
 
-    private Resolution resolve(Connection connection, String query) {
-        if (isBlank(query)) {
-            return Resolution.error("请输入用户 ID、邮箱或用户名。");
-        }
+    private List<Sub2AdminUser> fuzzyCandidates(Connection connection, String query) {
         String keyword = query.trim();
+        List<Sub2AdminUser> candidates = new ArrayList<>(client.searchUsers(
+                connection.baseUrl(), connection.adminKey(), keyword, SEARCH_PAGE_SIZE));
 
+        // 数字 ID 也作为候选加入，但不会自动选中，仍需管理员确认具体人员。
         if (keyword.matches("\\d+")) {
-            long userId;
             try {
-                userId = Long.parseLong(keyword);
-            } catch (NumberFormatException ex) {
-                return Resolution.error("用户 ID 格式不正确。");
-            }
-            if (userId <= 0) {
-                return Resolution.error("用户 ID 必须为正整数。");
-            }
-            Optional<Sub2AdminUser> user = client.findUserById(
-                    connection.baseUrl(), connection.adminKey(), userId);
-            return user.map(Resolution::found)
-                    .orElseGet(() -> Resolution.error("没有找到 ID 为 " + userId + " 的平台用户。"));
-        }
-
-        List<Sub2AdminUser> candidates = client.searchUsers(
-                connection.baseUrl(), connection.adminKey(), keyword, SEARCH_PAGE_SIZE);
-        boolean emailQuery = keyword.contains("@");
-        List<Sub2AdminUser> exact = new ArrayList<>();
-        for (Sub2AdminUser candidate : candidates) {
-            String value = emailQuery ? candidate.email() : candidate.username();
-            if (equalsIgnoreCase(value, keyword)) {
-                exact.add(candidate);
+                long userId = Long.parseLong(keyword);
+                if (userId > 0) {
+                    client.findUserById(connection.baseUrl(), connection.adminKey(), userId)
+                            .filter(user -> candidates.stream().noneMatch(item ->
+                                    item.id() != null && item.id().equals(user.id())))
+                            .ifPresent(user -> candidates.add(0, user));
+                }
+            } catch (NumberFormatException ignored) {
+                // 超出 long 范围的数字仍按普通关键字搜索
             }
         }
-        if (exact.size() == 1) {
-            return Resolution.found(exact.get(0));
-        }
-        if (exact.size() > 1) {
-            return Resolution.ambiguous(exact, "存在多个同名/同邮箱用户，请提供用户 ID 后重试：");
-        }
-        if (candidates.isEmpty()) {
-            return Resolution.error("没有找到匹配的用户。");
-        }
-        return Resolution.ambiguous(candidates, "没有精确匹配，请提供用户 ID 后重试：");
+        return candidates;
     }
 
     private Connection connection() {
@@ -268,20 +265,9 @@ public class BotBalanceService {
         return text.toString();
     }
 
-    private String formatUser(Sub2AdminUser user) {
-        StringBuilder text = new StringBuilder("平台用户\n\n");
-        text.append("用户：").append(userLabel(user)).append('\n');
-        text.append("余额：$").append(money(BigDecimal.valueOf(
-                user.balance() == null ? 0d : user.balance()))).append('\n');
-        text.append("累计充值：$").append(money(BigDecimal.valueOf(
-                user.totalRecharged() == null ? 0d : user.totalRecharged()))).append('\n');
-        text.append("状态：").append(statusText(user.status()));
-        return text.toString();
-    }
-
     private String candidatesText(List<Sub2AdminUser> candidates, String prefix) {
         if (candidates == null || candidates.isEmpty()) {
-            return prefix == null ? "没有找到匹配的用户。" : prefix;
+            return "没有找到匹配的用户。";
         }
         StringBuilder text = new StringBuilder(prefix == null ? "匹配到多个用户：" : prefix);
         text.append('\n');
@@ -296,7 +282,7 @@ public class BotBalanceService {
         if (candidates.size() > MAX_CANDIDATES) {
             text.append("还有 ").append(candidates.size() - MAX_CANDIDATES).append(" 个候选未显示。\n");
         }
-        text.append("请提供用户 ID 后再充值。");
+        text.append("请确认具体人员，然后回复：选择用户 <ID>。");
         return text.toString();
     }
 
@@ -438,17 +424,4 @@ public class BotBalanceService {
         }
     }
 
-    private record Resolution(Sub2AdminUser user, List<Sub2AdminUser> candidates, String error) {
-        private static Resolution found(Sub2AdminUser user) {
-            return new Resolution(user, List.of(), null);
-        }
-
-        private static Resolution ambiguous(List<Sub2AdminUser> candidates, String message) {
-            return new Resolution(null, candidates, message);
-        }
-
-        private static Resolution error(String message) {
-            return new Resolution(null, List.of(), message);
-        }
-    }
 }
