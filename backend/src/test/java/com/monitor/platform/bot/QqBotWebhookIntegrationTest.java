@@ -5,6 +5,7 @@ import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
+import com.monitor.platform.bot.user.BotBalanceService;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.report.BotReportRenderer;
@@ -94,7 +95,7 @@ class QqBotWebhookIntegrationTest {
                 tools, orderTools, usageTools, channelStatusService, botUserService, weatherTools, bindings, userCache, imageGenService);
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, imageGenService, mock(BotRuntimeStatus.class), botUserService, archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

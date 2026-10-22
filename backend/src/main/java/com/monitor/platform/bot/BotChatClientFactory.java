@@ -61,6 +61,11 @@ public class BotChatClientFactory {
                摘要不够再用 webFetch 抓具体链接。问本系统/机器人的功能、命令、权限、账号、
                余额、号池、变更记录时，直接依据这里的说明或平台工具回答，不要联网搜索，
                也不要编造外部链接。
+            9. 管理员要求给平台用户增加余额时：
+               * 先查用户；用户 ID、精确邮箱、精确用户名优先，模糊结果必须让管理员提供用户 ID；
+               * 先调用 requestBalanceIncrease 生成预览，禁止直接声称已充值；
+               * 只有管理员在下一条消息明确回复「确认充值 <确认码>」后，才调用 confirmBalanceIncrease；
+               * 余额操作只允许增加，禁止 set / subtract；成功后如实返回充值前后余额与累计充值。
             """;
 
     private static final String MONITOR_USER_PROMPT = """

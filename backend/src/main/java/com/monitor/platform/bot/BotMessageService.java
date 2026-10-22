@@ -2,6 +2,8 @@ package com.monitor.platform.bot;
 
 import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
+import com.monitor.platform.bot.user.BotBalanceService;
+import com.monitor.platform.bot.user.BotBalanceTools;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.user.BotUserTools;
 import com.monitor.platform.bot.channel.BotChannelStatusTools;
@@ -87,6 +89,7 @@ public class BotMessageService {
     private final ImageGenService imageGenService;
     private final BotRuntimeStatus runtimeStatus;
     private final BotUserService botUserService;
+    private final BotBalanceService botBalanceService;
     private final BotMessageArchiveService archive;
     private final BotImageFetcher imageFetcher;
     private final BotVisionProperties visionProperties;
@@ -109,6 +112,7 @@ public class BotMessageService {
                              ImageGenService imageGenService,
                              BotRuntimeStatus runtimeStatus,
                              BotUserService botUserService,
+                             BotBalanceService botBalanceService,
                              BotMessageArchiveService archive,
                              BotImageFetcher imageFetcher,
                              BotVisionProperties visionProperties,
@@ -124,6 +128,7 @@ public class BotMessageService {
         this.imageGenService = imageGenService;
         this.runtimeStatus = runtimeStatus;
         this.botUserService = botUserService;
+        this.botBalanceService = botBalanceService;
         this.archive = archive;
         this.imageFetcher = imageFetcher;
         this.visionProperties = visionProperties;
@@ -315,6 +320,10 @@ public class BotMessageService {
         // 用户端工具按请求绑定发送者邮箱：大模型只能查到发送者本人的数据
         if (platformFeature && identity.hasEmail()) {
             request = request.tools(new BotUserTools(botUserService, identity.email()));
+        }
+        // 管理员余额调整：按请求绑定管理员身份和当前消息，二次确认必须出现在当前消息里
+        if (platformFeature && identity.admin() && identity.hasEmail()) {
+            request = request.tools(new BotBalanceTools(botBalanceService, identity.email(), text));
         }
         // 渠道状态对「管理员 + 平台用户」都开放，按请求绑定可见范围，普通用户只看自己的分组
         if (platformFeature) {

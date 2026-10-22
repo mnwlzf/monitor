@@ -2,25 +2,29 @@ package com.monitor.platform.bot.user;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.monitor.platform.adapter.sub2api.Sub2AdminApi;
+import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.common.time.BusinessTime;
 import com.monitor.platform.config.RestClientConfig;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 /**
- * Sub2API 管理端「平台用户」只读接口客户端。
+ * Sub2API 管理端「平台用户」客户端：用户查询与管理员余额调整。
  *
  * <p>认证方式与号池客户端一致：请求头 {@code x-api-key: <管理员密钥>}，
- * 不需要登录接口或 Turnstile。全部是只读查询。</p>
+ * 不需要登录接口或 Turnstile。查询接口只读，余额调整只开放管理员加款。</p>
  *
  * <p>对应 Sub2API 源码里的路由（见 {@code internal/server/routes/admin.go}）：</p>
  * <ul>
  *     <li>{@code GET /api/v1/admin/users?search=} —— 按邮箱/用户名搜索用户；</li>
+ *     <li>{@code POST /api/v1/admin/users/:id/balance} —— 管理员增加余额；</li>
  *     <li>{@code GET /api/v1/admin/users/:id/api-keys} —— 某用户的密钥列表；</li>
  *     <li>{@code GET /api/v1/admin/usage/stats?user_id=&period=} —— 某用户的用量统计。</li>
  * </ul>
@@ -36,6 +40,7 @@ public class Sub2UserAdminClient {
     private static final String USERS_PATH = "/api/v1/admin/users";
     private static final String USAGE_STATS_PATH = "/api/v1/admin/usage/stats";
     private static final String API_KEY_HEADER = "x-api-key";
+    private static final String IDEMPOTENCY_HEADER = "Idempotency-Key";
     /** 搜索用户时返回的候选条数上限。 */
     private static final int SEARCH_PAGE_SIZE = 20;
 
@@ -65,6 +70,64 @@ public class Sub2UserAdminClient {
             }
         }
         return Optional.empty();
+    }
+
+    /** 按数字 ID 精确查找平台用户；上游返回 404 时视为不存在。 */
+    public Optional<Sub2AdminUser> findUserById(String baseUrl, String adminKey, long userId) {
+        try {
+            JsonNode data = Sub2AdminApi.execute(() -> restClient.get()
+                    .uri(baseUrl + USERS_PATH + "/{id}", userId)
+                    .header(API_KEY_HEADER, adminKey)
+                    .retrieve()
+                    .body(JsonNode.class), "查询平台用户");
+            if (data == null || data.isNull() || data.isMissingNode()) {
+                return Optional.empty();
+            }
+            return Optional.of(toUser(data));
+        } catch (BusinessException ex) {
+            if (ex.getMessage() != null && ex.getMessage().contains("404")) {
+                return Optional.empty();
+            }
+            throw ex;
+        }
+    }
+
+    /** 按关键字搜索平台用户，供管理员选择目标用户。 */
+    public List<Sub2AdminUser> searchUsers(String baseUrl, String adminKey, String keyword, int limit) {
+        int pageSize = Math.max(1, Math.min(limit, SEARCH_PAGE_SIZE));
+        JsonNode data = Sub2AdminApi.execute(() -> restClient.get()
+                .uri(baseUrl + USERS_PATH + "?search={search}&page=1&page_size={size}",
+                        keyword, pageSize)
+                .header(API_KEY_HEADER, adminKey)
+                .retrieve()
+                .body(JsonNode.class), "查询平台用户");
+
+        List<Sub2AdminUser> result = new ArrayList<>();
+        for (JsonNode node : Sub2AdminApi.extractArray(data)) {
+            result.add(toUser(node));
+        }
+        return result;
+    }
+
+    /**
+     * 管理员增加余额。
+     *
+     * <p>只发送 {@code operation=add}；固定携带幂等键，网络超时后用同一确认码重试不会重复加款。</p>
+     */
+    public Sub2AdminUser updateBalance(String baseUrl, String adminKey, long userId,
+                                       BigDecimal amount, String notes, String idempotencyKey) {
+        JsonNode data = Sub2AdminApi.execute(() -> restClient.post()
+                .uri(baseUrl + USERS_PATH + "/{id}/balance", userId)
+                .header(API_KEY_HEADER, adminKey)
+                .header(IDEMPOTENCY_HEADER, idempotencyKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new Sub2BalanceUpdateRequest(amount, "add", notes))
+                .retrieve()
+                .body(JsonNode.class), "调整平台用户余额");
+        if (data == null || data.isNull() || data.isMissingNode()) {
+            throw new IllegalStateException("调整平台用户余额失败：响应为空");
+        }
+        return toUser(data);
     }
 
     /** 拉取某用户的密钥列表（已打码）。 */
