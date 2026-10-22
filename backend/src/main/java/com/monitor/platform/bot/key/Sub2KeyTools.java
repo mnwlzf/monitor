@@ -2,12 +2,14 @@ package com.monitor.platform.bot.key;
 
 import com.monitor.platform.adapter.sub2api.Sub2ApiAdapter;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
 import com.monitor.platform.collector.application.AccountCredentialService;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.bot.identity.Sub2ApiUserCache;
 import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,11 +50,14 @@ public class Sub2KeyTools {
     private final AccountRepository accountRepository;
     private final AccountCredentialService credentialService;
     private final Sub2ApiAdapter sub2ApiAdapter;
+    private final Sub2ApiUserCache userCache;
 
     public Sub2KeyTools(PlatformRepository platformRepository,
                         AccountRepository accountRepository,
                         AccountCredentialService credentialService,
+                        Sub2ApiUserCache userCache,
                         Sub2ApiAdapter sub2ApiAdapter) {
+        this.userCache = userCache;
         this.platformRepository = platformRepository;
         this.accountRepository = accountRepository;
         this.credentialService = credentialService;
@@ -159,11 +164,52 @@ public class Sub2KeyTools {
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
                         "没有配置「号池监控源」平台（用户自建的 Sub2API），请先在平台页面勾选"));
-        AccountEntity account = accountRepository.findEnabledByPlatformId(platform.getId()).stream()
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                        "号池监控源平台下没有启用账号：" + platform.getPlatformName()));
-        return new Context(platform.getUrl(), account.getEmail(), preparePassword(platform, account));
+
+        List<AccountEntity> accounts = accountRepository.findEnabledByPlatformId(platform.getId());
+        if (accounts.isEmpty()) {
+            throw new IllegalStateException("号池监控源平台下没有启用账号：" + platform.getPlatformName());
+        }
+
+        // 系统设置「身份识别与管理员」的 Sub2API 用户缓存里已经有 role 信息，
+        // 优先用它精确匹配账号，避免不必要的逐个登录探测。
+        for (AccountEntity account : accounts) {
+            if (!isBlank(account.getEmail()) && userCache.isAdmin(account.getEmail())) {
+                try {
+                    String password = preparePassword(platform, account);
+                    log.info("建密钥使用 Sub2API 系统管理员账号: platformId={}, email={}",
+                            platform.getId(), account.getEmail());
+                    return new Context(platform.getUrl(), account.getEmail(), password);
+                } catch (Exception ex) {
+                    log.warn("准备 Sub2API 管理员账号失败: platformId={}, email={}, reason={}",
+                            platform.getId(), account.getEmail(), ex.getMessage());
+                }
+            }
+        }
+
+        // 创建密钥必须使用 Sub2API 系统管理员账号，不能使用第一个普通账号，
+        // 也不能使用监控平台当前发命令的管理员身份。
+        for (AccountEntity account : accounts) {
+            if (isBlank(account.getEmail())) {
+                continue;
+            }
+            try {
+                String password = preparePassword(platform, account);
+                Sub2ProfileResponse profile = sub2ApiAdapter.fetchProfile(
+                        platform.getUrl(), account.getEmail(), password);
+                if (profile != null && profile.data() != null
+                        && "admin".equalsIgnoreCase(profile.data().role())) {
+                    log.info("建密钥使用 Sub2API 系统管理员账号: platformId={}, email={}",
+                            platform.getId(), account.getEmail());
+                    return new Context(platform.getUrl(), account.getEmail(), password);
+                }
+            } catch (Exception ex) {
+                log.warn("检查 Sub2API 账号角色失败: platformId={}, email={}, reason={}",
+                        platform.getId(), account.getEmail(), ex.getMessage());
+            }
+        }
+
+        throw new IllegalStateException(
+                "号池监控源平台下没有找到 Sub2API 系统管理员账号（role=admin），请先配置管理员账号");
     }
 
     /** 与采集链路保持一致：手动 Token 账号先导入缓存；否则读取账号密码。 */

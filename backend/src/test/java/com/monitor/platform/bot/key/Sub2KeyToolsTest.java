@@ -2,7 +2,9 @@ package com.monitor.platform.bot.key;
 
 import com.monitor.platform.adapter.sub2api.Sub2ApiAdapter;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
+import com.monitor.platform.bot.identity.Sub2ApiUserCache;
 import com.monitor.platform.collector.application.AccountCredentialService;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
@@ -35,12 +37,13 @@ class Sub2KeyToolsTest {
     private final AccountRepository accountRepository = mock(AccountRepository.class);
     private final AccountCredentialService credentialService = mock(AccountCredentialService.class);
     private final Sub2ApiAdapter sub2ApiAdapter = mock(Sub2ApiAdapter.class);
+    private final Sub2ApiUserCache userCache = mock(Sub2ApiUserCache.class);
 
     private Sub2KeyTools tools;
 
     @BeforeEach
     void setUp() {
-        tools = new Sub2KeyTools(platformRepository, accountRepository, credentialService, sub2ApiAdapter);
+        tools = new Sub2KeyTools(platformRepository, accountRepository, credentialService, userCache, sub2ApiAdapter);
 
         PlatformEntity platform = new PlatformEntity();
         platform.setId(1);
@@ -56,6 +59,13 @@ class Sub2KeyToolsTest {
         when(platformRepository.findEnabled()).thenReturn(List.of(platform));
         when(accountRepository.findEnabledByPlatformId(1)).thenReturn(List.of(account));
         when(credentialService.resolvePassword(7)).thenReturn("pw");
+        when(userCache.isAdmin("admin@example.com")).thenReturn(true);
+        Sub2ProfileResponse.UserProfile profileData = mock(Sub2ProfileResponse.UserProfile.class);
+        when(profileData.role()).thenReturn("admin");
+        Sub2ProfileResponse profile = mock(Sub2ProfileResponse.class);
+        when(profile.data()).thenReturn(profileData);
+        when(sub2ApiAdapter.fetchProfile("https://sub2.example.com", "admin@example.com", "pw"))
+                .thenReturn(profile);
     }
 
     @Test
@@ -94,6 +104,46 @@ class Sub2KeyToolsTest {
                 .contains("密钥：sk-created-123");
         verify(sub2ApiAdapter).createKey("https://sub2.example.com", "admin@example.com", "pw",
                 "my-key", 32L, 10.0, 30, null);
+    }
+
+    @Test
+    void shouldSelectSub2AdminAccountNotFirstEnabledAccount() {
+        AccountEntity monitorAccount = new AccountEntity();
+        monitorAccount.setId(8);
+        monitorAccount.setEmail("monitor-admin@example.com");
+        monitorAccount.setAuthType(AccountCredentialService.PASSWORD);
+        AccountEntity sub2Admin = new AccountEntity();
+        sub2Admin.setId(9);
+        sub2Admin.setEmail("system-admin@example.com");
+        sub2Admin.setAuthType(AccountCredentialService.PASSWORD);
+
+        when(accountRepository.findEnabledByPlatformId(1))
+                .thenReturn(List.of(monitorAccount, sub2Admin));
+        when(credentialService.resolvePassword(8)).thenReturn("monitor-pw");
+        when(credentialService.resolvePassword(9)).thenReturn("admin-pw");
+        when(userCache.isAdmin("monitor-admin@example.com")).thenReturn(false);
+        when(userCache.isAdmin("system-admin@example.com")).thenReturn(true);
+        Sub2ProfileResponse monitorProfile = profile("user");
+        Sub2ProfileResponse adminProfile = profile("admin");
+        when(sub2ApiAdapter.fetchProfile("https://sub2.example.com",
+                "monitor-admin@example.com", "monitor-pw"))
+                .thenReturn(monitorProfile);
+        when(sub2ApiAdapter.fetchProfile("https://sub2.example.com",
+                "system-admin@example.com", "admin-pw"))
+                .thenReturn(adminProfile);
+
+        Sub2GroupsResponse.Group group = group(32L, "pro", "openai", 0.3);
+        when(sub2ApiAdapter.fetchAvailableGroups("https://sub2.example.com",
+                "system-admin@example.com", "admin-pw")).thenReturn(groups(group));
+        Sub2KeysResponse.KeyItem created = createdKey();
+        when(sub2ApiAdapter.createKey("https://sub2.example.com", "system-admin@example.com",
+                "admin-pw", "my-key", 32L, 10.0, 30, null)).thenReturn(created);
+
+        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 10.0, 30, null);
+
+        assertThat(reply).contains("密钥创建成功");
+        verify(sub2ApiAdapter).createKey("https://sub2.example.com", "system-admin@example.com",
+                "admin-pw", "my-key", 32L, 10.0, 30, null);
     }
 
     @Test
@@ -183,6 +233,14 @@ class Sub2KeyToolsTest {
         assertThat(tools.createSub2ApiKey("openai", "my-key", "pro", 1.0, -1, null))
                 .contains("有效期天数不能为负数");
         verifyNoInteractions(sub2ApiAdapter);
+    }
+
+    private static Sub2ProfileResponse profile(String role) {
+        Sub2ProfileResponse.UserProfile data = mock(Sub2ProfileResponse.UserProfile.class);
+        when(data.role()).thenReturn(role);
+        Sub2ProfileResponse profile = mock(Sub2ProfileResponse.class);
+        when(profile.data()).thenReturn(data);
+        return profile;
     }
 
     private static Sub2GroupsResponse groups(Sub2GroupsResponse.Group... groups) {
