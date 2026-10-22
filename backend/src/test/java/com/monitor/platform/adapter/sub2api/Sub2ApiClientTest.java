@@ -2,6 +2,7 @@ package com.monitor.platform.adapter.sub2api;
 
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ApiKeysUsageResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2UpdateKeyResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -172,6 +173,38 @@ class Sub2ApiClientTest {
         assertEquals(2, response.data().stats().size());
         assertEquals(0.145950112,
                 response.data().stats().get("39").totalActualCost().doubleValue(), 1e-9);
+        server.verify();
+    }
+
+    @Test
+    void shouldPutKeyExpirationAsRfc3339() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        Sub2ApiClient client = new Sub2ApiClient(builder.build());
+
+        server.expect(requestTo(BASE_URL + "/api/v1/keys/53"))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer access-token"))
+                .andExpect(jsonPath("$.expires_at").value("2099-10-22T10:11:12+08:00"))
+                .andRespond(withSuccess("""
+                        {
+                          "code": 0,
+                          "message": "success",
+                          "data": {
+                            "id": 53,
+                            "key": "sk-existing",
+                            "name": "my-key",
+                            "status": "active",
+                            "expires_at": "2099-10-22T10:11:12+08:00"
+                          }
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        Sub2UpdateKeyResponse response = client.updateKeyExpiration(
+                BASE_URL, "access-token", 53L, "2099-10-22T10:11:12+08:00");
+
+        assertEquals(0, response.code());
+        assertEquals("2099-10-22T10:11:12+08:00", response.data().expiresAt());
         server.verify();
     }
 

@@ -11,6 +11,7 @@ import com.monitor.platform.collector.repository.entity.PlatformEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,7 +60,7 @@ class Sub2KeyToolsTest {
 
     @Test
     void shouldAskForAllMissingParamsWithoutCallingSub2Api() {
-        String reply = tools.createSub2ApiKey(null, " ", "", null, null);
+        String reply = tools.createSub2ApiKey(null, " ", "", null, null, null);
 
         assertThat(reply)
                 .contains("还缺少以下参数")
@@ -78,10 +79,10 @@ class Sub2KeyToolsTest {
         when(sub2ApiAdapter.fetchAvailableGroups("https://sub2.example.com", "admin@example.com", "pw"))
                 .thenReturn(groups(group));
         when(sub2ApiAdapter.createKey("https://sub2.example.com", "admin@example.com", "pw",
-                "my-key", 32L, 10.0, 30))
+                "my-key", 32L, 10.0, 30, null))
                 .thenReturn(created);
 
-        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 10.0, 30);
+        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 10.0, 30, null);
 
         assertThat(reply)
                 .contains("密钥创建成功")
@@ -92,7 +93,7 @@ class Sub2KeyToolsTest {
                 .contains("有效期：30 天")
                 .contains("密钥：sk-created-123");
         verify(sub2ApiAdapter).createKey("https://sub2.example.com", "admin@example.com", "pw",
-                "my-key", 32L, 10.0, 30);
+                "my-key", 32L, 10.0, 30, null);
     }
 
     @Test
@@ -101,12 +102,12 @@ class Sub2KeyToolsTest {
         when(sub2ApiAdapter.fetchAvailableGroups(anyString(), anyString(), any()))
                 .thenReturn(groups(group));
 
-        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 0.0, 0);
+        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 0.0, 0, null);
 
         assertThat(reply)
                 .contains("没找到厂商「openai」")
                 .contains("同名分组实际厂商：anthropic");
-        verify(sub2ApiAdapter, never()).createKey(any(), any(), any(), any(), any(), any(), any());
+        verify(sub2ApiAdapter, never()).createKey(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -116,23 +117,70 @@ class Sub2KeyToolsTest {
         when(sub2ApiAdapter.fetchAvailableGroups(anyString(), anyString(), any()))
                 .thenReturn(groups(group));
         when(sub2ApiAdapter.createKey(anyString(), anyString(), any(), anyString(), anyLong(),
-                anyDouble(), any()))
+                anyDouble(), any(), any()))
                 .thenReturn(created);
 
-        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 0.0, 0);
+        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 0.0, 0, null);
 
         assertThat(reply)
                 .contains("额度限制：不限（$0）")
                 .contains("有效期：永久");
         verify(sub2ApiAdapter).createKey("https://sub2.example.com", "admin@example.com", "pw",
-                "my-key", 32L, 0.0, null);
+                "my-key", 32L, 0.0, null, null);
+    }
+
+    @Test
+    void shouldCreateKeyWithExactExpiryTime() {
+        Sub2GroupsResponse.Group group = group(32L, "pro", "openai", 0.3);
+        Sub2KeysResponse.KeyItem created = createdKey();
+        OffsetDateTime expected = OffsetDateTime.parse("2099-10-22T10:11:12+08:00");
+        when(sub2ApiAdapter.fetchAvailableGroups(anyString(), anyString(), any()))
+                .thenReturn(groups(group));
+        when(sub2ApiAdapter.createKey("https://sub2.example.com", "admin@example.com", "pw",
+                "my-key", 32L, 10.0, null, expected)).thenReturn(created);
+
+        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 10.0, null,
+                "2099-10-22 10:11:12");
+
+        assertThat(reply)
+                .contains("有效期：2099-10-22 10:11:12（Asia/Shanghai）")
+                .contains("密钥：sk-created-123");
+        verify(sub2ApiAdapter).createKey("https://sub2.example.com", "admin@example.com", "pw",
+                "my-key", 32L, 10.0, null, expected);
+    }
+
+    @Test
+    void shouldRejectInvalidExpiryFormat() {
+        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 10.0, null,
+                "2099/10/22 10:11:12");
+
+        assertThat(reply).contains("有效期格式错误", "yyyy-MM-dd HH:mm:ss");
+        verifyNoInteractions(sub2ApiAdapter);
+    }
+
+    @Test
+    void shouldRejectBothExpiryModes() {
+        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 10.0, 30,
+                "2099-10-22 10:11:12");
+
+        assertThat(reply).contains("只能二选一");
+        verifyNoInteractions(sub2ApiAdapter);
+    }
+
+    @Test
+    void shouldRejectPastExpiryTime() {
+        String reply = tools.createSub2ApiKey("openai", "my-key", "pro", 10.0, null,
+                "2000-01-01 00:00:00");
+
+        assertThat(reply).contains("必须晚于当前时间");
+        verifyNoInteractions(sub2ApiAdapter);
     }
 
     @Test
     void shouldRejectNegativeQuotaOrExpiry() {
-        assertThat(tools.createSub2ApiKey("openai", "my-key", "pro", -1.0, 30))
+        assertThat(tools.createSub2ApiKey("openai", "my-key", "pro", -1.0, 30, null))
                 .contains("额度限制不能为负数");
-        assertThat(tools.createSub2ApiKey("openai", "my-key", "pro", 1.0, -1))
+        assertThat(tools.createSub2ApiKey("openai", "my-key", "pro", 1.0, -1, null))
                 .contains("有效期天数不能为负数");
         verifyNoInteractions(sub2ApiAdapter);
     }

@@ -10,6 +10,8 @@ import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2UpdateKeyRequest;
+import com.monitor.platform.adapter.sub2api.model.Sub2UpdateKeyResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import com.monitor.platform.common.time.BusinessTime;
 import org.springframework.http.HttpHeaders;
@@ -154,6 +156,22 @@ public class Sub2ApiClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .body(Sub2GroupsResponse.class);
+    }
+
+    /**
+     * 更新 API Key 的精确到期时间（当前登录账号）。
+     *
+     * <p>接口：{@code PUT /api/v1/keys/:id}，{@code expires_at} 使用 RFC3339 格式。</p>
+     */
+    public Sub2UpdateKeyResponse updateKeyExpiration(String baseUrl, String accessToken,
+                                                      long keyId, String expiresAt) {
+        return restClient.put()
+                .uri(baseUrl + KEYS_PATH + "/{id}", keyId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new Sub2UpdateKeyRequest(expiresAt))
+                .retrieve()
+                .body(Sub2UpdateKeyResponse.class);
     }
 
     /**

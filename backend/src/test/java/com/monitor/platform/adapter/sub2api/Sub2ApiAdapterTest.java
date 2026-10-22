@@ -1,5 +1,9 @@
 package com.monitor.platform.adapter.sub2api;
 
+import com.monitor.platform.adapter.sub2api.model.Sub2CreateKeyRequest;
+import com.monitor.platform.adapter.sub2api.model.Sub2CreateKeyResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2UpdateKeyResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
@@ -14,6 +18,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -143,4 +149,27 @@ class Sub2ApiAdapterTest {
 
         assertTrue(error.getMessage().contains("Token"));
     }
+    @Test
+    void shouldSetExactExpiryAfterCreatingKeyWithAdminAccount() {
+        Sub2KeysResponse.KeyItem created = org.mockito.Mockito.mock(Sub2KeysResponse.KeyItem.class);
+        when(created.id()).thenReturn(53L);
+        when(created.key()).thenReturn("sk-created");
+        when(created.name()).thenReturn("my-key");
+        when(created.groupId()).thenReturn(32L);
+        when(valueOperations.get(TOKEN_CACHE_KEY)).thenReturn("admin-token");
+        when(sub2ApiClient.createKey(eq(BASE_URL), eq("admin-token"), any(Sub2CreateKeyRequest.class)))
+                .thenReturn(new Sub2CreateKeyResponse(0, "ok", created));
+        when(sub2ApiClient.updateKeyExpiration(BASE_URL, "admin-token", 53L,
+                "2099-10-22T10:11:12+08:00"))
+                .thenReturn(new Sub2UpdateKeyResponse(0, "ok", created));
+
+        Sub2KeysResponse.KeyItem result = adapter.createKey(
+                BASE_URL, EMAIL, PASSWORD, "my-key", 32L, 10.0, null,
+                OffsetDateTime.parse("2099-10-22T10:11:12+08:00"));
+
+        assertSame(created, result);
+        verify(sub2ApiClient).updateKeyExpiration(BASE_URL, "admin-token", 53L,
+                "2099-10-22T10:11:12+08:00");
+    }
+
 }

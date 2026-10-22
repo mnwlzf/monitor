@@ -8,6 +8,7 @@ import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
@@ -15,6 +16,11 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -35,6 +41,8 @@ public class Sub2KeyTools {
     private static final Logger log = LoggerFactory.getLogger(Sub2KeyTools.class);
 
     private static final int MAX_GROUP_HINTS = 30;
+    private static final DateTimeFormatter EXPIRES_AT_FORMAT = DateTimeFormatter
+            .ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(ResolverStyle.STRICT);
 
     private final PlatformRepository platformRepository;
     private final AccountRepository accountRepository;
@@ -53,20 +61,22 @@ public class Sub2KeyTools {
 
     @Tool(description = """
             仅管理员可用：在本平台自己的 Sub2API 上创建 API Key。
-            以下 5 个参数全部必填，缺任何一个都【不要调用本工具】，
-            必须先告诉管理员缺少哪几项并请他补充：
+            以下 5 个业务参数全部必填，缺任何一个都【不要调用本工具】：
             - vendor：密钥厂商（分组 platform，如 openai / anthropic / gemini / grok / kimi / deepseek）
             - name：密钥名称
             - group：分组名称
             - quotaUsd：额度限制（美元，0 = 不限）
-            - expiresInDays：有效期天数（0 = 永久）
+            - 有效期：expiresInDays 或 expiresAt 二选一
+              * expiresInDays：有效天数；0 = 永久
+              * expiresAt：精确到期时间，格式必须是 yyyy-MM-dd HH:mm:ss，且必须晚于当前时间
             创建成功后，必须把返回的完整密钥，以及厂商 / 名称 / 分组 / 额度 / 有效期全部原样回复给管理员。
             """)
     public String createSub2ApiKey(String vendor,
                                    String name,
                                    String group,
                                    @ToolParam(required = false, description = "额度限制（USD）；0 表示不限") Double quotaUsd,
-                                   @ToolParam(required = false, description = "有效期天数；0 表示永久") Integer expiresInDays) {
+                                   @ToolParam(required = false, description = "有效期天数；0 表示永久；与 expiresAt 二选一") Integer expiresInDays,
+                                   @ToolParam(required = false, description = "精确到期时间，格式 yyyy-MM-dd HH:mm:ss；与 expiresInDays 二选一") String expiresAt) {
         List<String> missing = new ArrayList<>();
         if (isBlank(vendor)) {
             missing.add("密钥厂商 vendor（如 openai / anthropic / gemini）");
@@ -80,17 +90,33 @@ public class Sub2KeyTools {
         if (quotaUsd == null) {
             missing.add("额度限制 quotaUsd（美元，0 = 不限）");
         }
-        if (expiresInDays == null) {
-            missing.add("有效期 expiresInDays（天，0 = 永久）");
+        boolean hasDays = expiresInDays != null;
+        boolean hasExpiresAt = !isBlank(expiresAt);
+        if (!hasDays && !hasExpiresAt) {
+            missing.add("有效期 expiresInDays 或 expiresAt（二选一）");
         }
         if (!missing.isEmpty()) {
             return "还缺少以下参数，请管理员补充后再创建：\n- " + String.join("\n- ", missing);
         }
+        if (hasDays && hasExpiresAt) {
+            return "有效期只能二选一：expiresInDays 或 expiresAt。";
+        }
         if (quotaUsd < 0) {
             return "额度限制不能为负数（0 表示不限）。";
         }
-        if (expiresInDays < 0) {
+        if (hasDays && expiresInDays < 0) {
             return "有效期天数不能为负数（0 表示永久）。";
+        }
+        OffsetDateTime parsedExpiresAt = null;
+        if (hasExpiresAt) {
+            try {
+                parsedExpiresAt = parseExpiresAt(expiresAt);
+            } catch (IllegalArgumentException ex) {
+                return ex.getMessage();
+            }
+            if (!parsedExpiresAt.isAfter(OffsetDateTime.now(BusinessTime.ZONE))) {
+                return "有效期必须晚于当前时间（Asia/Shanghai）。";
+            }
         }
 
         try {
@@ -112,8 +138,9 @@ public class Sub2KeyTools {
             Sub2GroupsResponse.Group target = matched.get(0);
             Sub2KeysResponse.KeyItem created = sub2ApiAdapter.createKey(
                     context.baseUrl(), context.email(), context.password(),
-                    name.trim(), target.id(), quotaUsd, expiresInDays > 0 ? expiresInDays : null);
-            return formatSuccess(vendor.trim(), name.trim(), target, quotaUsd, expiresInDays, created);
+                    name.trim(), target.id(), quotaUsd,
+                    hasDays && expiresInDays > 0 ? expiresInDays : null, parsedExpiresAt);
+            return formatSuccess(vendor.trim(), name.trim(), target, quotaUsd, expiresInDays, parsedExpiresAt, created);
         } catch (Exception ex) {
             log.warn("创建 Sub2API 密钥失败: vendor={}, group={}, reason={}", vendor, group, ex.getMessage());
             return "创建密钥失败：" + ex.getMessage();
@@ -187,7 +214,8 @@ public class Sub2KeyTools {
     }
 
     private String formatSuccess(String vendor, String name, Sub2GroupsResponse.Group group,
-                                 double quotaUsd, int expiresInDays, Sub2KeysResponse.KeyItem created) {
+                                 double quotaUsd, Integer expiresInDays,
+                                 OffsetDateTime expiresAt, Sub2KeysResponse.KeyItem created) {
         StringBuilder message = new StringBuilder("✅ 密钥创建成功\n\n");
         message.append("厂商：").append(vendor).append('\n');
         message.append("名称：").append(created.name() == null || created.name().isBlank() ? name : created.name())
@@ -200,19 +228,32 @@ public class Sub2KeyTools {
         message.append("额度限制：").append(quotaUsd <= 0
                 ? "不限（$0）"
                 : "$" + money(BigDecimal.valueOf(quotaUsd))).append('\n');
-        if (expiresInDays <= 0) {
-            message.append("有效期：永久\n");
-        } else {
+        if (expiresAt != null) {
+            message.append("有效期：").append(expiresAt.format(EXPIRES_AT_FORMAT))
+                    .append("（Asia/Shanghai）\n");
+        } else if (expiresInDays != null && expiresInDays > 0) {
             message.append("有效期：").append(expiresInDays).append(" 天");
             if (created.expiresAt() != null && !created.expiresAt().isBlank()) {
                 message.append("（到期：").append(created.expiresAt()).append('）');
             }
             message.append('\n');
+        } else {
+            message.append("有效期：永久\n");
         }
         message.append("状态：").append(created.status() == null || created.status().isBlank()
                 ? "active" : created.status()).append('\n');
         message.append("密钥：").append(created.key());
         return message.toString();
+    }
+
+    private static OffsetDateTime parseExpiresAt(String value) {
+        try {
+            LocalDateTime local = LocalDateTime.parse(value.trim(), EXPIRES_AT_FORMAT);
+            return local.atZone(BusinessTime.ZONE).toOffsetDateTime();
+        } catch (DateTimeParseException ex) {
+            throw new IllegalArgumentException(
+                    "有效期格式错误，必须是 yyyy-MM-dd HH:mm:ss，例如 2026-10-22 10:11:12。");
+        }
     }
 
     private static String money(BigDecimal value) {

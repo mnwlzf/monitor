@@ -10,6 +10,7 @@ import com.monitor.platform.adapter.sub2api.model.Sub2LoginRequest;
 import com.monitor.platform.adapter.sub2api.model.Sub2LoginResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2RefreshTokenResponse;
+import com.monitor.platform.adapter.sub2api.model.Sub2UpdateKeyResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2UsageDashboardResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +18,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -251,10 +254,14 @@ public class Sub2ApiAdapter {
      * <p>登录令牌复用采集链路同一份 Redis 缓存；没有令牌时会用邮箱 / 密码登录。
      * 日志只记录密钥 ID / 名称 / 分组，<strong>绝不打印明文 key</strong>。</p>
      *
+     * <p>指定精确到期时间时，先按当前管理员账号创建密钥，再用同一账号调用
+     * {@code PUT /api/v1/keys/:id} 写入 {@code expires_at}。</p>
+     *
      * @return 创建出的密钥（含明文 {@code key}，由调用方负责只回给管理员）
      */
     public Sub2KeysResponse.KeyItem createKey(String baseUrl, String email, String password,
-                                              String name, Long groupId, Double quota, Integer expiresInDays) {
+                                              String name, Long groupId, Double quota,
+                                              Integer expiresInDays, OffsetDateTime expiresAt) {
         String accessToken = resolveAccessToken(baseUrl, email, password);
         Sub2CreateKeyRequest request = new Sub2CreateKeyRequest(name, groupId, quota, expiresInDays);
 
@@ -273,9 +280,31 @@ public class Sub2ApiAdapter {
             log.error("{} {} 创建密钥失败：响应缺少密钥", baseUrl, email);
             throw new IllegalStateException("创建密钥失败：响应缺少密钥");
         }
+
+        Sub2KeysResponse.KeyItem created = response.data();
+        if (expiresAt != null) {
+            if (created.id() == null) {
+                throw new IllegalStateException("密钥已创建，但响应缺少 ID，无法设置精确到期时间");
+            }
+            String expiresAtValue = expiresAt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            Sub2UpdateKeyResponse updated = sub2ApiClient.updateKeyExpiration(
+                    baseUrl, accessToken, created.id(), expiresAtValue);
+            if (updated == null || updated.code() != SUCCESS_CODE) {
+                int code = updated == null ? -1 : updated.code();
+                String message = updated == null ? "响应为空" : updated.message();
+                log.error("{} {} 设置密钥到期时间失败: keyId={}, code={}, message={}",
+                        baseUrl, email, created.id(), code, message);
+                clearTokenIfUnauthorized(baseUrl, email, code);
+                throw new IllegalStateException("密钥已创建（ID " + created.id()
+                        + "），但设置精确到期时间失败：" + message);
+            }
+            log.info("{} {} 设置密钥到期时间成功: keyId={}, expiresAt={}",
+                    baseUrl, email, created.id(), expiresAtValue);
+        }
+
         log.info("{} {} 创建密钥成功: id={}, name={}, groupId={}",
-                baseUrl, email, response.data().id(), response.data().name(), response.data().groupId());
-        return response.data();
+                baseUrl, email, created.id(), created.name(), created.groupId());
+        return created;
     }
 
     /**
