@@ -362,6 +362,8 @@ public class Sub2ErrorReader {
                 }
             }
         }
+        // 保证 WHERE 片段与后续 GROUP BY / ORDER BY 之间有明确分隔，避免拼成 falseGROUP BY。
+        sql.append('\n');
         return new Where(sql.toString(), args);
     }
 
