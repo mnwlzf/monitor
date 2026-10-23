@@ -15,12 +15,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 
@@ -41,7 +44,7 @@ public class BotErrorService {
     private static final String NO_DATABASE = """
             没有配置 Sub2API 只读库连接，错误查询不可用。
             需要设置 SUB2API_DB_URL / SUB2API_DB_USERNAME，并给只读账号授予
-            ops_error_logs、ops_system_logs、ops_ingress_reject_aggregates、usage_logs、users、api_keys、accounts、groups 的 SELECT 权限。""";
+            ops_error_logs、ops_system_logs、ops_ingress_reject_aggregates、usage_logs、users、api_keys、accounts、groups、user_subscriptions、user_allowed_groups 的 SELECT 权限。""";
 
     private final Sub2ErrorReader reader;
     private final BotUserService userService;
@@ -64,9 +67,11 @@ public class BotErrorService {
             ErrorFilter filter = ErrorFilter.all(null);
             List<ErrorGroup> groups = reader.topGroups(window.from(), window.to(), filter, 5);
             List<AccountGroup> accounts = reader.topAccounts(window.from(), window.to(), filter, 5);
+            List<ErrorRow> sampleRows = reader.recent(window.from(), window.to(), filter, 200);
+            List<CauseCount> causes = topCauses(sampleRows, true);
             Long success = safeSuccessCount(window, null);
             Long ingressRejects = safeIngressRejectCount(window);
-            return diagnoseReport(window, summary, success, groups, accounts, ingressRejects);
+            return diagnoseReport(window, summary, success, groups, accounts, ingressRejects, causes);
         } catch (RuntimeException ex) {
             return queryError(ex);
         }
@@ -166,16 +171,23 @@ public class BotErrorService {
 
     private BotReport diagnoseReport(Window window, ErrorSummary summary, Long success,
                                      List<ErrorGroup> groups, List<AccountGroup> accounts,
-                                     Long ingressRejects) {
+                                     Long ingressRejects, List<CauseCount> causes) {
         long totalRequests = success == null ? 0L : success + summary.totalErrors();
         Double errorRate = success == null || totalRequests <= 0
                 ? null : (double) summary.totalErrors() / totalRequests;
 
         List<BotReport.Block> blocks = new ArrayList<>();
+        String inferred = causes.isEmpty()
+                ? "暂无足够上下文"
+                : causes.get(0).label() + "（" + count(causes.get(0).count()) + " 次）";
         blocks.add(BotReport.paragraph(null, List.of(
                 "结论：" + conclusion(window, summary, groups),
-                "建议：" + action(summary, accounts))));
+                "推断：" + inferred,
+                "建议：" + action(summary, accounts, causes))));
         blocks.add(summaryBlock(window, summary, success, errorRate, ingressRejects));
+        if (!causes.isEmpty()) {
+            blocks.add(causesBlock(causes));
+        }
         if (!groups.isEmpty()) {
             blocks.add(groupsBlock(groups));
         }
@@ -185,6 +197,7 @@ public class BotErrorService {
 
         List<String> notes = new ArrayList<>();
         notes.add("默认排除配额/限流等业务限制；回复 /错误 " + window.raw() + " 全部 可包含。");
+        notes.add("原因推断结合错误码、用户/Key/分组/账号状态；单条详情还会参考同链路成功请求。");
         if (ingressRejects != null && ingressRejects > 0) {
             notes.add("另有入口拒绝 " + count(ingressRejects) + " 次，回复 /入口拒绝 " + window.raw() + " 查看原因。");
         }
@@ -353,12 +366,23 @@ public class BotErrorService {
             List<BotReport.Block> blocks = new ArrayList<>();
             blocks.add(detailBlock(detail, admin));
 
-            String cause = firstNonBlank(
+            Long nearbySuccess = safeNearbySuccessCount(row);
+            Cause assessment = assess(row, admin, nearbySuccess);
+            blocks.add(BotReport.paragraph("原因推断", List.of(
+                    assessment.label() + "（" + assessment.confidence() + "置信度）",
+                    assessment.evidence())));
+            if (nearbySuccess != null) {
+                blocks.add(BotReport.paragraph("旁证", List.of(
+                        "同一用户/账号/模型在错误前后 5 分钟内还有 "
+                                + count(nearbySuccess) + " 次成功请求。")));
+            }
+
+            String errorText = firstNonBlank(
                     detail.upstreamErrorMessage(),
                     detail.upstreamErrorDetail(),
                     row.message());
-            if (!cause.isBlank()) {
-                blocks.add(BotReport.paragraph("错误信息", List.of(truncate(cause, 600))));
+            if (!errorText.isBlank()) {
+                blocks.add(BotReport.paragraph("错误信息", List.of(truncate(errorText, 600))));
             }
             if (admin && !detail.errorBody().isBlank()) {
                 blocks.add(BotReport.paragraph("错误正文", List.of(truncate(detail.errorBody(), 600))));
@@ -366,8 +390,7 @@ public class BotErrorService {
             if (admin && !detail.upstreamErrors().isBlank()) {
                 blocks.add(BotReport.paragraph("上游尝试", List.of(truncate(detail.upstreamErrors(), 900))));
             }
-            blocks.add(BotReport.paragraph("建议", List.of(suggestion(
-                    row.phase(), row.type(), row.statusCode(), row.businessLimited()))));
+            blocks.add(BotReport.paragraph("建议", List.of(assessment.suggestion())));
 
             if (admin) {
                 List<SystemLogRow> logs = reader.systemLogs(row.requestId(), row.clientRequestId(), 5);
@@ -422,6 +445,16 @@ public class BotErrorService {
                 BotReport.Col.right("值")), rows, null);
     }
 
+    private BotReport.Block causesBlock(List<CauseCount> causes) {
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (CauseCount cause : causes) {
+            rows.add(BotReport.Row.of(cause.label(), count(cause.count())));
+        }
+        return new BotReport.Block("推断原因", List.of(
+                BotReport.Col.left("原因"),
+                BotReport.Col.right("次数")), rows, null);
+    }
+
     private BotReport.Block groupsBlock(List<ErrorGroup> groups) {
         List<BotReport.Row> rows = new ArrayList<>();
         for (ErrorGroup group : groups) {
@@ -471,6 +504,7 @@ public class BotErrorService {
                         status(row),
                         model(row),
                         identity(row),
+                        assess(row, true, null).label(),
                         truncate(row.message(), 70)));
             } else {
                 data.add(BotReport.Row.of(
@@ -479,6 +513,7 @@ public class BotErrorService {
                         category(row.phase(), row.type()),
                         status(row),
                         model(row),
+                        assess(row, false, null).label(),
                         truncate(row.message(), 90)));
             }
         }
@@ -486,10 +521,11 @@ public class BotErrorService {
                 ? List.of(BotReport.Col.left("编号"), BotReport.Col.left("时间"),
                 BotReport.Col.left("分类"), BotReport.Col.left("状态"),
                 BotReport.Col.left("模型"), BotReport.Col.left("用户/账号"),
-                BotReport.Col.left("消息"))
+                BotReport.Col.left("推断"), BotReport.Col.left("消息"))
                 : List.of(BotReport.Col.left("编号"), BotReport.Col.left("时间"),
                 BotReport.Col.left("分类"), BotReport.Col.left("状态"),
-                BotReport.Col.left("模型"), BotReport.Col.left("消息"));
+                BotReport.Col.left("模型"), BotReport.Col.left("推断"),
+                BotReport.Col.left("消息"));
         return new BotReport.Block("最近错误", cols, data, null);
     }
 
@@ -514,15 +550,46 @@ public class BotErrorService {
         rows.add(BotReport.Row.of("已解决", row.resolved() ? "是" : "否"));
         if (admin) {
             rows.add(BotReport.Row.of("用户", safe(row.userEmail())));
+            rows.add(BotReport.Row.of("用户状态", statusText(row.userStatus())));
+            rows.add(BotReport.Row.of("用户余额", money(row.userBalance())));
             rows.add(BotReport.Row.of("API Key", safe(row.apiKeyName())));
+            rows.add(BotReport.Row.of("Key 状态", statusText(row.apiKeyStatus())));
+            rows.add(BotReport.Row.of("Key 额度", quotaText(row)));
             if (detail.apiKeyPrefix() != null && !detail.apiKeyPrefix().isBlank()) {
                 rows.add(BotReport.Row.of("Key 前缀", detail.apiKeyPrefix()));
             }
             rows.add(BotReport.Row.of("账号", safe(row.accountName())));
+            rows.add(BotReport.Row.of("账号状态", statusText(row.accountStatus())));
+            rows.add(BotReport.Row.of("账号可调度", boolText(row.accountSchedulable())));
+            if (row.accountRateLimitResetAt() != null) {
+                rows.add(BotReport.Row.of("限流恢复", time(row.accountRateLimitResetAt())));
+            }
+            if (row.accountOverloadUntil() != null) {
+                rows.add(BotReport.Row.of("过载截止", time(row.accountOverloadUntil())));
+            }
+            if (row.accountTempUnschedulableUntil() != null) {
+                rows.add(BotReport.Row.of("临时不可调度至", time(row.accountTempUnschedulableUntil())));
+            }
+            if (row.accountTempUnschedulableReason() != null
+                    && !row.accountTempUnschedulableReason().isBlank()) {
+                rows.add(BotReport.Row.of("不可调度原因", row.accountTempUnschedulableReason()));
+            }
             rows.add(BotReport.Row.of("分组", safe(row.groupName())));
+            rows.add(BotReport.Row.of("分组状态", statusText(row.groupStatus())));
+            rows.add(BotReport.Row.of("分组权限", boolText(row.groupAllowed())));
+            rows.add(BotReport.Row.of("订阅状态", statusText(row.subscriptionStatus())));
+            if (row.subscriptionExpiresAt() != null) {
+                rows.add(BotReport.Row.of("订阅到期", time(row.subscriptionExpiresAt())));
+            }
             rows.add(BotReport.Row.of("客户端 IP", safe(row.clientIp())));
             rows.add(BotReport.Row.of("User-Agent", truncate(row.userAgent(), 120)));
             rows.add(BotReport.Row.of("请求路径", safe(detail.requestPath())));
+        } else {
+            rows.add(BotReport.Row.of("Key 状态", statusText(row.apiKeyStatus())));
+            rows.add(BotReport.Row.of("Key 额度", quotaText(row)));
+            rows.add(BotReport.Row.of("分组状态", statusText(row.groupStatus())));
+            rows.add(BotReport.Row.of("分组权限", boolText(row.groupAllowed())));
+            rows.add(BotReport.Row.of("订阅状态", statusText(row.subscriptionStatus())));
         }
         return new BotReport.Block(null, List.of(
                 BotReport.Col.left("项目"),
@@ -753,7 +820,7 @@ public class BotErrorService {
         return "存在零散错误，建议查看最近错误列表。";
     }
 
-    private String action(ErrorSummary summary, List<AccountGroup> accounts) {
+    private String action(ErrorSummary summary, List<AccountGroup> accounts, List<CauseCount> causes) {
         if (summary.rateLimited() > 0) {
             String account = accounts.stream()
                     .filter(item -> item.rateLimited() > 0)
@@ -772,6 +839,9 @@ public class BotErrorService {
         }
         if (summary.businessLimited() > 0) {
             return "检查余额、配额、并发和订阅限制。";
+        }
+        if (!causes.isEmpty()) {
+            return "优先处理「" + causes.get(0).label() + "」，再结合下方证据检查。";
         }
         return "查看最近错误详情，确认具体模型、账号和错误消息。";
     }
@@ -825,6 +895,164 @@ public class BotErrorService {
         };
     }
 
+    private Cause assess(ErrorRow row, boolean admin, Long nearbySuccess) {
+        OffsetDateTime now = OffsetDateTime.now(ZONE);
+        String key = admin ? safe(row.apiKeyName()) : "API Key";
+        String account = admin ? safe(row.accountName()) : "号池账号";
+        String group = admin ? safe(row.groupName()) : "分组";
+        String type = row.type() == null ? "" : row.type().toLowerCase(Locale.ROOT);
+        String phase = row.phase() == null ? "" : row.phase().toLowerCase(Locale.ROOT);
+
+        if (row.apiKeyDeleted()) {
+            return cause("API Key 已删除", key + " 在错误发生后已被删除。", "更换或重新创建 API Key。", "高");
+        }
+        if (isStatus(row.apiKeyStatus(), "disabled")) {
+            return cause("API Key 已禁用", key + " 当前状态为 disabled。", "恢复 API Key 或更换 Key。", "高");
+        }
+        if (row.apiKeyExpired(now)) {
+            return cause("API Key 已过期", key + " 已于 " + time(row.apiKeyExpiresAt()) + " 过期。",
+                    "续期或更换 API Key。", "高");
+        }
+        if (row.apiKeyQuotaExhausted()) {
+            return cause("API Key 额度用尽", key + " 已用 " + money(row.apiKeyQuotaUsed())
+                    + " / 额度 " + money(row.apiKeyQuota()) + "。", "提高额度或更换 API Key。", "高");
+        }
+        if (isStatus(row.userStatus(), "disabled")) {
+            return cause("用户已禁用", safe(row.userEmail()) + " 当前状态为 disabled。",
+                    "检查用户状态或联系用户。", "高");
+        }
+        if ((row.statusCode() == 402 || "billing_error".equals(type) || "subscription_error".equals(type))
+                && row.userBalance() != null && row.userBalance().signum() <= 0) {
+            return cause("用户余额不足", "用户余额为 " + money(row.userBalance()) + "。",
+                    "检查充值、余额和订阅覆盖范围。", "中");
+        }
+        if (row.groupDeleted()) {
+            return cause("分组已删除", group + " 已被删除。", "重新绑定有效分组。", "高");
+        }
+        if (hasText(row.groupStatus()) && !"active".equalsIgnoreCase(row.groupStatus())) {
+            return cause("分组已禁用", group + " 当前状态为 " + row.groupStatus() + "。",
+                    "恢复分组或切换到可用分组。", "高");
+        }
+        if (Boolean.FALSE.equals(row.groupAllowed())) {
+            return cause("用户无分组权限", "用户没有访问 " + group + " 的权限。",
+                    "检查分组是否专属、是否分配订阅或加入允许列表。", "高");
+        }
+        if (hasText(row.subscriptionStatus()) && !"active".equalsIgnoreCase(row.subscriptionStatus())) {
+            return cause("订阅已失效", group + " 的订阅状态为 " + row.subscriptionStatus() + "。",
+                    "续订或恢复订阅。", "高");
+        }
+        if (row.subscriptionExpiresAt() != null && !row.subscriptionExpiresAt().isAfter(now)) {
+            return cause("订阅已过期", group + " 的订阅已于 " + time(row.subscriptionExpiresAt()) + " 过期。",
+                    "续订或恢复订阅。", "高");
+        }
+        if (hasText(row.accountStatus()) && !"active".equalsIgnoreCase(row.accountStatus())) {
+            String detail = admin && hasText(row.accountErrorMessage())
+                    ? "：" + truncate(row.accountErrorMessage(), 160) : "。";
+            return cause("号池账号异常", account + " 当前状态为 " + row.accountStatus() + detail,
+                    "检查账号凭证、上游状态和调度配置。", "高");
+        }
+        if (Boolean.FALSE.equals(row.accountSchedulable())) {
+            return cause("号池账号不可调度", account + " 当前 schedulable=false。",
+                    "恢复账号调度或切换其他账号。", "高");
+        }
+        if (row.accountTempUnschedulable(now)) {
+            String reason = !admin ? "平台调度冷却"
+                    : (row.accountTempUnschedulableReason() == null
+                    || row.accountTempUnschedulableReason().isBlank()
+                    ? "未说明原因" : row.accountTempUnschedulableReason());
+            return cause("号池账号临时不可调度", account + " 不可调度至 "
+                    + time(row.accountTempUnschedulableUntil()) + "，原因：" + reason + "。",
+                    "等待冷却结束，或检查该账号的临时不可调度规则。", "高");
+        }
+        if (row.accountRateLimited(now)) {
+            return cause("号池账号限流中", account + " 限流恢复时间为 "
+                    + time(row.accountRateLimitResetAt()) + "。", "等待限流恢复，或降低该账号调度权重。", "高");
+        }
+        if (row.accountOverloaded(now)) {
+            return cause("号池账号过载冷却", account + " 过载冷却至 "
+                    + time(row.accountOverloadUntil()) + "。", "等待冷却结束，或临时暂停该账号调度。", "高");
+        }
+        if (row.accountExpired(now)) {
+            return cause("号池账号已过期", account + " 已于 " + time(row.accountExpiresAt()) + " 过期。",
+                    "更新账号凭证或重新授权。", "高");
+        }
+        if (row.statusCode() == 402) {
+            return cause("余额/配额不足", "上游返回 402，未发现 Key 额度或用户状态异常。",
+                    "检查用户余额、Key 额度和订阅覆盖范围。", "中");
+        }
+        if (row.statusCode() == 400 || row.statusCode() == 422) {
+            return cause("请求参数/模型名错误", "客户端返回 " + row.statusCode() + "。",
+                    "检查模型名、请求参数、上下文长度和请求体格式。", "中");
+        }
+        if (row.statusCode() == 404) {
+            return cause("模型/端点不存在", "客户端返回 404。",
+                    "检查模型名、端点路径和分组映射。", "中");
+        }
+        if (row.statusCode() == 401 || row.statusCode() == 403) {
+            return cause("鉴权/权限失败", "状态码 " + row.statusCode()
+                    + "，未发现 Key/用户/分组直接异常，可能是凭证内容或上游鉴权问题。",
+                    "检查 Key 是否复制完整、上游凭证是否有效，以及分组权限。", "中");
+        }
+        if (row.statusCode() == 429) {
+            return cause("上游 429 限流", "上游返回 429，未发现账号冷却记录。",
+                    "检查上游限流、账号调度和重试策略。", "中");
+        }
+        if (row.statusCode() == 529) {
+            return cause("上游 529 过载", "上游返回 529，未发现账号过载冷却记录。",
+                    "检查上游状态，考虑降权或暂停该账号。", "中");
+        }
+        if (row.statusCode() >= 500) {
+            return cause("上游 5xx 异常", "上游返回 " + row.statusCode() + "。",
+                    "检查上游账号、供应商状态和网络链路。", "中");
+        }
+        if ("account_auth".equals(phase)) {
+            return cause("号池账号凭证失效", "错误阶段为 account_auth。",
+                    "检查账号授权、凭证有效期和刷新状态。", "高");
+        }
+        if ("routing".equals(phase)) {
+            return cause("无可用账号/路由失败", "错误阶段为 routing。",
+                    "检查分组绑定、账号可调度状态和并发限制。", "中");
+        }
+        if ("network".equals(phase)) {
+            return cause("网络/代理/TLS 异常", "错误阶段为 network。",
+                    "检查代理、DNS/TLS、超时和上游连通性。", "中");
+        }
+        if ("internal".equals(phase)) {
+            return cause("平台内部异常", "错误阶段为 internal。",
+                    "查看关联系统日志和后端错误。", "中");
+        }
+        if ("invalid_request_error".equals(type)) {
+            return cause("请求参数/模型名错误", "错误类型为 invalid_request_error。",
+                    "检查模型名、请求参数、上下文长度和请求体格式。", "中");
+        }
+        if ("cyber_policy".equals(type)) {
+            return cause("安全策略拦截", "错误类型为 cyber_policy。",
+                    "检查内容安全策略和用户请求内容。", "高");
+        }
+        if (row.businessLimited()) {
+            return cause("业务限制", "该错误被标记为 business_limited。",
+                    "检查余额、配额、并发和订阅限制。", "中");
+        }
+        if (nearbySuccess != null && nearbySuccess == 0) {
+            return cause("疑似链路故障", "同一用户/账号/模型在错误前后 5 分钟没有成功请求。",
+                    "继续查看错误正文和系统日志，确认是否为上游或网络故障。", "低");
+        }
+        return cause("上下文不足", "未发现明确的用户、Key、分组或账号状态异常。",
+                suggestion(row.phase(), row.type(), row.statusCode(), row.businessLimited()), "低");
+    }
+
+    private static boolean isStatus(String value, String expected) {
+        return value != null && expected.equalsIgnoreCase(value.trim());
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static Cause cause(String label, String evidence, String suggestion, String confidence) {
+        return new Cause(label, evidence, suggestion, confidence);
+    }
+
     private static String suggestion(String phase, String type, int statusCode, boolean businessLimited) {
         if (businessLimited) {
             return "该错误属于业务限制，优先检查余额、配额、并发或订阅状态。";
@@ -859,6 +1087,39 @@ public class BotErrorService {
             return "检查请求参数、模型名、上下文长度和请求体格式。";
         }
         return "查看错误消息和关联日志，确认具体失败原因。";
+    }
+
+    private static String statusText(String value) {
+        if (value == null || value.isBlank()) {
+            return "-";
+        }
+        return switch (value.trim().toLowerCase(Locale.ROOT)) {
+            case "active" -> "正常";
+            case "disabled" -> "已禁用";
+            case "error" -> "异常";
+            case "expired" -> "已过期";
+            case "suspended" -> "已暂停";
+            case "deleted" -> "已删除";
+            default -> value;
+        };
+    }
+
+    private static String boolText(Boolean value) {
+        if (value == null) {
+            return "-";
+        }
+        return value ? "是" : "否";
+    }
+
+    private static String money(BigDecimal value) {
+        return value == null ? "-" : value.stripTrailingZeros().toPlainString();
+    }
+
+    private static String quotaText(ErrorRow row) {
+        if (row.apiKeyQuota() == null || row.apiKeyQuota().signum() <= 0) {
+            return "不限（已用 " + money(row.apiKeyQuotaUsed()) + "）";
+        }
+        return money(row.apiKeyQuotaUsed()) + " / " + money(row.apiKeyQuota());
     }
 
     private static String status(ErrorRow row) {
@@ -945,6 +1206,30 @@ public class BotErrorService {
         return BotReport.fromMarkdown(value);
     }
 
+    private List<CauseCount> topCauses(List<ErrorRow> rows, boolean admin) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (ErrorRow row : rows) {
+            String label = assess(row, admin, null).label();
+            counts.merge(label, 1L, Long::sum);
+        }
+        List<CauseCount> causes = new ArrayList<>();
+        counts.forEach((label, count) -> causes.add(new CauseCount(label, count)));
+        causes.sort((left, right) -> Long.compare(right.count(), left.count()));
+        return causes.size() > 5 ? new ArrayList<>(causes.subList(0, 5)) : causes;
+    }
+
+    private Long safeNearbySuccessCount(ErrorRow row) {
+        if (row == null || row.createdAt() == null) {
+            return null;
+        }
+        try {
+            return reader.nearbySuccessCount(row.userId(), row.accountId(), row.model(), row.createdAt(), 5);
+        } catch (RuntimeException ex) {
+            log.warn("查询同链路成功请求失败: {}", ex.getMessage());
+            return null;
+        }
+    }
+
     private Long safeIngressRejectCount(Window window) {
         try {
             return reader.ingressRejectCount(window.from(), window.to());
@@ -978,6 +1263,12 @@ public class BotErrorService {
     }
 
     private record ParsedSystemLog(Window window, String level, String keyword, int limit) {
+    }
+
+    private record Cause(String label, String evidence, String suggestion, String confidence) {
+    }
+
+    private record CauseCount(String label, long count) {
     }
 
     private record ParsedErrors(

@@ -12,6 +12,7 @@ import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.user.BotUserService;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -42,6 +43,8 @@ class BotErrorServiceTest {
                 .thenReturn(List.of(new AccountGroup(1L, "account-a", "openai",
                         5, 4, 0, 0, now)));
         when(reader.successCount(any(), any(), isNull())).thenReturn(100L);
+        when(reader.recent(any(), any(), any(ErrorFilter.class), anyInt()))
+                .thenReturn(List.of(errorRow(now)));
 
         BotReport report = service.diagnoseReport("1h");
 
@@ -49,7 +52,9 @@ class BotErrorServiceTest {
         assertThat(report.toPlainText())
                 .contains("429 / 529")
                 .contains("account-a")
-                .contains("上游状态");
+                .contains("上游状态")
+                .contains("推断原因")
+                .contains("上游 529 过载");
     }
 
     @Test
@@ -73,6 +78,30 @@ class BotErrorServiceTest {
                 .contains("429")
                 .doesNotContain("user@example.com")
                 .doesNotContain("account-a");
+    }
+
+    @Test
+    void shouldInferDisabledApiKeyFromCrossTableContext() {
+        OffsetDateTime now = OffsetDateTime.now();
+        ErrorRow row = errorRow(now, "disabled");
+        when(reader.isAvailable()).thenReturn(true);
+        when(reader.detail(12L, null)).thenReturn(new ErrorDetail(
+                row,
+                "",
+                "invalid key",
+                "",
+                "",
+                "",
+                "/v1/responses",
+                null, null, null, null, null));
+        when(reader.systemLogs(any(), any(), anyInt())).thenReturn(List.of());
+
+        BotReport report = service.recentReport("#12");
+
+        assertThat(report.toPlainText())
+                .contains("API Key 已禁用")
+                .contains("高置信度")
+                .contains("恢复 API Key");
     }
 
     @Test
@@ -125,6 +154,7 @@ class BotErrorServiceTest {
                 null, null, null, null, null));
         when(reader.systemLogs(any(), any(), anyInt()))
                 .thenReturn(List.of(new SystemLogRow(now, "warn", "gateway", "upstream 529")));
+        when(reader.nearbySuccessCount(any(), any(), any(), any(), anyInt())).thenReturn(3L);
 
         BotReport report = service.recentReport("#12");
 
@@ -132,10 +162,15 @@ class BotErrorServiceTest {
         assertThat(report.toPlainText())
                 .contains("upstream overloaded")
                 .contains("关联系统日志")
+                .contains("3 次成功请求")
                 .doesNotContain("request_id");
     }
 
     private static ErrorRow errorRow(OffsetDateTime now) {
+        return errorRow(now, "active");
+    }
+
+    private static ErrorRow errorRow(OffsetDateTime now, String apiKeyStatus) {
         return new ErrorRow(
                 12L,
                 now,
@@ -151,12 +186,33 @@ class BotErrorServiceTest {
                 "upstream overloaded",
                 7L,
                 "user@example.com",
+                "active",
+                new BigDecimal("10.00"),
+                BigDecimal.ZERO,
                 3L,
                 "key-a",
+                apiKeyStatus,
+                false,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                null,
                 1L,
                 "account-a",
+                "active",
+                true,
+                null,
+                null,
+                null,
+                "",
+                null,
+                "",
                 2L,
                 "group-a",
+                "active",
+                false,
+                "",
+                null,
+                true,
                 "/v1/responses",
                 "/v1/responses",
                 "1.2.3.4",

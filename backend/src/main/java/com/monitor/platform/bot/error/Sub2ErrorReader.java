@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -166,6 +167,33 @@ public class Sub2ErrorReader {
         ), args.toArray());
     }
 
+    /** 错误发生前后同一用户/账号/模型的成功请求数，用于判断是否局部故障。 */
+    public long nearbySuccessCount(Long userId, Long accountId, String model,
+                                   OffsetDateTime at, int minutes) {
+        if (at == null) {
+            return 0L;
+        }
+        StringBuilder sql = new StringBuilder(
+                "SELECT COUNT(*) FROM usage_logs WHERE created_at >= ? AND created_at < ?");
+        List<Object> args = new ArrayList<>();
+        args.add(at.minusMinutes(Math.max(1, minutes)));
+        args.add(at.plusMinutes(Math.max(1, minutes)));
+        if (userId != null) {
+            sql.append(" AND user_id = ?");
+            args.add(userId);
+        }
+        if (accountId != null) {
+            sql.append(" AND account_id = ?");
+            args.add(accountId);
+        }
+        if (model != null && !model.isBlank()) {
+            sql.append(" AND model = ?");
+            args.add(model);
+        }
+        Long value = jdbc.template().queryForObject(sql.toString(), Long.class, args.toArray());
+        return value == null ? 0L : value;
+    }
+
     /** 最近错误列表。 */
     public List<ErrorRow> recent(OffsetDateTime from, OffsetDateTime to, ErrorFilter filter, int limit) {
         Where where = filterWhere(from, to, filter);
@@ -184,12 +212,39 @@ public class Sub2ErrorReader {
                        COALESCE(e.error_message, '') AS error_message,
                        e.user_id,
                        COALESCE(u.email, '') AS user_email,
+                       COALESCE(u.status, '') AS user_status,
+                       u.balance AS user_balance,
+                       u.frozen_balance AS user_frozen_balance,
                        e.api_key_id,
                        COALESCE(ak.name, '') AS api_key_name,
+                       COALESCE(ak.status, '') AS api_key_status,
+                       (ak.deleted_at IS NOT NULL) AS api_key_deleted,
+                       ak.quota AS api_key_quota,
+                       ak.quota_used AS api_key_quota_used,
+                       ak.expires_at AS api_key_expires_at,
                        e.account_id,
                        COALESCE(a.name, '') AS account_name,
+                       COALESCE(a.status, '') AS account_status,
+                       a.schedulable AS account_schedulable,
+                       a.rate_limit_reset_at AS account_rate_limit_reset_at,
+                       a.overload_until AS account_overload_until,
+                       a.temp_unschedulable_until AS account_temp_unschedulable_until,
+                       COALESCE(a.temp_unschedulable_reason, '') AS account_temp_unschedulable_reason,
+                       a.expires_at AS account_expires_at,
+                       COALESCE(a.error_message, '') AS account_error_message,
                        e.group_id,
                        COALESCE(g.name, '') AS group_name,
+                       COALESCE(g.status, '') AS group_status,
+                       (g.deleted_at IS NOT NULL) AS group_deleted,
+                       COALESCE(s.status, '') AS subscription_status,
+                       s.expires_at AS subscription_expires_at,
+                       CASE WHEN e.group_id IS NULL THEN NULL
+                            WHEN g.subscription_type = 'subscription'
+                                 THEN COALESCE(s.status = 'active' AND s.expires_at > NOW(), false)
+                            ELSE ((NOT g.is_exclusive) AND (NOT COALESCE(u.restrict_public_groups, false)))
+                                 OR EXISTS (SELECT 1 FROM user_allowed_groups ug
+                                            WHERE ug.user_id = e.user_id AND ug.group_id = e.group_id)
+                       END AS group_allowed,
                        COALESCE(e.inbound_endpoint, '') AS inbound_endpoint,
                        COALESCE(e.upstream_endpoint, '') AS upstream_endpoint,
                        CASE WHEN e.client_ip IS NULL THEN '' ELSE host(e.client_ip) END AS client_ip,
@@ -206,6 +261,7 @@ public class Sub2ErrorReader {
                 LEFT JOIN api_keys ak ON ak.id = e.api_key_id
                 LEFT JOIN accounts a ON a.id = e.account_id
                 LEFT JOIN groups g ON g.id = e.group_id
+                LEFT JOIN user_subscriptions s ON s.user_id = e.user_id AND s.group_id = e.group_id
                 """ + where.sql() + " ORDER BY e.created_at DESC LIMIT ?";
         List<Object> args = new ArrayList<>(where.args());
         args.add(Math.max(1, Math.min(limit, 50)));
@@ -327,12 +383,39 @@ public class Sub2ErrorReader {
                        COALESCE(e.error_message, '') AS error_message,
                        e.user_id,
                        COALESCE(u.email, '') AS user_email,
+                       COALESCE(u.status, '') AS user_status,
+                       u.balance AS user_balance,
+                       u.frozen_balance AS user_frozen_balance,
                        e.api_key_id,
                        COALESCE(ak.name, '') AS api_key_name,
+                       COALESCE(ak.status, '') AS api_key_status,
+                       (ak.deleted_at IS NOT NULL) AS api_key_deleted,
+                       ak.quota AS api_key_quota,
+                       ak.quota_used AS api_key_quota_used,
+                       ak.expires_at AS api_key_expires_at,
                        e.account_id,
                        COALESCE(a.name, '') AS account_name,
+                       COALESCE(a.status, '') AS account_status,
+                       a.schedulable AS account_schedulable,
+                       a.rate_limit_reset_at AS account_rate_limit_reset_at,
+                       a.overload_until AS account_overload_until,
+                       a.temp_unschedulable_until AS account_temp_unschedulable_until,
+                       COALESCE(a.temp_unschedulable_reason, '') AS account_temp_unschedulable_reason,
+                       a.expires_at AS account_expires_at,
+                       COALESCE(a.error_message, '') AS account_error_message,
                        e.group_id,
                        COALESCE(g.name, '') AS group_name,
+                       COALESCE(g.status, '') AS group_status,
+                       (g.deleted_at IS NOT NULL) AS group_deleted,
+                       COALESCE(s.status, '') AS subscription_status,
+                       s.expires_at AS subscription_expires_at,
+                       CASE WHEN e.group_id IS NULL THEN NULL
+                            WHEN g.subscription_type = 'subscription'
+                                 THEN COALESCE(s.status = 'active' AND s.expires_at > NOW(), false)
+                            ELSE ((NOT g.is_exclusive) AND (NOT COALESCE(u.restrict_public_groups, false)))
+                                 OR EXISTS (SELECT 1 FROM user_allowed_groups ug
+                                            WHERE ug.user_id = e.user_id AND ug.group_id = e.group_id)
+                       END AS group_allowed,
                        COALESCE(e.inbound_endpoint, '') AS inbound_endpoint,
                        COALESCE(e.upstream_endpoint, '') AS upstream_endpoint,
                        CASE WHEN e.client_ip IS NULL THEN '' ELSE host(e.client_ip) END AS client_ip,
@@ -360,6 +443,7 @@ public class Sub2ErrorReader {
                 LEFT JOIN api_keys ak ON ak.id = e.api_key_id
                 LEFT JOIN accounts a ON a.id = e.account_id
                 LEFT JOIN groups g ON g.id = e.group_id
+                LEFT JOIN user_subscriptions s ON s.user_id = e.user_id AND s.group_id = e.group_id
                 WHERE e.id = ?
                 """);
         List<Object> args = new ArrayList<>();
@@ -484,12 +568,33 @@ public class Sub2ErrorReader {
                 rs.getString("error_message"),
                 nullableLong(rs, "user_id"),
                 rs.getString("user_email"),
+                rs.getString("user_status"),
+                decimalOrNull(rs, "user_balance"),
+                decimalOrNull(rs, "user_frozen_balance"),
                 nullableLong(rs, "api_key_id"),
                 rs.getString("api_key_name"),
+                rs.getString("api_key_status"),
+                rs.getBoolean("api_key_deleted"),
+                decimalOrNull(rs, "api_key_quota"),
+                decimalOrNull(rs, "api_key_quota_used"),
+                time(rs, "api_key_expires_at"),
                 nullableLong(rs, "account_id"),
                 rs.getString("account_name"),
+                rs.getString("account_status"),
+                nullableBoolean(rs, "account_schedulable"),
+                time(rs, "account_rate_limit_reset_at"),
+                time(rs, "account_overload_until"),
+                time(rs, "account_temp_unschedulable_until"),
+                rs.getString("account_temp_unschedulable_reason"),
+                time(rs, "account_expires_at"),
+                rs.getString("account_error_message"),
                 nullableLong(rs, "group_id"),
                 rs.getString("group_name"),
+                rs.getString("group_status"),
+                rs.getBoolean("group_deleted"),
+                rs.getString("subscription_status"),
+                time(rs, "subscription_expires_at"),
+                nullableBoolean(rs, "group_allowed"),
                 rs.getString("inbound_endpoint"),
                 rs.getString("upstream_endpoint"),
                 rs.getString("client_ip"),
@@ -519,6 +624,19 @@ public class Sub2ErrorReader {
     private static Integer nullableInt(ResultSet rs, String column) throws SQLException {
         Object value = rs.getObject(column);
         return value instanceof Number number ? number.intValue() : null;
+    }
+
+    private static Boolean nullableBoolean(ResultSet rs, String column) throws SQLException {
+        Object value = rs.getObject(column);
+        return value instanceof Boolean bool ? bool : null;
+    }
+
+    private static BigDecimal decimalOrNull(ResultSet rs, String column) throws SQLException {
+        Object value = rs.getObject(column);
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
+        }
+        return value instanceof Number number ? BigDecimal.valueOf(number.doubleValue()) : null;
     }
 
     private record Where(String sql, List<Object> args) {
@@ -566,12 +684,33 @@ public class Sub2ErrorReader {
             String message,
             Long userId,
             String userEmail,
+            String userStatus,
+            BigDecimal userBalance,
+            BigDecimal userFrozenBalance,
             Long apiKeyId,
             String apiKeyName,
+            String apiKeyStatus,
+            boolean apiKeyDeleted,
+            BigDecimal apiKeyQuota,
+            BigDecimal apiKeyQuotaUsed,
+            OffsetDateTime apiKeyExpiresAt,
             Long accountId,
             String accountName,
+            String accountStatus,
+            Boolean accountSchedulable,
+            OffsetDateTime accountRateLimitResetAt,
+            OffsetDateTime accountOverloadUntil,
+            OffsetDateTime accountTempUnschedulableUntil,
+            String accountTempUnschedulableReason,
+            OffsetDateTime accountExpiresAt,
+            String accountErrorMessage,
             Long groupId,
             String groupName,
+            String groupStatus,
+            boolean groupDeleted,
+            String subscriptionStatus,
+            OffsetDateTime subscriptionExpiresAt,
+            Boolean groupAllowed,
             String inboundEndpoint,
             String upstreamEndpoint,
             String clientIp,
@@ -584,6 +723,30 @@ public class Sub2ErrorReader {
             String requestId,
             String clientRequestId
     ) {
+        public boolean apiKeyExpired(OffsetDateTime now) {
+            return apiKeyExpiresAt != null && !apiKeyExpiresAt.isAfter(now);
+        }
+
+        public boolean apiKeyQuotaExhausted() {
+            return apiKeyQuota != null && apiKeyQuota.signum() > 0
+                    && apiKeyQuotaUsed != null && apiKeyQuotaUsed.compareTo(apiKeyQuota) >= 0;
+        }
+
+        public boolean accountRateLimited(OffsetDateTime now) {
+            return accountRateLimitResetAt != null && accountRateLimitResetAt.isAfter(now);
+        }
+
+        public boolean accountOverloaded(OffsetDateTime now) {
+            return accountOverloadUntil != null && accountOverloadUntil.isAfter(now);
+        }
+
+        public boolean accountTempUnschedulable(OffsetDateTime now) {
+            return accountTempUnschedulableUntil != null && accountTempUnschedulableUntil.isAfter(now);
+        }
+
+        public boolean accountExpired(OffsetDateTime now) {
+            return accountExpiresAt != null && !accountExpiresAt.isAfter(now);
+        }
     }
 
     public record ErrorGroup(

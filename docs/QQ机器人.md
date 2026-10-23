@@ -150,8 +150,18 @@ MONITOR_BOT_REQUIRE_MENTION=true
 /我的错误 #123
 ```
 
+原因推断会跨表关联：
+
+- `users`：用户状态、余额、分组限制
+- `api_keys`：Key 状态、额度、过期时间
+- `groups` / `user_subscriptions` / `user_allowed_groups`：分组状态、订阅有效性、访问权限
+- `accounts`：账号状态、可调度、限流/过载/临时不可调度、过期时间
+- `usage_logs`：同用户/账号/模型在错误前后是否仍有成功请求
+
+例如会直接指出「API Key 已禁用」「用户无分组权限」「订阅已过期」「号池账号限流中」「上游 529 过载」等原因，并给出置信度和处理建议。
+
 错误命令需要 `SUB2API_DB_URL` / `SUB2API_DB_USERNAME`，并给只读账号授予
-`ops_error_logs`、`ops_system_logs`、`ops_ingress_reject_aggregates`、`usage_logs`、`users`、`api_keys`、`accounts`、`groups`
+`ops_error_logs`、`ops_system_logs`、`ops_ingress_reject_aggregates`、`usage_logs`、`users`、`api_keys`、`accounts`、`groups`、`user_subscriptions`、`user_allowed_groups`
 的 SELECT 权限。错误查询只要求连接信息完整，不依赖 `SUB2API_DB_ENABLED`（该开关只控制号池增量采集）。
 
 ### 长回复会自动转成表格图片
