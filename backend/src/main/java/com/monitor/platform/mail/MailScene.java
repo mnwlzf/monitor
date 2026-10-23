@@ -20,5 +20,8 @@ public enum MailScene {
     CHANNEL_ALERT,
 
     /** 非在用渠道的变更汇总（每天一封）。 */
-    CHANNEL_DIGEST
+    CHANNEL_DIGEST,
+
+    /** Sub2API 错误突增主动告警。 */
+    ERROR_ALERT
 }

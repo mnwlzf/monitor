@@ -44,7 +44,7 @@ class BotSettingsServiceTest {
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
         BotSettingsResponse saved = service.save(new BotSettingsRequest(
-                true, List.of("785724309"), List.of("2696775653"), List.of("785724309"), true, "/", 900, 10, false));
+                true, List.of("785724309"), List.of("2696775653"), List.of("785724309"), true, "/", 900, 10, false, false, 15, 5, 1.5, 30));
 
         assertEquals(Set.of("785724309"), saved.allowedGroups());
         assertEquals(Set.of("785724309"), saved.platformGroups());
@@ -62,7 +62,7 @@ class BotSettingsServiceTest {
         when(repository.find()).thenReturn(existing());
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
-        service.save(new BotSettingsRequest(true, List.of(), List.of(), List.of(), true, "/", 900, 10, false));
+        service.save(new BotSettingsRequest(true, List.of(), List.of(), List.of(), true, "/", 900, 10, false, false, 15, 5, 1.5, 30));
 
         assertTrue(service.current().isGroupAllowed(1L));
         assertTrue(service.current().isUserAllowed(2L));
@@ -77,7 +77,7 @@ class BotSettingsServiceTest {
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
         BotSettingsResponse saved = service.save(new BotSettingsRequest(
-                true, List.of(" 111 ", "", "222"), null, null, null, "   ", 999999, 1, null));
+                true, List.of(" 111 ", "", "222"), null, null, null, "   ", 999999, 1, null, null, null, null, null, null));
 
         assertEquals(Set.of("111", "222"), saved.allowedGroups());
         assertEquals(Set.of(), saved.platformGroups());
@@ -85,6 +85,11 @@ class BotSettingsServiceTest {
         assertEquals(4000, saved.maxReplyLength());
         assertEquals(2, saved.memoryWindow());
         assertTrue(saved.requireMention());
+        assertFalse(saved.errorAlertEnabled());
+        assertEquals(15, saved.errorAlertWindowMinutes());
+        assertEquals(5, saved.errorAlertMinCount());
+        assertEquals(1.5, saved.errorAlertSpikeRatio());
+        assertEquals(30, saved.errorAlertCooldownMinutes());
     }
 
     /** 指定群必须是启用群的子集，越界直接拒绝保存。 */
@@ -95,7 +100,7 @@ class BotSettingsServiceTest {
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
         assertThrows(BusinessException.class, () -> service.save(new BotSettingsRequest(
-                true, List.of("111"), List.of(), List.of("111", "999"), true, "/", 900, 10, false)));
+                true, List.of("111"), List.of(), List.of("111", "999"), true, "/", 900, 10, false, false, 15, 5, 1.5, 30)));
     }
 
     /** 页面开关：普通人是否可用联网搜索，保存后内存快照立即生效。 */
@@ -106,10 +111,29 @@ class BotSettingsServiceTest {
         BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
 
         BotSettingsResponse saved = service.save(new BotSettingsRequest(
-                true, List.of("111"), List.of(), List.of(), true, "/", 900, 10, true));
+                true, List.of("111"), List.of(), List.of(), true, "/", 900, 10, true, false, 15, 5, 1.5, 30));
 
         assertTrue(saved.webSearchForNonAdmin());
         assertTrue(service.current().webSearchForNonAdmin());
+    }
+
+    @Test
+    void shouldPersistErrorAlertSettingsFromPage() {
+        BotSettingsRepository repository = mock(BotSettingsRepository.class);
+        when(repository.find()).thenReturn(existing());
+        BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
+
+        BotSettingsResponse saved = service.save(new BotSettingsRequest(
+                true, List.of("111"), List.of(), List.of(), true, "/", 900, 10, false,
+                true, 30, 10, 2.0, 60));
+
+        assertTrue(saved.errorAlertEnabled());
+        assertEquals(30, saved.errorAlertWindowMinutes());
+        assertEquals(10, saved.errorAlertMinCount());
+        assertEquals(2.0, saved.errorAlertSpikeRatio());
+        assertEquals(60, saved.errorAlertCooldownMinutes());
+        assertTrue(service.current().errorAlertEnabled());
+        assertEquals(30, service.current().errorAlertWindowMinutes());
     }
 
     @Test

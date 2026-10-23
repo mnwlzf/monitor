@@ -21,6 +21,16 @@ public record BotSettingsRequest(
         Integer maxReplyLength,
         Integer memoryWindow,
         /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索；空按 false。 */
-        Boolean webSearchForNonAdmin
+        Boolean webSearchForNonAdmin,
+        /** 是否启用 Sub2API 错误突增主动告警；空按 false。 */
+        Boolean errorAlertEnabled,
+        /** 告警窗口分钟数，空按 15。 */
+        Integer errorAlertWindowMinutes,
+        /** 最小触发数量，空按 5。 */
+        Integer errorAlertMinCount,
+        /** 突增倍数，空按 1.5。 */
+        Double errorAlertSpikeRatio,
+        /** 冷却分钟数，空按 30。 */
+        Integer errorAlertCooldownMinutes
 ) {
 }

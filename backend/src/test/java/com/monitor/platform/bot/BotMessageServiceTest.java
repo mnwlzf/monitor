@@ -21,7 +21,10 @@ import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.error.BotErrorQueryAuditService;
+import com.monitor.platform.bot.error.BotErrorQueryGuard;
 import com.monitor.platform.bot.error.BotErrorService;
+import com.monitor.platform.bot.error.BotInstanceErrorService;
 import com.monitor.platform.bot.error.BotErrorTools;
 import com.monitor.platform.bot.image.ImageGenService;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +68,9 @@ class BotMessageServiceTest {
     private BotUsageTools usageTools;
     private BotChannelStatusService channelStatusService;
     private BotErrorService errorService;
+    private BotInstanceErrorService instanceErrorService;
+    private BotErrorQueryGuard errorQueryGuard;
+    private BotErrorQueryAuditService errorQueryAuditService;
     private BotErrorTools errorTools;
     private ImageGenService imageGenService;
     private BotRuntimeStatus runtimeStatus;
@@ -85,7 +91,7 @@ class BotMessageServiceTest {
         BotSettingsService settingsService = mock(BotSettingsService.class);
         when(settingsService.current()).thenReturn(new BotSettings(
                 true, java.util.Set.of("222", "333"), java.util.Set.of("999"), java.util.Set.of("222"),
-                true, "/", 900, 10, false));
+                true, "/", 900, 10, false, false, 15, 5, 1.5, 30));
 
         client = mock(OneBotClient.class);
         tools = mock(MonitorChatTools.class);
@@ -93,6 +99,10 @@ class BotMessageServiceTest {
         usageTools = mock(BotUsageTools.class);
         channelStatusService = mock(BotChannelStatusService.class);
         errorService = mock(BotErrorService.class);
+        instanceErrorService = mock(BotInstanceErrorService.class);
+        errorQueryGuard = mock(BotErrorQueryGuard.class);
+        errorQueryAuditService = mock(BotErrorQueryAuditService.class);
+        when(errorQueryGuard.allow(anyLong())).thenReturn(true);
         errorTools = mock(BotErrorTools.class);
         imageGenService = mock(ImageGenService.class);
         runtimeStatus = new BotRuntimeStatus();
@@ -114,9 +124,9 @@ class BotMessageServiceTest {
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, botUserService, weatherTools, bindings, userCache, imageGenService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService);
         service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -209,6 +219,66 @@ class BotMessageServiceTest {
         service.onEvent(event(privateCommand("/错误账号 1h 5")));
 
         verify(errorService, timeout(3000)).accountReport("1h 5");
+    }
+
+    @Test
+    void shouldRouteAdminInstanceErrorQuery() throws Exception {
+        identityIs(admin());
+        when(instanceErrorService.report("1h")).thenReturn(BotReport.fromMarkdown("多实例"));
+
+        service.onEvent(event(privateCommand("/错误实例 1h")));
+
+        verify(instanceErrorService, timeout(3000)).report("1h");
+    }
+
+    @Test
+    void shouldRouteAdminRecoveredErrorQuery() throws Exception {
+        identityIs(admin());
+        when(errorService.recoveredReport("1h 10")).thenReturn(BotReport.fromMarkdown("恢复错误"));
+
+        service.onEvent(event(privateCommand("/恢复错误 1h 10")));
+
+        verify(errorService, timeout(3000)).recoveredReport("1h 10");
+    }
+
+    @Test
+    void shouldRouteAdminErrorChangeQuery() throws Exception {
+        identityIs(admin());
+        when(errorService.changeReport("1h")).thenReturn(BotReport.fromMarkdown("错误变更"));
+
+        service.onEvent(event(privateCommand("/错误变更 1h")));
+
+        verify(errorService, timeout(3000)).changeReport("1h");
+    }
+
+    @Test
+    void shouldRouteAdminErrorTrendQuery() throws Exception {
+        identityIs(admin());
+        when(errorService.trendReport("1h")).thenReturn(BotReport.fromMarkdown("错误趋势"));
+
+        service.onEvent(event(privateCommand("/错误趋势 1h")));
+
+        verify(errorService, timeout(3000)).trendReport("1h");
+    }
+
+    @Test
+    void shouldRouteAdminErrorFingerprintQuery() throws Exception {
+        identityIs(admin());
+        when(errorService.fingerprintReport("1h 5")).thenReturn(BotReport.fromMarkdown("错误指纹"));
+
+        service.onEvent(event(privateCommand("/错误指纹 1h 5")));
+
+        verify(errorService, timeout(3000)).fingerprintReport("1h 5");
+    }
+
+    @Test
+    void shouldRouteAdminErrorAuditQuery() throws Exception {
+        identityIs(admin());
+        when(errorQueryAuditService.report("24h 20")).thenReturn(BotReport.fromMarkdown("错误审计"));
+
+        service.onEvent(event(privateCommand("/错误审计 24h 20")));
+
+        verify(errorQueryAuditService, timeout(3000)).report("24h 20");
     }
 
     @Test

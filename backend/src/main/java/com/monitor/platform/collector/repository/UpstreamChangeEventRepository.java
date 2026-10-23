@@ -68,6 +68,15 @@ public class UpstreamChangeEventRepository {
         return eventMapper.selectInUseGroupRateEventsSince(since, safeLimit);
     }
 
+    /** 查询指定平台在时间窗内的全部变更事件。 */
+    public List<UpstreamChangeEventEntity> findEventsBetween(Integer platformId,
+                                                              OffsetDateTime from,
+                                                              OffsetDateTime to,
+                                                              int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        return eventMapper.selectEventsBetween(platformId, from, to, safeLimit);
+    }
+
     /**
      * 查询指定时间窗内的渠道变更，可按「是否在用」筛选。
      *

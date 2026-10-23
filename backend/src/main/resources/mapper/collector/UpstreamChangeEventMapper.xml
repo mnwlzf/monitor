@@ -181,6 +181,16 @@
         LIMIT #{limit}
     </select>
 
+    <select id="selectEventsBetween" resultMap="UpstreamChangeEventResultMap">
+        SELECT <include refid="UpstreamChangeEventColumns"/>
+        <include refid="UpstreamChangeEventJoin"/>
+        WHERE a.platform_id = #{platformId}
+          AND e.detected_at &gt;= #{from}
+          AND e.detected_at &lt; #{to}
+        ORDER BY e.detected_at DESC
+        LIMIT #{limit}
+    </select>
+
     <!--
         渠道变更：按「是否在用」筛，每日汇总用它取非在用的那部分。
 

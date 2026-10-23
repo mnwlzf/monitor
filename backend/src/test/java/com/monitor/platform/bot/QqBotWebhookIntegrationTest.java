@@ -19,7 +19,10 @@ import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.error.BotErrorQueryAuditService;
+import com.monitor.platform.bot.error.BotErrorQueryGuard;
 import com.monitor.platform.bot.error.BotErrorService;
+import com.monitor.platform.bot.error.BotInstanceErrorService;
 import com.monitor.platform.bot.error.BotErrorTools;
 import com.monitor.platform.bot.identity.Sub2ApiUserCache;
 import com.monitor.platform.bot.image.ImageGenService;
@@ -68,7 +71,7 @@ class QqBotWebhookIntegrationTest {
 
         BotSettingsService settingsService = mock(BotSettingsService.class);
         when(settingsService.current()).thenReturn(new BotSettings(
-                true, java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), true, "/", 900, 10, false));
+                true, java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), true, "/", 900, 10, false, false, 15, 5, 1.5, 30));
 
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
@@ -87,6 +90,10 @@ class QqBotWebhookIntegrationTest {
 
         BotChannelStatusService channelStatusService = mock(BotChannelStatusService.class);
         BotErrorService errorService = mock(BotErrorService.class);
+        BotInstanceErrorService instanceErrorService = mock(BotInstanceErrorService.class);
+        BotErrorQueryGuard errorQueryGuard = mock(BotErrorQueryGuard.class);
+        BotErrorQueryAuditService errorQueryAuditService = mock(BotErrorQueryAuditService.class);
+        org.mockito.Mockito.when(errorQueryGuard.allow(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
         BotErrorTools errorTools = mock(BotErrorTools.class);
         BotOrderTools orderTools = mock(BotOrderTools.class);
         BotUsageTools usageTools = mock(BotUsageTools.class);
@@ -96,10 +103,10 @@ class QqBotWebhookIntegrationTest {
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, botUserService, weatherTools, bindings, userCache, imageGenService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService);
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

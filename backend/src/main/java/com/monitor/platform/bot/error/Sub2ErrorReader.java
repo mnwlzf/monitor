@@ -49,8 +49,13 @@ public class Sub2ErrorReader {
 
     /** 时间窗内的错误汇总。只统计客户端可见错误（status>=400 或 cyber_policy）。 */
     public ErrorSummary summary(OffsetDateTime from, OffsetDateTime to, Long userId) {
-        Where where = filterWhere(from, to, new ErrorFilter(
+        return summary(from, to, new ErrorFilter(
                 userId, null, false, false, false, true, null));
+    }
+
+    /** 按与列表相同的筛选条件统计错误，保证汇总数字和明细一致。 */
+    public ErrorSummary summary(OffsetDateTime from, OffsetDateTime to, ErrorFilter filter) {
+        Where where = filterWhere(from, to, filter);
         String sql = """
                 SELECT COUNT(*) AS total_errors,
                        COUNT(*) FILTER (WHERE COALESCE(e.is_business_limited, false)) AS business_limited,
@@ -196,6 +201,11 @@ public class Sub2ErrorReader {
 
     /** 最近错误列表。 */
     public List<ErrorRow> recent(OffsetDateTime from, OffsetDateTime to, ErrorFilter filter, int limit) {
+        return recent(from, to, filter, limit, 0);
+    }
+
+    public List<ErrorRow> recent(OffsetDateTime from, OffsetDateTime to, ErrorFilter filter,
+                                 int limit, int offset) {
         Where where = filterWhere(from, to, filter);
         String sql = """
                 SELECT e.id,
@@ -262,10 +272,127 @@ public class Sub2ErrorReader {
                 LEFT JOIN accounts a ON a.id = e.account_id
                 LEFT JOIN groups g ON g.id = e.group_id
                 LEFT JOIN user_subscriptions s ON s.user_id = e.user_id AND s.group_id = e.group_id
-                """ + where.sql() + " ORDER BY e.created_at DESC LIMIT ?";
+                """ + where.sql() + " ORDER BY e.created_at DESC LIMIT ? OFFSET ?";
         List<Object> args = new ArrayList<>(where.args());
         args.add(Math.max(1, Math.min(limit, 50)));
+        args.add(Math.max(0, offset));
         return jdbc.template().query(sql, ROW_MAPPER, args.toArray());
+    }
+
+    /** 恢复型上游错误汇总：上游失败但最终客户端成功。 */
+    public RecoveredSummary recoveredSummary(OffsetDateTime from, OffsetDateTime to) {
+        String sql = """
+                SELECT COUNT(*) AS total_recovered,
+                       COUNT(*) FILTER (WHERE COALESCE(jsonb_array_length(e.upstream_errors), 0) > 1) AS multi_attempt,
+                       COUNT(DISTINCT e.user_id) AS affected_users,
+                       COUNT(DISTINCT e.account_id) AS affected_accounts
+                FROM ops_error_logs e
+                WHERE e.created_at >= ? AND e.created_at < ?
+                  AND e.error_phase IN ('upstream', 'account_auth', 'network')
+                  AND COALESCE(e.status_code, 0) > 0
+                  AND COALESCE(e.status_code, 0) < 400
+                """;
+        return jdbc.template().queryForObject(sql, (rs, rowNum) -> new RecoveredSummary(
+                rs.getLong("total_recovered"),
+                rs.getLong("multi_attempt"),
+                rs.getLong("affected_users"),
+                rs.getLong("affected_accounts")
+        ), from, to);
+    }
+
+    /** 恢复型上游错误排行。 */
+    public List<RecoveredGroup> topRecovered(OffsetDateTime from, OffsetDateTime to, int limit) {
+        String sql = """
+                SELECT COALESCE(e.error_phase, '') AS error_phase,
+                       COALESCE(e.error_type, '') AS error_type,
+                       COALESCE(e.upstream_status_code, e.status_code, 0) AS status_code,
+                       e.account_id,
+                       COALESCE(a.name, '') AS account_name,
+                       COALESCE(e.model, '') AS model,
+                       COUNT(*) AS error_count,
+                       MAX(COALESCE(jsonb_array_length(e.upstream_errors), 0)) AS max_attempts,
+                       MAX(e.created_at) AS last_seen
+                FROM ops_error_logs e
+                LEFT JOIN accounts a ON a.id = e.account_id
+                WHERE e.created_at >= ? AND e.created_at < ?
+                  AND e.error_phase IN ('upstream', 'account_auth', 'network')
+                  AND COALESCE(e.status_code, 0) > 0
+                  AND COALESCE(e.status_code, 0) < 400
+                GROUP BY COALESCE(e.error_phase, ''), COALESCE(e.error_type, ''),
+                         COALESCE(e.upstream_status_code, e.status_code, 0),
+                         e.account_id, a.name, COALESCE(e.model, '')
+                ORDER BY error_count DESC
+                LIMIT ?
+                """;
+        return jdbc.template().query(sql, (rs, rowNum) -> new RecoveredGroup(
+                rs.getString("error_phase"),
+                rs.getString("error_type"),
+                rs.getInt("status_code"),
+                nullableLong(rs, "account_id"),
+                rs.getString("account_name"),
+                rs.getString("model"),
+                rs.getLong("error_count"),
+                rs.getInt("max_attempts"),
+                time(rs, "last_seen")
+        ), from, to, Math.max(1, Math.min(limit, 20)));
+    }
+
+    /** 错误指纹：按阶段、类型、状态码、provider_error_code 和归一化消息聚合。 */
+    public List<ErrorFingerprint> topFingerprints(OffsetDateTime from, OffsetDateTime to,
+                                                   ErrorFilter filter, int limit) {
+        Where where = filterWhere(from, to, filter);
+        String sql = """
+                WITH fingerprint_rows AS (
+                    SELECT e.*,
+                           LEFT(TRIM(regexp_replace(
+                               regexp_replace(
+                                   regexp_replace(
+                                       regexp_replace(
+                                           LOWER(COALESCE(e.error_message, '')),
+                                           '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+                                           '<uuid>', 'g'),
+                                       '[0-9a-f]{16,}', '<hex>', 'g'),
+                                   '[0-9]{4,}', '<num>', 'g'),
+                               '[[:space:]]+', ' ', 'g')
+                           ), 180) AS fingerprint_message
+                    FROM ops_error_logs e
+                    LEFT JOIN users u ON u.id = e.user_id
+                    LEFT JOIN accounts a ON a.id = e.account_id
+                    LEFT JOIN groups g ON g.id = e.group_id
+                    """ + where.sql() + """
+                )
+                SELECT COALESCE(e.error_phase, '') AS error_phase,
+                       COALESCE(e.error_type, '') AS error_type,
+                       COALESCE(e.upstream_status_code, e.status_code, 0) AS status_code,
+                       COALESCE(e.provider_error_code, '') AS provider_error_code,
+                       COUNT(*) AS error_count,
+                       COUNT(DISTINCT e.user_id) AS affected_users,
+                       COUNT(DISTINCT e.account_id) AS affected_accounts,
+                       MIN(e.created_at) AS first_seen,
+                       MAX(e.created_at) AS last_seen,
+                       (ARRAY_AGG(LEFT(COALESCE(e.error_message, ''), 200)
+                                 ORDER BY e.created_at DESC))[1] AS sample_message
+                FROM fingerprint_rows e
+                GROUP BY COALESCE(e.error_phase, ''), COALESCE(e.error_type, ''),
+                         COALESCE(e.upstream_status_code, e.status_code, 0),
+                         COALESCE(e.provider_error_code, ''), e.fingerprint_message
+                ORDER BY error_count DESC
+                LIMIT ?
+                """;
+        List<Object> args = new ArrayList<>(where.args());
+        args.add(Math.max(1, Math.min(limit, 20)));
+        return jdbc.template().query(sql, (rs, rowNum) -> new ErrorFingerprint(
+                rs.getString("error_phase"),
+                rs.getString("error_type"),
+                rs.getInt("status_code"),
+                rs.getString("provider_error_code"),
+                rs.getLong("error_count"),
+                rs.getLong("affected_users"),
+                rs.getLong("affected_accounts"),
+                time(rs, "first_seen"),
+                time(rs, "last_seen"),
+                rs.getString("sample_message")
+        ), args.toArray());
     }
 
     /** 按错误类型/状态聚合，便于快速看出主要问题。 */
@@ -278,7 +405,8 @@ public class Sub2ErrorReader {
                        COUNT(*) AS error_count,
                        COUNT(*) FILTER (WHERE COALESCE(e.is_business_limited, false)) AS business_limited,
                        MAX(e.created_at) AS last_seen,
-                       MAX(LEFT(COALESCE(e.error_message, ''), 200)) AS sample_message
+                       (ARRAY_AGG(LEFT(COALESCE(e.error_message, ''), 200)
+                                 ORDER BY e.created_at DESC))[1] AS sample_message
                 FROM ops_error_logs e
                 LEFT JOIN users u ON u.id = e.user_id
                 LEFT JOIN accounts a ON a.id = e.account_id
@@ -653,8 +781,14 @@ public class Sub2ErrorReader {
             boolean includeBusinessLimited,
             String keyword
     ) {
+        /** 默认错误视图：排除配额/限流等业务限制。 */
         public static ErrorFilter all(Long userId) {
             return new ErrorFilter(userId, null, false, false, false, false, null);
+        }
+
+        /** 全量错误视图：用于诊断、趋势和告警，包含业务限制。 */
+        public static ErrorFilter everything(Long userId) {
+            return new ErrorFilter(userId, null, false, false, false, true, null);
         }
     }
 
@@ -747,6 +881,41 @@ public class Sub2ErrorReader {
         public boolean accountExpired(OffsetDateTime now) {
             return accountExpiresAt != null && !accountExpiresAt.isAfter(now);
         }
+    }
+
+    public record RecoveredSummary(
+            long total,
+            long multiAttempt,
+            long affectedUsers,
+            long affectedAccounts
+    ) {
+    }
+
+    public record RecoveredGroup(
+            String phase,
+            String type,
+            int statusCode,
+            Long accountId,
+            String accountName,
+            String model,
+            long count,
+            int maxAttempts,
+            OffsetDateTime lastSeen
+    ) {
+    }
+
+    public record ErrorFingerprint(
+            String phase,
+            String type,
+            int statusCode,
+            String providerErrorCode,
+            long count,
+            long affectedUsers,
+            long affectedAccounts,
+            OffsetDateTime firstSeen,
+            OffsetDateTime lastSeen,
+            String sampleMessage
+    ) {
     }
 
     public record ErrorGroup(

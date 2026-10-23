@@ -35,6 +35,11 @@ public class BotSettingsService {
     private static final int MIN_MEMORY_WINDOW = 2;
     private static final int MAX_MEMORY_WINDOW = 50;
 
+    private static final int DEFAULT_ERROR_ALERT_WINDOW_MINUTES = 15;
+    private static final int DEFAULT_ERROR_ALERT_MIN_COUNT = 5;
+    private static final double DEFAULT_ERROR_ALERT_SPIKE_RATIO = 1.5;
+    private static final int DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES = 30;
+
     private final BotSettingsRepository repository;
     private final QqBotProperties properties;
 
@@ -96,13 +101,23 @@ public class BotSettingsService {
         entity.setMaxReplyLength(clamp(request.maxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900));
         entity.setMemoryWindow(clamp(request.memoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10));
         entity.setWebSearchForNonAdmin(Boolean.TRUE.equals(request.webSearchForNonAdmin()));
+        entity.setErrorAlertEnabled(Boolean.TRUE.equals(request.errorAlertEnabled()));
+        entity.setErrorAlertWindowMinutes(clamp(request.errorAlertWindowMinutes(),
+                1, 1440, DEFAULT_ERROR_ALERT_WINDOW_MINUTES));
+        entity.setErrorAlertMinCount(clamp(request.errorAlertMinCount(),
+                1, 100000, DEFAULT_ERROR_ALERT_MIN_COUNT));
+        entity.setErrorAlertSpikeRatio(clamp(request.errorAlertSpikeRatio(),
+                1.0, 100.0, DEFAULT_ERROR_ALERT_SPIKE_RATIO));
+        entity.setErrorAlertCooldownMinutes(clamp(request.errorAlertCooldownMinutes(),
+                1, 1440, DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES));
         entity.setUpdatedAt(OffsetDateTime.now());
         repository.save(entity);
 
         current = toSettings(entity);
-        log.info("机器人设置已更新: enabled={}, groups={}, platformGroups={}, users={}, requireMention={}, webSearchForNonAdmin={}",
+        log.info("机器人设置已更新: enabled={}, groups={}, platformGroups={}, users={}, requireMention={}, webSearchForNonAdmin={}, errorAlertEnabled={}, errorAlertWindow={}m",
                 current.enabled(), current.allowedGroups(), current.platformGroups(),
-                current.allowedUsers(), current.requireMention(), current.webSearchForNonAdmin());
+                current.allowedUsers(), current.requireMention(), current.webSearchForNonAdmin(),
+                current.errorAlertEnabled(), current.errorAlertWindowMinutes());
         return toResponse(entity);
     }
 
@@ -143,6 +158,11 @@ public class BotSettingsService {
         entity.setMemoryWindow(clamp(properties.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10));
         // 普通人联网搜索默认关闭，首次初始化后由页面维护
         entity.setWebSearchForNonAdmin(false);
+        entity.setErrorAlertEnabled(false);
+        entity.setErrorAlertWindowMinutes(DEFAULT_ERROR_ALERT_WINDOW_MINUTES);
+        entity.setErrorAlertMinCount(DEFAULT_ERROR_ALERT_MIN_COUNT);
+        entity.setErrorAlertSpikeRatio(DEFAULT_ERROR_ALERT_SPIKE_RATIO);
+        entity.setErrorAlertCooldownMinutes(DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES);
         entity.setUpdatedAt(OffsetDateTime.now());
         repository.save(entity);
         log.info("已用环境变量初始化机器人设置（之后请在页面上维护）: groups={}, users={}",
@@ -160,7 +180,12 @@ public class BotSettingsService {
                 normalizePrefix(properties.getCommandPrefix()),
                 clamp(properties.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
                 clamp(properties.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10),
-                false);
+                false,
+                false,
+                DEFAULT_ERROR_ALERT_WINDOW_MINUTES,
+                DEFAULT_ERROR_ALERT_MIN_COUNT,
+                DEFAULT_ERROR_ALERT_SPIKE_RATIO,
+                DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES);
     }
 
     private BotSettings toSettings(BotSettingsEntity entity) {
@@ -173,7 +198,12 @@ public class BotSettingsService {
                 normalizePrefix(entity.getCommandPrefix()),
                 clamp(entity.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
                 clamp(entity.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10),
-                Boolean.TRUE.equals(entity.getWebSearchForNonAdmin()));
+                Boolean.TRUE.equals(entity.getWebSearchForNonAdmin()),
+                Boolean.TRUE.equals(entity.getErrorAlertEnabled()),
+                clamp(entity.getErrorAlertWindowMinutes(), 1, 1440, DEFAULT_ERROR_ALERT_WINDOW_MINUTES),
+                clamp(entity.getErrorAlertMinCount(), 1, 100000, DEFAULT_ERROR_ALERT_MIN_COUNT),
+                clamp(entity.getErrorAlertSpikeRatio(), 1.0, 100.0, DEFAULT_ERROR_ALERT_SPIKE_RATIO),
+                clamp(entity.getErrorAlertCooldownMinutes(), 1, 1440, DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES));
     }
 
     private BotSettingsResponse toResponse(BotSettingsEntity entity) {
@@ -187,6 +217,11 @@ public class BotSettingsService {
                 clamp(entity.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
                 clamp(entity.getMemoryWindow(), MIN_MEMORY_WINDOW, MAX_MEMORY_WINDOW, 10),
                 Boolean.TRUE.equals(entity.getWebSearchForNonAdmin()),
+                Boolean.TRUE.equals(entity.getErrorAlertEnabled()),
+                clamp(entity.getErrorAlertWindowMinutes(), 1, 1440, DEFAULT_ERROR_ALERT_WINDOW_MINUTES),
+                clamp(entity.getErrorAlertMinCount(), 1, 100000, DEFAULT_ERROR_ALERT_MIN_COUNT),
+                clamp(entity.getErrorAlertSpikeRatio(), 1.0, 100.0, DEFAULT_ERROR_ALERT_SPIKE_RATIO),
+                clamp(entity.getErrorAlertCooldownMinutes(), 1, 1440, DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES),
                 entity.getUpdatedAt());
     }
 
@@ -227,6 +262,13 @@ public class BotSettingsService {
 
     private static int clamp(Integer value, int min, int max, int fallback) {
         if (value == null) {
+            return fallback;
+        }
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static double clamp(Double value, double min, double max, double fallback) {
+        if (value == null || !Double.isFinite(value)) {
             return fallback;
         }
         return Math.max(min, Math.min(max, value));

@@ -263,7 +263,7 @@ export interface MailSettings {
 /**
  * 邮件事件场景：不同事件使用各自的收件人。
  */
-export type MailScene = 'BALANCE_ALERT' | 'DAILY_REPORT' | 'API_KEY_CHANGE' | 'CHANNEL_ALERT' | 'CHANNEL_DIGEST'
+export type MailScene = 'BALANCE_ALERT' | 'DAILY_REPORT' | 'API_KEY_CHANGE' | 'CHANNEL_ALERT' | 'CHANNEL_DIGEST' | 'ERROR_ALERT'
 
 /**
  * 邮件收件人（按事件场景区分）。
@@ -442,6 +442,12 @@ export interface BotSettings {
   memoryWindow: number
   /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索。 */
   webSearchForNonAdmin: boolean
+  /** 是否启用 Sub2API 错误突增主动告警。 */
+  errorAlertEnabled: boolean
+  errorAlertWindowMinutes: number
+  errorAlertMinCount: number
+  errorAlertSpikeRatio: number
+  errorAlertCooldownMinutes: number
   updatedAt: string | null
 }
 /** 监控项目侧登记的自定义管理员。 */

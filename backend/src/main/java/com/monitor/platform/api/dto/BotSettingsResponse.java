@@ -15,6 +15,11 @@ import java.util.Set;
  * @param maxReplyLength  单条回复最大字符数
  * @param memoryWindow    每个会话保留的历史消息条数
  * @param webSearchForNonAdmin 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索
+ * @param errorAlertEnabled 是否启用 Sub2API 错误突增主动告警
+ * @param errorAlertWindowMinutes 告警窗口分钟数
+ * @param errorAlertMinCount 最小触发数量
+ * @param errorAlertSpikeRatio 突增倍数
+ * @param errorAlertCooldownMinutes 告警冷却分钟数
  * @param updatedAt       最后保存时间
  */
 public record BotSettingsResponse(
@@ -27,6 +32,11 @@ public record BotSettingsResponse(
         int maxReplyLength,
         int memoryWindow,
         boolean webSearchForNonAdmin,
+        boolean errorAlertEnabled,
+        int errorAlertWindowMinutes,
+        int errorAlertMinCount,
+        double errorAlertSpikeRatio,
+        int errorAlertCooldownMinutes,
         OffsetDateTime updatedAt
 ) {
 }

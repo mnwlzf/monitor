@@ -317,6 +317,42 @@
           </span>
         </el-form-item>
 
+        <el-divider content-position="left">Sub2API 错误主动告警</el-divider>
+
+        <el-form-item label="启用错误告警">
+          <el-switch v-model="botForm.errorAlertEnabled" />
+          <span class="admin-form-hint" style="margin-left: 10px">
+            当前窗口的错误、429/529 或入口拒绝相对上一周期突增时，向下方接收人发送 QQ 消息
+          </span>
+        </el-form-item>
+
+        <el-form-item label="对比窗口（分钟）">
+          <el-input-number v-model="botForm.errorAlertWindowMinutes" :min="1" :max="1440" :step="5" />
+          <span class="admin-form-hint" style="margin-left: 10px">当前窗口与上一周期等长，默认 15 分钟</span>
+        </el-form-item>
+
+        <el-form-item label="最小触发数量">
+          <el-input-number v-model="botForm.errorAlertMinCount" :min="1" :max="100000" :step="1" />
+          <span class="admin-form-hint" style="margin-left: 10px">当前窗口至少达到这个数量才可能触发，默认 5</span>
+        </el-form-item>
+
+        <el-form-item label="突增倍数">
+          <el-input-number v-model="botForm.errorAlertSpikeRatio" :min="1" :max="100" :step="0.1" :precision="2" />
+          <span class="admin-form-hint" style="margin-left: 10px">当前数量达到上一周期的多少倍时触发，默认 1.5 倍</span>
+        </el-form-item>
+
+        <el-form-item label="告警冷却（分钟）">
+          <el-input-number v-model="botForm.errorAlertCooldownMinutes" :min="1" :max="1440" :step="5" />
+          <span class="admin-form-hint" style="margin-left: 10px">同一告警在冷却期内不重复发送，默认 30 分钟</span>
+        </el-form-item>
+
+        <el-form-item label="告警接收人">
+          <div style="width: 100%">
+            <QqRecipientEditor scene="ERROR_ALERT" :can-write="canWrite" />
+            <small class="admin-form-hint">接收人可以同时配置群和私聊；接收人增删立即生效，开关和阈值点下方「保存」后生效。</small>
+          </div>
+        </el-form-item>
+
         <el-form-item>
           <el-button type="primary" :loading="botSaving" @click="saveBotSettingsForm">保存</el-button>
           <span v-if="botUpdatedAt" class="admin-form-hint" style="margin-left: 12px">上次保存：{{ botUpdatedAt }}</span>
@@ -578,6 +614,11 @@ const botForm = reactive<BotSettingsInput>({
   maxReplyLength: 900,
   memoryWindow: 10,
   webSearchForNonAdmin: false,
+  errorAlertEnabled: false,
+  errorAlertWindowMinutes: 15,
+  errorAlertMinCount: 5,
+  errorAlertSpikeRatio: 1.5,
+  errorAlertCooldownMinutes: 30,
 })
 
 function applyBotSettings(settings: BotSettings) {
@@ -591,6 +632,11 @@ function applyBotSettings(settings: BotSettings) {
     maxReplyLength: settings.maxReplyLength || 900,
     memoryWindow: settings.memoryWindow || 10,
     webSearchForNonAdmin: settings.webSearchForNonAdmin === true,
+    errorAlertEnabled: settings.errorAlertEnabled === true,
+    errorAlertWindowMinutes: settings.errorAlertWindowMinutes || 15,
+    errorAlertMinCount: settings.errorAlertMinCount || 5,
+    errorAlertSpikeRatio: settings.errorAlertSpikeRatio ?? 1.5,
+    errorAlertCooldownMinutes: settings.errorAlertCooldownMinutes || 30,
   })
   botUpdatedAt.value = settings.updatedAt ? new Date(settings.updatedAt).toLocaleString('zh-CN') : ''
 }

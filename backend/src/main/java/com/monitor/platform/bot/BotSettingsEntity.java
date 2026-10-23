@@ -21,6 +21,12 @@ public class BotSettingsEntity {
     private Integer memoryWindow;
     /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索。 */
     private Boolean webSearchForNonAdmin;
+    /** 是否启用 Sub2API 错误突增主动告警。 */
+    private Boolean errorAlertEnabled;
+    private Integer errorAlertWindowMinutes;
+    private Integer errorAlertMinCount;
+    private Double errorAlertSpikeRatio;
+    private Integer errorAlertCooldownMinutes;
     private OffsetDateTime updatedAt;
 
     public Integer getId() { return id; }
@@ -43,6 +49,16 @@ public class BotSettingsEntity {
     public void setMemoryWindow(Integer memoryWindow) { this.memoryWindow = memoryWindow; }
     public Boolean getWebSearchForNonAdmin() { return webSearchForNonAdmin; }
     public void setWebSearchForNonAdmin(Boolean webSearchForNonAdmin) { this.webSearchForNonAdmin = webSearchForNonAdmin; }
+    public Boolean getErrorAlertEnabled() { return errorAlertEnabled; }
+    public void setErrorAlertEnabled(Boolean errorAlertEnabled) { this.errorAlertEnabled = errorAlertEnabled; }
+    public Integer getErrorAlertWindowMinutes() { return errorAlertWindowMinutes; }
+    public void setErrorAlertWindowMinutes(Integer errorAlertWindowMinutes) { this.errorAlertWindowMinutes = errorAlertWindowMinutes; }
+    public Integer getErrorAlertMinCount() { return errorAlertMinCount; }
+    public void setErrorAlertMinCount(Integer errorAlertMinCount) { this.errorAlertMinCount = errorAlertMinCount; }
+    public Double getErrorAlertSpikeRatio() { return errorAlertSpikeRatio; }
+    public void setErrorAlertSpikeRatio(Double errorAlertSpikeRatio) { this.errorAlertSpikeRatio = errorAlertSpikeRatio; }
+    public Integer getErrorAlertCooldownMinutes() { return errorAlertCooldownMinutes; }
+    public void setErrorAlertCooldownMinutes(Integer errorAlertCooldownMinutes) { this.errorAlertCooldownMinutes = errorAlertCooldownMinutes; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

@@ -8,6 +8,8 @@ import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.user.BotUserTools;
 import com.monitor.platform.bot.channel.BotChannelStatusTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.error.BotErrorQueryAuditService;
+import com.monitor.platform.bot.error.BotErrorQueryGuard;
 import com.monitor.platform.bot.error.BotErrorService;
 import com.monitor.platform.bot.error.BotMyErrorTools;
 import com.monitor.platform.bot.image.GeneratedImages;
@@ -32,6 +34,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -89,6 +92,8 @@ public class BotMessageService {
     private final MonitorChatTools tools;
     private final BotChannelStatusService channelStatusService;
     private final BotErrorService errorService;
+    private final BotErrorQueryGuard errorQueryGuard;
+    private final BotErrorQueryAuditService errorQueryAuditService;
     private final ImageGenService imageGenService;
     private final BotRuntimeStatus runtimeStatus;
     private final BotUserService botUserService;
@@ -113,6 +118,8 @@ public class BotMessageService {
                              MonitorChatTools tools,
                              BotChannelStatusService channelStatusService,
                              BotErrorService errorService,
+                             BotErrorQueryGuard errorQueryGuard,
+                             BotErrorQueryAuditService errorQueryAuditService,
                              ImageGenService imageGenService,
                              BotRuntimeStatus runtimeStatus,
                              BotUserService botUserService,
@@ -130,6 +137,8 @@ public class BotMessageService {
         this.tools = tools;
         this.channelStatusService = channelStatusService;
         this.errorService = errorService;
+        this.errorQueryGuard = errorQueryGuard;
+        this.errorQueryAuditService = errorQueryAuditService;
         this.imageGenService = imageGenService;
         this.runtimeStatus = runtimeStatus;
         this.botUserService = botUserService;
@@ -326,7 +335,7 @@ public class BotMessageService {
         if (platformFeature && identity.hasEmail()) {
             request = request.tools(new BotUserTools(botUserService, identity.email()));
             // 普通用户只能查自己的错误；工具在构造时绑定邮箱，不接受用户标识参数。
-            request = request.tools(new BotMyErrorTools(errorService, identity.email()));
+            request = request.tools(new BotMyErrorTools(errorService, identity.email(), errorQueryGuard, errorQueryAuditService));
         }
         // 管理员余额调整：按请求绑定管理员身份和当前消息，二次确认必须出现在当前消息里
         if (platformFeature && identity.admin() && identity.hasEmail()) {
@@ -340,6 +349,9 @@ public class BotMessageService {
         // 生图：所有人都能用，图片归属到本条消息（按请求构造，避免串到别人的回复里）
         request = request.tools(new ImageGenTools(imageGenService, generated,
                     () -> notifyImageStart(event, generated)));
+        // ToolContext 必须非空；即使事件缺少 userId 也放入空字符串，工具侧会按未知用户处理。
+        request = request.toolContext(Map.of("qqUserId",
+                event.userId() == null ? "" : event.userId()));
         String answer = request
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)))
                 .call()

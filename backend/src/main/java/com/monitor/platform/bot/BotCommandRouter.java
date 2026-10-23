@@ -1,7 +1,10 @@
 package com.monitor.platform.bot;
 
 import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.error.BotErrorQueryAuditService;
+import com.monitor.platform.bot.error.BotErrorQueryGuard;
 import com.monitor.platform.bot.error.BotErrorService;
+import com.monitor.platform.bot.error.BotInstanceErrorService;
 import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.identity.Sub2ApiUserCache;
@@ -47,8 +50,14 @@ public class BotCommandRouter {
             - /错误 [时间窗] [状态码|关键词]  最近错误；/错误 #编号 查看单条详情
             - /错误账号 [时间窗] [条数]  按账号统计错误排行
             - /错误用户 <邮箱|ID> [时间窗]  指定用户的错误
+            - /错误指纹 [时间窗] [条数]  按错误阶段/类型/状态码/错误码聚合，查看影响面
+            - /错误趋势 [时间窗]  当前窗口与上一周期对比，判断是否突增
+            - /错误实例 [时间窗]  多个 Sub2API 实例的错误率/健康度对比
+            - /错误变更 [时间窗]  查看错误时间窗内发生的分组/Key/账号变更，回答「是不是刚改了什么」
+            - /恢复错误 [时间窗] [条数]  查看上游失败但最终恢复的请求和重试情况
             - /入口拒绝 [时间窗]  无效 Key、IP 限制、分组禁用等入口拒绝统计
             - /错误日志 [时间窗] [级别] [关键词]  按时间/级别/关键词查系统日志
+            - /错误审计 [时间窗] [条数]  查看错误查询审计和限流拦截
             - /我的错误 [时间窗]  我自己的错误
             - /任务            定时任务启用状态与最近一次执行结果
             - /订单 <账号> [起] [止]  指定平台用户的订单（默认近 30 天）
@@ -102,6 +111,9 @@ public class BotCommandRouter {
     private final BotUsageTools usageTools;
     private final BotChannelStatusService channelStatusService;
     private final BotErrorService errorService;
+    private final BotInstanceErrorService instanceErrorService;
+    private final BotErrorQueryGuard errorQueryGuard;
+    private final BotErrorQueryAuditService errorQueryAuditService;
     private final BotUserService botUserService;
     private final WeatherTools weatherTools;
     private final QqUserBindingService bindings;
@@ -113,6 +125,9 @@ public class BotCommandRouter {
                             BotUsageTools usageTools,
                             BotChannelStatusService channelStatusService,
                             BotErrorService errorService,
+                            BotInstanceErrorService instanceErrorService,
+                            BotErrorQueryGuard errorQueryGuard,
+                            BotErrorQueryAuditService errorQueryAuditService,
                             BotUserService botUserService,
                             WeatherTools weatherTools,
                             QqUserBindingService bindings,
@@ -123,6 +138,9 @@ public class BotCommandRouter {
         this.usageTools = usageTools;
         this.channelStatusService = channelStatusService;
         this.errorService = errorService;
+        this.instanceErrorService = instanceErrorService;
+        this.errorQueryGuard = errorQueryGuard;
+        this.errorQueryAuditService = errorQueryAuditService;
         this.botUserService = botUserService;
         this.weatherTools = weatherTools;
         this.bindings = bindings;
@@ -177,19 +195,44 @@ public class BotCommandRouter {
                     platformOnly(identity, platformFeature, () -> tools.usageReport(parseInt(arg, 10)));
             case "abnormal", "异常" -> platformOnly(identity, platformFeature, tools::abnormalReport);
             case "diagnose", "诊断", "错误诊断" ->
-                    platformOnly(identity, platformFeature, () -> errorService.diagnoseReport(arg));
+                    errorCommand(event, identity, platformFeature, "diagnose", arg,
+                            () -> errorService.diagnoseReport(arg));
             case "errors", "错误", "最近错误" ->
-                    platformOnly(identity, platformFeature, () -> errorService.recentReport(arg));
+                    errorCommand(event, identity, platformFeature, "errors", arg,
+                            () -> errorService.recentReport(arg));
             case "erroraccounts", "错误账号" ->
-                    platformOnly(identity, platformFeature, () -> errorService.accountReport(arg));
+                    errorCommand(event, identity, platformFeature, "error-accounts", arg,
+                            () -> errorService.accountReport(arg));
             case "erroruser", "错误用户" ->
-                    platformOnly(identity, platformFeature, () -> errorUserReport(arg));
+                    errorCommand(event, identity, platformFeature, "error-user", arg,
+                            () -> errorUserReport(arg));
+            case "errorfingerprints", "错误指纹" ->
+                    errorCommand(event, identity, platformFeature, "error-fingerprints", arg,
+                            () -> errorService.fingerprintReport(arg));
+            case "errortrend", "错误趋势" ->
+                    errorCommand(event, identity, platformFeature, "error-trend", arg,
+                            () -> errorService.trendReport(arg));
+            case "errorinstances", "错误实例", "实例诊断" ->
+                    errorCommand(event, identity, platformFeature, "error-instances", arg,
+                            () -> instanceErrorService.report(arg));
+            case "errorchanges", "错误变更", "什么变了" ->
+                    errorCommand(event, identity, platformFeature, "error-changes", arg,
+                            () -> errorService.changeReport(arg));
+            case "recoverederrors", "恢复错误", "上游恢复" ->
+                    errorCommand(event, identity, platformFeature, "recovered-errors", arg,
+                            () -> errorService.recoveredReport(arg));
             case "ingress", "入口拒绝" ->
-                    platformOnly(identity, platformFeature, () -> errorService.ingressReport(arg));
+                    errorCommand(event, identity, platformFeature, "ingress", arg,
+                            () -> errorService.ingressReport(arg));
             case "errorlogs", "错误日志" ->
-                    platformOnly(identity, platformFeature, () -> errorService.systemLogReport(arg));
+                    errorCommand(event, identity, platformFeature, "error-logs", arg,
+                            () -> errorService.systemLogReport(arg));
+            case "erroraudit", "错误审计" ->
+                    errorCommand(event, identity, platformFeature, "error-audit", arg,
+                            () -> errorQueryAuditService.report(arg));
             case "myerrors", "我的错误" ->
-                    selfService(platformFeature, identity, () -> errorService.myReport(identity.email(), arg));
+                    selfErrorCommand(event, identity, platformFeature, arg,
+                            () -> errorService.myReport(identity.email(), arg));
             case "tasks", "任务" -> platformOnly(identity, platformFeature, tools::taskReport);
             case "订单", "orders" -> platformOnly(identity, platformFeature, () -> orderReport(arg));
             case "用户余额", "userbalance" ->
@@ -242,6 +285,45 @@ public class BotCommandRouter {
             return text(UNKNOWN_COMMAND);
         }
         return action.get();
+    }
+
+    /** 管理员错误命令的统一审计和限流闸门。 */
+    private BotReport errorCommand(OneBotEvent event, BotIdentity identity, boolean platformFeature,
+                                   String action, String query, Supplier<BotReport> call) {
+        if (!platformFeature) {
+            return text(UNKNOWN_COMMAND);
+        }
+        if (!identity.admin()) {
+            errorQueryAuditService.record(event.userId(), action, query, false, 0);
+            return text("平台级数据仅管理员可查。");
+        }
+        return guardedErrorCommand(event, action, query, call);
+    }
+
+    /** 普通用户自己的错误查询：同样限流和审计，但只允许查本人。 */
+    private BotReport selfErrorCommand(OneBotEvent event, BotIdentity identity, boolean platformFeature,
+                                       String query, Supplier<BotReport> call) {
+        if (!platformFeature || !identity.hasEmail()) {
+            return text(UNKNOWN_COMMAND);
+        }
+        return guardedErrorCommand(event, "my-errors", query, call);
+    }
+
+    private BotReport guardedErrorCommand(OneBotEvent event, String action, String query,
+                                          Supplier<BotReport> call) {
+        Long userId = event.userId();
+        long id = userId == null ? 0L : userId;
+        if (!errorQueryGuard.allow(id)) {
+            errorQueryAuditService.record(userId, action, query, false, 0);
+            return text("错误查询太频繁，请稍后再试。");
+        }
+        long start = System.nanoTime();
+        try {
+            return call.get();
+        } finally {
+            long durationMs = (System.nanoTime() - start) / 1_000_000;
+            errorQueryAuditService.record(userId, action, query, true, durationMs);
+        }
     }
 
     /** 纯文本包成报表：短内容仍按纯文本发出，长内容走段落渲染。 */

@@ -3,13 +3,20 @@ package com.monitor.platform.bot.error;
 import com.monitor.platform.bot.error.Sub2ErrorReader.AccountGroup;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorDetail;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorFilter;
+import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorFingerprint;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorGroup;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorRow;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorSummary;
 import com.monitor.platform.bot.error.Sub2ErrorReader.IngressRejectGroup;
+import com.monitor.platform.bot.error.Sub2ErrorReader.RecoveredGroup;
+import com.monitor.platform.bot.error.Sub2ErrorReader.RecoveredSummary;
 import com.monitor.platform.bot.error.Sub2ErrorReader.SystemLogRow;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.user.BotUserService;
+import com.monitor.platform.collector.repository.PlatformRepository;
+import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
+import com.monitor.platform.collector.repository.entity.PlatformEntity;
+import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import com.monitor.platform.common.time.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +28,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,10 +56,16 @@ public class BotErrorService {
 
     private final Sub2ErrorReader reader;
     private final BotUserService userService;
+    private final PlatformRepository platformRepository;
+    private final UpstreamChangeEventRepository changeEventRepository;
 
-    public BotErrorService(Sub2ErrorReader reader, BotUserService userService) {
+    public BotErrorService(Sub2ErrorReader reader, BotUserService userService,
+                           PlatformRepository platformRepository,
+                           UpstreamChangeEventRepository changeEventRepository) {
         this.reader = reader;
         this.userService = userService;
+        this.platformRepository = platformRepository;
+        this.changeEventRepository = changeEventRepository;
     }
 
     // ============================================================ 对外入口
@@ -63,15 +77,19 @@ public class BotErrorService {
             return message(NO_DATABASE);
         }
         try {
-            ErrorSummary summary = reader.summary(window.from(), window.to(), null);
-            ErrorFilter filter = ErrorFilter.all(null);
+            ErrorFilter filter = ErrorFilter.everything(null);
+            ErrorSummary summary = reader.summary(window.from(), window.to(), filter);
             List<ErrorGroup> groups = reader.topGroups(window.from(), window.to(), filter, 5);
             List<AccountGroup> accounts = reader.topAccounts(window.from(), window.to(), filter, 5);
             List<ErrorRow> sampleRows = reader.recent(window.from(), window.to(), filter, 200);
             List<CauseCount> causes = topCauses(sampleRows, true);
+            List<ErrorFingerprint> fingerprints = reader.topFingerprints(
+                    window.from(), window.to(), filter, 3);
             Long success = safeSuccessCount(window, null);
             Long ingressRejects = safeIngressRejectCount(window);
-            return diagnoseReport(window, summary, success, groups, accounts, ingressRejects, causes);
+            List<UpstreamChangeEventEntity> changes = safeChanges(window, 5);
+            return diagnoseReport(window, summary, success, groups, accounts, ingressRejects,
+                    causes, fingerprints, changes);
         } catch (RuntimeException ex) {
             return queryError(ex);
         }
@@ -94,11 +112,116 @@ public class BotErrorService {
             return message(NO_DATABASE);
         }
         try {
-            ErrorSummary summary = reader.summary(window.from(), window.to(), null);
+            ErrorFilter filter = ErrorFilter.everything(null);
+            ErrorSummary summary = reader.summary(window.from(), window.to(), filter);
             List<AccountGroup> accounts = reader.topAccounts(
-                    window.from(), window.to(), ErrorFilter.all(null), limit);
+                    window.from(), window.to(), filter, limit);
             Long success = safeSuccessCount(window, null);
             return accountReport(window, summary, success, accounts);
+        } catch (RuntimeException ex) {
+            return queryError(ex);
+        }
+    }
+
+    /** 管理员：恢复型上游错误和重试分析。 */
+    public BotReport recoveredReport(String arg) {
+        Window window = parseRange(arg, "1h");
+        int limit = parseLimit(arg, 10);
+        if (!reader.isAvailable()) {
+            return message(NO_DATABASE);
+        }
+        try {
+            RecoveredSummary summary = reader.recoveredSummary(window.from(), window.to());
+            List<RecoveredGroup> groups = reader.topRecovered(window.from(), window.to(), limit);
+            return recoveredReport(window, summary, groups);
+        } catch (RuntimeException ex) {
+            return queryError(ex);
+        }
+    }
+
+    /** 管理员：错误时间窗内发生的上游变更，回答“是不是刚改了什么”。 */
+    public BotReport changeReport(String arg) {
+        Window window = parseRange(arg, "1h");
+        PlatformEntity platform = poolPlatform();
+        if (platform == null) {
+            return message("没有找到启用的号池监控源平台。");
+        }
+        try {
+            List<UpstreamChangeEventEntity> changes = changeEventRepository.findEventsBetween(
+                    platform.getId(), window.from(), window.to(), 50);
+            ErrorSummary summary = null;
+            Long success = null;
+            List<ErrorFingerprint> fingerprints = List.of();
+            if (reader.isAvailable()) {
+                try {
+                    ErrorFilter filter = ErrorFilter.everything(null);
+                    summary = reader.summary(window.from(), window.to(), filter);
+                    success = safeSuccessCount(window, null);
+                    fingerprints = reader.topFingerprints(
+                            window.from(), window.to(), filter, 5);
+                } catch (RuntimeException ex) {
+                    log.warn("读取错误变更关联上下文失败: {}", ex.getMessage());
+                }
+            }
+            return changeReport(window, platform,
+                    changes == null ? List.of() : changes,
+                    summary, success, fingerprints);
+        } catch (RuntimeException ex) {
+            return queryError(ex);
+        }
+    }
+
+    /** 管理员：当前窗口与上一等长时间窗的趋势对比。 */
+    public BotReport trendReport(String arg) {
+        Window current = window(arg, "1h");
+        Duration span = Duration.between(current.from(), current.to());
+        Window previous = new Window(current.from().minus(span), current.from(),
+                "上一周期", current.raw());
+        if (!reader.isAvailable()) {
+            return message(NO_DATABASE);
+        }
+        try {
+            ErrorFilter filter = ErrorFilter.everything(null);
+            ErrorSummary now = reader.summary(current.from(), current.to(), filter);
+            ErrorSummary before = reader.summary(previous.from(), previous.to(), filter);
+            List<ErrorFingerprint> nowFingerprints = reader.topFingerprints(
+                    current.from(), current.to(), filter, 20);
+            List<ErrorFingerprint> beforeFingerprints = reader.topFingerprints(
+                    previous.from(), previous.to(), filter, 20);
+            Long nowSuccess = safeSuccessCount(current, null);
+            Long beforeSuccess = safeSuccessCount(previous, null);
+            Long nowIngress = safeIngressRejectCount(current);
+            Long beforeIngress = safeIngressRejectCount(previous);
+            return trendReport(current, previous, now, before,
+                    nowSuccess, beforeSuccess, nowIngress, beforeIngress,
+                    nowFingerprints, beforeFingerprints);
+        } catch (RuntimeException ex) {
+            return queryError(ex);
+        }
+    }
+
+    /** 管理员：错误指纹排行。 */
+    public BotReport fingerprintReport(String arg) {
+        Window window = parseRange(arg, "1h");
+        int limit = parseLimit(arg, 10);
+        if (!reader.isAvailable()) {
+            return message(NO_DATABASE);
+        }
+        try {
+            List<ErrorFingerprint> fingerprints = reader.topFingerprints(
+                    window.from(), window.to(), ErrorFilter.everything(null), limit);
+            List<BotReport.Block> blocks = new ArrayList<>();
+            if (fingerprints.isEmpty()) {
+                blocks.add(BotReport.paragraph("错误指纹", List.of("没有找到错误记录。")));
+            } else {
+                blocks.add(fingerprintsBlock(fingerprints));
+                blocks.add(fingerprintSamplesBlock(fingerprints));
+            }
+            List<String> notes = new ArrayList<>();
+            notes.add("指纹 = 错误阶段 + 错误类型 + 状态码 + provider_error_code + 归一化错误消息。");
+            notes.add("UUID、长十六进制 ID、4 位以上数字和连续空白会在聚合前归一化。");
+            notes.add("指纹统计包含业务限制类错误；影响用户/账号数用于判断问题扩散范围。");
+            return BotReport.of("错误指纹（" + window.label() + "）", blocks, notes);
         } catch (RuntimeException ex) {
             return queryError(ex);
         }
@@ -171,7 +294,9 @@ public class BotErrorService {
 
     private BotReport diagnoseReport(Window window, ErrorSummary summary, Long success,
                                      List<ErrorGroup> groups, List<AccountGroup> accounts,
-                                     Long ingressRejects, List<CauseCount> causes) {
+                                     Long ingressRejects, List<CauseCount> causes,
+                                     List<ErrorFingerprint> fingerprints,
+                                     List<UpstreamChangeEventEntity> changes) {
         long totalRequests = success == null ? 0L : success + summary.totalErrors();
         Double errorRate = success == null || totalRequests <= 0
                 ? null : (double) summary.totalErrors() / totalRequests;
@@ -188,6 +313,12 @@ public class BotErrorService {
         if (!causes.isEmpty()) {
             blocks.add(causesBlock(causes));
         }
+        if (!fingerprints.isEmpty()) {
+            blocks.add(fingerprintsBlock(fingerprints));
+        }
+        if (!changes.isEmpty()) {
+            blocks.add(changesBlock(changes));
+        }
         if (!groups.isEmpty()) {
             blocks.add(groupsBlock(groups));
         }
@@ -196,7 +327,7 @@ public class BotErrorService {
         }
 
         List<String> notes = new ArrayList<>();
-        notes.add("默认排除配额/限流等业务限制；回复 /错误 " + window.raw() + " 全部 可包含。");
+        notes.add("诊断统计包含配额/限流等业务限制；错误列表默认排除，回复 /错误 " + window.raw() + " 全部 可包含。");
         notes.add("原因推断结合错误码、用户/Key/分组/账号状态；单条详情还会参考同链路成功请求。");
         if (ingressRejects != null && ingressRejects > 0) {
             notes.add("另有入口拒绝 " + count(ingressRejects) + " 次，回复 /入口拒绝 " + window.raw() + " 查看原因。");
@@ -221,10 +352,16 @@ public class BotErrorService {
                     parsed.businessLimitedOnly(),
                     parsed.includeBusinessLimited(),
                     parsed.keyword());
-            ErrorSummary summary = reader.summary(window.from(), window.to(), userId);
-            Long success = safeSuccessCount(window, userId);
+            ErrorSummary summary = reader.summary(window.from(), window.to(), filter);
+            boolean narrowed = parsed.statusCode() != null || parsed.status5xx()
+                    || parsed.rateLimited() || parsed.businessLimitedOnly()
+                    || hasText(parsed.keyword());
+            // 带状态码/关键词筛选时，错误率分母不能直接用全部成功请求，避免给出误导数字。
+            Long success = narrowed ? null : safeSuccessCount(window, userId);
             List<ErrorGroup> groups = reader.topGroups(window.from(), window.to(), filter, 5);
-            List<ErrorRow> rows = reader.recent(window.from(), window.to(), filter, parsed.limit());
+            int offset = Math.max(0, (parsed.page() - 1) * parsed.limit());
+            List<ErrorRow> rows = reader.recent(window.from(), window.to(), filter, parsed.limit(), offset);
+            boolean hasMore = (long) offset + rows.size() < summary.totalErrors();
 
             long totalRequests = success == null ? 0L : success + summary.totalErrors();
             Double errorRate = success == null || totalRequests <= 0
@@ -248,6 +385,13 @@ public class BotErrorService {
             notes.add(admin
                     ? "回复 /错误 #编号 查看单条详情。"
                     : "回复 /我的错误 #编号 查看单条详情。");
+            String command = admin ? "/错误" : "/我的错误";
+            String pageHint = hasMore
+                    ? "当前第 " + parsed.page() + " 页，共 " + count(summary.totalErrors())
+                    + " 条；查看更多用 p" + (parsed.page() + 1)
+                    + "，例如 " + command + " " + window.raw() + " p" + (parsed.page() + 1) + "。"
+                    : "当前第 " + parsed.page() + " 页，已是最后一页。";
+            notes.add(pageHint);
             return BotReport.of(titlePrefix + "（" + window.label() + "）", blocks, notes);
         } catch (RuntimeException ex) {
             return queryError(ex);
@@ -268,7 +412,7 @@ public class BotErrorService {
             blocks.add(accountsBlock(accounts));
         }
         List<String> notes = new ArrayList<>();
-        notes.add("默认排除业务限制类错误；如需包含，回复 /错误 " + window.raw() + " 全部。");
+        notes.add("账号排行包含业务限制类错误；错误列表默认排除，回复 /错误 " + window.raw() + " 全部 可包含。");
         notes.add("账号错误集中在少数账号时，优先检查该账号的上游状态、凭证和调度。");
         return BotReport.of("错误账号排行（" + window.label() + "）", blocks, notes);
     }
@@ -351,6 +495,249 @@ public class BotErrorService {
         notes.add("默认索引 warning / error / audit 日志；访问日志是否落库取决于 Sub2API 运行时配置。");
         notes.add("可以加级别或关键词，例如：/错误日志 1h error 529");
         return BotReport.of("错误日志（" + parsed.window().label() + "）", blocks, notes);
+    }
+
+    private BotReport recoveredReport(Window window, RecoveredSummary summary,
+                                      List<RecoveredGroup> groups) {
+        List<BotReport.Block> blocks = new ArrayList<>();
+        blocks.add(new BotReport.Block("概览", List.of(
+                BotReport.Col.left("项目"),
+                BotReport.Col.right("值")), List.of(
+                BotReport.Row.of("时间窗", window.label()),
+                BotReport.Row.of("恢复型上游错误", count(summary.total())),
+                BotReport.Row.of("多次尝试后恢复", count(summary.multiAttempt())),
+                BotReport.Row.of("影响用户", count(summary.affectedUsers())),
+                BotReport.Row.of("影响账号", count(summary.affectedAccounts()))), null));
+        if (groups.isEmpty()) {
+            blocks.add(BotReport.paragraph("恢复明细", List.of("没有找到恢复型上游错误。")));
+        } else {
+            List<BotReport.Row> rows = new ArrayList<>();
+            for (RecoveredGroup group : groups) {
+                rows.add(BotReport.Row.of(
+                        category(group.phase(), group.type()),
+                        String.valueOf(group.statusCode()),
+                        safe(group.accountName()),
+                        safe(group.model()),
+                        count(group.count()),
+                        String.valueOf(group.maxAttempts()),
+                        time(group.lastSeen())));
+            }
+            blocks.add(new BotReport.Block("恢复明细", List.of(
+                    BotReport.Col.left("分类"),
+                    BotReport.Col.left("状态"),
+                    BotReport.Col.left("账号"),
+                    BotReport.Col.left("模型"),
+                    BotReport.Col.right("次数"),
+                    BotReport.Col.right("最大尝试"),
+                    BotReport.Col.left("最近")), rows, null));
+        }
+        List<String> notes = new ArrayList<>();
+        notes.add("这些记录表示上游曾经失败，但最终客户端请求成功；不会出现在普通错误列表。");
+        notes.add("多次尝试后恢复说明重试/账号切换可能有效，也可能是上游短暂抖动。");
+        return BotReport.of("恢复型上游错误（" + window.label() + "）", blocks, notes);
+    }
+
+    private BotReport changeReport(Window window, PlatformEntity platform,
+                                   List<UpstreamChangeEventEntity> changes,
+                                   ErrorSummary summary, Long success,
+                                   List<ErrorFingerprint> fingerprints) {
+        List<BotReport.Row> overview = new ArrayList<>();
+        overview.add(BotReport.Row.of("平台", safe(platform.getPlatformName())));
+        overview.add(BotReport.Row.of("时间窗", window.label()));
+        overview.add(BotReport.Row.of("变更数", count(changes.size())));
+        if (summary != null) {
+            Double rate = errorRate(summary, success);
+            overview.add(BotReport.Row.of("错误数", count(summary.totalErrors())));
+            overview.add(BotReport.Row.of("错误率", percent(rate)));
+            overview.add(BotReport.Row.of("主要指纹", fingerprints.isEmpty()
+                    ? "-" : fingerprintLabel(fingerprints.get(0))));
+        } else {
+            overview.add(BotReport.Row.of("错误上下文", "不可用"));
+        }
+
+        List<BotReport.Block> blocks = new ArrayList<>();
+        blocks.add(BotReport.paragraph("关联结论", List.of(
+                changeCorrelation(changes, fingerprints))));
+        blocks.add(new BotReport.Block("概览", List.of(
+                BotReport.Col.left("项目"),
+                BotReport.Col.left("值")), overview, null));
+        if (!fingerprints.isEmpty()) {
+            blocks.add(fingerprintsBlock(fingerprints));
+        }
+        if (changes.isEmpty()) {
+            blocks.add(BotReport.paragraph("变更明细", List.of("这个时间窗内没有变更记录。")));
+        } else {
+            blocks.add(changesBlock(changes));
+        }
+        List<String> notes = new ArrayList<>();
+        notes.add("变更记录来自 monitor 采集到的分组、Key、账号和倍率变化。");
+        notes.add("关联结论只依据时间先后，不能单独证明因果；仍需结合错误指纹和账号状态。");
+        notes.add("如果错误在变更后开始出现，优先检查对应分组、Key 或账号。");
+        return BotReport.of("错误关联变更（" + window.label() + "）", blocks, notes);
+    }
+
+    private static String fingerprintLabel(ErrorFingerprint fingerprint) {
+        String code = fingerprint.providerErrorCode();
+        String label = category(fingerprint.phase(), fingerprint.type())
+                + " / " + fingerprint.statusCode();
+        return code == null || code.isBlank() ? label : label + " / " + code;
+    }
+
+    private static String changeCorrelation(List<UpstreamChangeEventEntity> changes,
+                                            List<ErrorFingerprint> fingerprints) {
+        if (changes.isEmpty() && fingerprints.isEmpty()) {
+            return "这个时间窗内既没有采集到变更，也没有错误记录。";
+        }
+        if (changes.isEmpty()) {
+            return "这个时间窗内没有采集到变更，错误更可能来自运行状态或外部上游。";
+        }
+        if (fingerprints.isEmpty()) {
+            return "采集到了变更，但当前时间窗没有错误记录，暂未看到直接关联。";
+        }
+        OffsetDateTime earliestChange = changes.stream()
+                .map(UpstreamChangeEventEntity::getDetectedAt)
+                .filter(value -> value != null)
+                .min(OffsetDateTime::compareTo)
+                .orElse(null);
+        OffsetDateTime earliestError = fingerprints.stream()
+                .map(ErrorFingerprint::firstSeen)
+                .filter(value -> value != null)
+                .min(OffsetDateTime::compareTo)
+                .orElse(null);
+        if (earliestChange == null || earliestError == null) {
+            return "变更或错误缺少时间信息，无法判断先后。";
+        }
+        if (!earliestChange.isAfter(earliestError)) {
+            return "最早变更早于主要错误指纹首次出现，时间上存在关联可能，建议优先核对变更对象。";
+        }
+        return "主要错误指纹早于最早变更出现，这次变更未必是当前错误的原因。";
+    }
+
+    private BotReport.Block changesBlock(List<UpstreamChangeEventEntity> changes) {
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (UpstreamChangeEventEntity change : changes) {
+            rows.add(BotReport.Row.of(
+                    time(change.getDetectedAt()),
+                    changeTypeLabel(change.getChangeType()),
+                    changeObject(change),
+                    changeValue(change),
+                    safe(change.getSeverity()),
+                    Boolean.TRUE.equals(change.getInUse()) ? "是" : "否"));
+        }
+        return new BotReport.Block("变更明细", List.of(
+                BotReport.Col.left("时间"),
+                BotReport.Col.left("类型"),
+                BotReport.Col.left("对象"),
+                BotReport.Col.left("变化"),
+                BotReport.Col.left("级别"),
+                BotReport.Col.left("使用中")), rows, null);
+    }
+
+    private BotReport trendReport(Window current, Window previous,
+                                     ErrorSummary now, ErrorSummary before,
+                                     Long nowSuccess, Long beforeSuccess,
+                                     Long nowIngress, Long beforeIngress,
+                                     List<ErrorFingerprint> nowFingerprints,
+                                     List<ErrorFingerprint> beforeFingerprints) {
+        Double nowRate = errorRate(now, nowSuccess);
+        Double beforeRate = errorRate(before, beforeSuccess);
+        List<BotReport.Row> rows = new ArrayList<>();
+        rows.add(BotReport.Row.of("错误数", count(now.totalErrors()), count(before.totalErrors()),
+                changeCount(now.totalErrors(), before.totalErrors())));
+        rows.add(BotReport.Row.of("错误率", percent(nowRate), percent(beforeRate),
+                changeRate(nowRate, beforeRate)));
+        rows.add(BotReport.Row.of("429/529", count(now.rateLimited()), count(before.rateLimited()),
+                changeCount(now.rateLimited(), before.rateLimited())));
+        rows.add(BotReport.Row.of("401/403", count(now.authErrors()), count(before.authErrors()),
+                changeCount(now.authErrors(), before.authErrors())));
+        rows.add(BotReport.Row.of("5xx", count(now.serverErrors()), count(before.serverErrors()),
+                changeCount(now.serverErrors(), before.serverErrors())));
+        if (nowIngress != null || beforeIngress != null) {
+            rows.add(BotReport.Row.of("入口拒绝", count(nowIngress == null ? 0 : nowIngress),
+                    count(beforeIngress == null ? 0 : beforeIngress),
+                    changeCount(nowIngress == null ? 0 : nowIngress,
+                            beforeIngress == null ? 0 : beforeIngress)));
+        }
+        rows.add(BotReport.Row.of("未解决", count(now.unresolved()), count(before.unresolved()),
+                changeCount(now.unresolved(), before.unresolved())));
+
+        List<BotReport.Block> blocks = new ArrayList<>();
+        blocks.add(BotReport.paragraph(null, List.of(
+                "结论：" + trendConclusion(now, before),
+                "当前：" + current.label() + "，对比：" + previous.label())));
+        blocks.add(new BotReport.Block("指标对比", List.of(
+                BotReport.Col.left("指标"),
+                BotReport.Col.right("当前"),
+                BotReport.Col.right("上一周期"),
+                BotReport.Col.right("变化")), rows, null));
+
+        List<FingerprintDelta> deltas = fingerprintDeltas(nowFingerprints, beforeFingerprints);
+        if (!deltas.isEmpty()) {
+            boolean changed = deltas.stream().anyMatch(item -> item.delta() != 0);
+            if (changed) {
+                blocks.add(fingerprintDeltaBlock(deltas));
+            } else {
+                blocks.add(BotReport.paragraph("指纹变化", List.of("主要错误指纹分布基本稳定。")));
+            }
+        }
+
+        List<String> notes = new ArrayList<>();
+        notes.add("上一周期是与当前窗口等长的前一个时间窗。");
+        notes.add("错误率 = 错误数 /（成功用量记录 + 错误数）；用量表不可用时显示 -。");
+        notes.add("趋势统计包含业务限制类错误。");
+        notes.add("指纹变化对比当前与上一周期各自 Top 20，按变化幅度排序。");
+        return BotReport.of("错误趋势（" + current.label() + "）", blocks, notes);
+    }
+
+    private BotReport.Block fingerprintDeltaBlock(List<FingerprintDelta> deltas) {
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (FingerprintDelta item : deltas) {
+            FingerprintKey key = item.key();
+            rows.add(BotReport.Row.of(
+                    category(key.phase(), key.type()),
+                    String.valueOf(key.statusCode()),
+                    safe(key.providerErrorCode()),
+                    count(item.current()),
+                    count(item.previous()),
+                    changeCount(item.current(), item.previous())));
+        }
+        return new BotReport.Block("指纹变化", List.of(
+                BotReport.Col.left("分类"),
+                BotReport.Col.left("状态"),
+                BotReport.Col.left("错误码"),
+                BotReport.Col.right("当前"),
+                BotReport.Col.right("上一周期"),
+                BotReport.Col.right("变化")), rows, null);
+    }
+
+    private static List<FingerprintDelta> fingerprintDeltas(List<ErrorFingerprint> current,
+                                                             List<ErrorFingerprint> previous) {
+        Map<FingerprintKey, Long> currentCounts = new LinkedHashMap<>();
+        Map<FingerprintKey, Long> previousCounts = new LinkedHashMap<>();
+        for (ErrorFingerprint item : current) {
+            currentCounts.merge(key(item), item.count(), Long::sum);
+        }
+        for (ErrorFingerprint item : previous) {
+            previousCounts.merge(key(item), item.count(), Long::sum);
+        }
+        LinkedHashMap<FingerprintKey, Boolean> all = new LinkedHashMap<>();
+        currentCounts.keySet().forEach(key -> all.put(key, Boolean.TRUE));
+        previousCounts.keySet().forEach(key -> all.put(key, Boolean.TRUE));
+        return all.keySet().stream()
+                .map(key -> new FingerprintDelta(key,
+                        currentCounts.getOrDefault(key, 0L),
+                        previousCounts.getOrDefault(key, 0L)))
+                .sorted(Comparator.comparingLong(
+                                (FingerprintDelta item) -> Math.abs(item.delta())).reversed()
+                        .thenComparing(Comparator.comparingLong(FingerprintDelta::delta).reversed())
+                        .thenComparing(Comparator.comparingLong(FingerprintDelta::current).reversed()))
+                .limit(5)
+                .toList();
+    }
+
+    private static FingerprintKey key(ErrorFingerprint item) {
+        return new FingerprintKey(item.phase(), item.type(), item.statusCode(),
+                item.providerErrorCode());
     }
 
     private BotReport detailReport(long id, Long userId, boolean admin) {
@@ -443,6 +830,48 @@ public class BotErrorService {
         return new BotReport.Block("关键指标", List.of(
                 BotReport.Col.left("项目"),
                 BotReport.Col.right("值")), rows, null);
+    }
+
+    private BotReport.Block fingerprintsBlock(List<ErrorFingerprint> fingerprints) {
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (ErrorFingerprint item : fingerprints) {
+            rows.add(BotReport.Row.of(
+                    category(item.phase(), item.type()),
+                    String.valueOf(item.statusCode()),
+                    safe(item.providerErrorCode()),
+                    count(item.count()),
+                    count(item.affectedUsers()),
+                    count(item.affectedAccounts()),
+                    time(item.firstSeen()),
+                    time(item.lastSeen())));
+        }
+        return new BotReport.Block("主要错误指纹", List.of(
+                BotReport.Col.left("分类"),
+                BotReport.Col.left("状态"),
+                BotReport.Col.left("错误码"),
+                BotReport.Col.right("次数"),
+                BotReport.Col.right("用户"),
+                BotReport.Col.right("账号"),
+                BotReport.Col.left("首次"),
+                BotReport.Col.left("最近")), rows, null);
+    }
+
+    private BotReport.Block fingerprintSamplesBlock(List<ErrorFingerprint> fingerprints) {
+        List<BotReport.Row> rows = new ArrayList<>();
+        for (ErrorFingerprint item : fingerprints) {
+            String code = item.providerErrorCode() == null || item.providerErrorCode().isBlank()
+                    ? "-" : item.providerErrorCode();
+            rows.add(BotReport.Row.of(
+                    category(item.phase(), item.type()),
+                    String.valueOf(item.statusCode()),
+                    code,
+                    truncate(item.sampleMessage(), 160)));
+        }
+        return new BotReport.Block("指纹消息样本", List.of(
+                BotReport.Col.left("分类"),
+                BotReport.Col.left("状态"),
+                BotReport.Col.left("错误码"),
+                BotReport.Col.left("消息样本")), rows, null);
     }
 
     private BotReport.Block causesBlock(List<CauseCount> causes) {
@@ -605,7 +1034,7 @@ public class BotErrorService {
             if (number.matches("\\d+")) {
                 try {
                     return new ParsedErrors(Long.parseLong(number), window(defaultRange, defaultRange),
-                            null, false, false, false, includeBusinessLimitedDefault, null, 10);
+                            null, false, false, false, includeBusinessLimitedDefault, null, 10, 1);
                 } catch (NumberFormatException ignored) {
                     // fall through
                 }
@@ -618,6 +1047,8 @@ public class BotErrorService {
         boolean rateLimited = false;
         boolean businessLimitedOnly = false;
         boolean includeBusinessLimited = includeBusinessLimitedDefault;
+        int limit = 10;
+        int page = 1;
         List<String> keywordParts = new ArrayList<>();
 
         for (String token : raw.isEmpty() ? new String[0] : raw.split("\\s+")) {
@@ -647,6 +1078,18 @@ public class BotErrorService {
                 status5xx = true;
                 continue;
             }
+            if (value.matches("p\\d+")) {
+                page = Math.max(1, Math.min(1000, Integer.parseInt(value.substring(1))));
+                continue;
+            }
+            if (value.matches("第\\d+页")) {
+                page = Math.max(1, Math.min(1000, Integer.parseInt(value.substring(1, value.length() - 1))));
+                continue;
+            }
+            if (value.matches("\\d{1,2}")) {
+                limit = Math.max(1, Math.min(Integer.parseInt(value), 50));
+                continue;
+            }
             if (value.matches("\\d{3}")) {
                 statusCode = Integer.parseInt(value);
                 if (statusCode == 429 || statusCode == 529) {
@@ -662,7 +1105,7 @@ public class BotErrorService {
         }
         String keyword = keywordParts.isEmpty() ? null : String.join(" ", keywordParts);
         return new ParsedErrors(null, window, statusCode, status5xx, rateLimited,
-                businessLimitedOnly, includeBusinessLimited, keyword, 10);
+                businessLimitedOnly, includeBusinessLimited, keyword, limit, page);
     }
 
     private Window parseRange(String arg, String defaultRange) {
@@ -796,6 +1239,50 @@ public class BotErrorService {
     }
 
     // ============================================================ text helpers
+
+    private static Double errorRate(ErrorSummary summary, Long success) {
+        if (success == null) {
+            return null;
+        }
+        long total = success + summary.totalErrors();
+        return total <= 0 ? null : (double) summary.totalErrors() / total;
+    }
+
+    private static String changeCount(long current, long previous) {
+        long diff = current - previous;
+        String sign = diff > 0 ? "+" : "";
+        if (previous == 0) {
+            return sign + count(diff) + (current > 0 && previous == 0 ? "（新增）" : "");
+        }
+        double percent = (double) diff / previous;
+        return sign + count(diff) + " (" + String.format(Locale.ROOT, "%+.1f%%", percent * 100) + ")";
+    }
+
+    private static String changeRate(Double current, Double previous) {
+        if (current == null || previous == null) {
+            return "-";
+        }
+        double diff = (current - previous) * 100;
+        return String.format(Locale.ROOT, "%+.1fpp", diff);
+    }
+
+    private static String trendConclusion(ErrorSummary now, ErrorSummary before) {
+        long current = now.totalErrors();
+        long previous = before.totalErrors();
+        if (previous == 0 && current == 0) {
+            return "两个周期都没有错误。";
+        }
+        if (previous == 0) {
+            return "上一周期没有错误，本周期出现 " + count(current) + " 个错误，属于新增问题。";
+        }
+        if (current >= 5 && current > previous * 1.5) {
+            return "错误数明显上升，建议优先排查新增错误指纹和变更记录。";
+        }
+        if (current * 1.5 < previous) {
+            return "错误数明显下降，问题可能正在恢复。";
+        }
+        return "错误数与上一周期基本持平。";
+    }
 
     private String conclusion(Window window, ErrorSummary summary, List<ErrorGroup> groups) {
         if (summary.totalErrors() == 0) {
@@ -1206,6 +1693,70 @@ public class BotErrorService {
         return BotReport.fromMarkdown(value);
     }
 
+    private List<UpstreamChangeEventEntity> safeChanges(Window window, int limit) {
+        PlatformEntity platform = poolPlatform();
+        if (platform == null) {
+            return List.of();
+        }
+        try {
+            List<UpstreamChangeEventEntity> changes = changeEventRepository.findEventsBetween(
+                    platform.getId(), window.from(), window.to(), limit);
+            return changes == null ? List.of() : changes;
+        } catch (RuntimeException ex) {
+            log.warn("查询错误关联变更失败: {}", ex.getMessage());
+            return List.of();
+        }
+    }
+
+    private PlatformEntity poolPlatform() {
+        return platformRepository.findAll().stream()
+                .filter(item -> item.getDeletedAt() == null)
+                .filter(item -> Boolean.TRUE.equals(item.getPoolMonitoringEnabled()))
+                .filter(item -> Boolean.TRUE.equals(item.getStatus()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static String changeTypeLabel(String value) {
+        return switch (value == null ? "" : value) {
+            case "GROUP_ADDED" -> "分组新增";
+            case "GROUP_REMOVED" -> "分组移除";
+            case "RATE_CHANGED", "BASE_RATE_CHANGED" -> "倍率变化";
+            case "STATUS_CHANGED" -> "状态变化";
+            case "API_KEY_ADDED" -> "Key 新增";
+            case "API_KEY_REMOVED" -> "Key 移除";
+            case "ACCOUNT_BALANCE_CHANGED" -> "余额变化";
+            case "API_KEY_QUOTA_CHANGED" -> "Key 额度变化";
+            default -> safe(value);
+        };
+    }
+
+    private static String changeObject(UpstreamChangeEventEntity change) {
+        if (change.getGroupName() != null && !change.getGroupName().isBlank()) {
+            return change.getGroupName();
+        }
+        if (change.getKeyName() != null && !change.getKeyName().isBlank()) {
+            return change.getKeyName();
+        }
+        if (change.getAccountName() != null && !change.getAccountName().isBlank()) {
+            return change.getAccountName();
+        }
+        if (change.getEntityKey() != null && !change.getEntityKey().isBlank()) {
+            return change.getEntityKey();
+        }
+        return safe(change.getEntityType());
+    }
+
+    private static String changeValue(UpstreamChangeEventEntity change) {
+        if (change.getMessage() != null && !change.getMessage().isBlank()) {
+            return truncate(change.getMessage(), 120);
+        }
+        String field = change.getFieldName() == null ? "" : change.getFieldName();
+        String oldValue = change.getOldValue() == null ? "-" : change.getOldValue();
+        String newValue = change.getNewValue() == null ? "-" : change.getNewValue();
+        return truncate((field.isBlank() ? "值" : field) + "：" + oldValue + " → " + newValue, 120);
+    }
+
     private List<CauseCount> topCauses(List<ErrorRow> rows, boolean admin) {
         Map<String, Long> counts = new LinkedHashMap<>();
         for (ErrorRow row : rows) {
@@ -1271,6 +1822,16 @@ public class BotErrorService {
     private record CauseCount(String label, long count) {
     }
 
+    private record FingerprintKey(String phase, String type, int statusCode,
+                                  String providerErrorCode) {
+    }
+
+    private record FingerprintDelta(FingerprintKey key, long current, long previous) {
+        long delta() {
+            return current - previous;
+        }
+    }
+
     private record ParsedErrors(
             Long id,
             Window window,
@@ -1280,7 +1841,8 @@ public class BotErrorService {
             boolean businessLimitedOnly,
             boolean includeBusinessLimited,
             String keyword,
-            int limit
+            int limit,
+            int page
     ) {
     }
 }

@@ -21,7 +21,17 @@ public record BotSettings(
         int maxReplyLength,
         int memoryWindow,
         /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索（页面可配）。 */
-        boolean webSearchForNonAdmin
+        boolean webSearchForNonAdmin,
+        /** 是否启用 Sub2API 错误突增主动告警。 */
+        boolean errorAlertEnabled,
+        /** 错误告警当前窗口与对比窗口的分钟数。 */
+        int errorAlertWindowMinutes,
+        /** 触发告警的最小错误数/429数/入口拒绝数。 */
+        int errorAlertMinCount,
+        /** 相对上一周期的突增倍数。 */
+        double errorAlertSpikeRatio,
+        /** 同一告警的冷却分钟数。 */
+        int errorAlertCooldownMinutes
 ) {
 
     public boolean isGroupAllowed(Long groupId) {

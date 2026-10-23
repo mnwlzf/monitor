@@ -53,7 +53,7 @@ class BotChatClientFactoryTest {
 
     private BotSettings settings(boolean webSearchForNonAdmin) {
         return new BotSettings(true, Set.of(), Set.of(), Set.of(), true, "/", 900, 10,
-                webSearchForNonAdmin);
+                webSearchForNonAdmin, false, 15, 5, 1.5, 30);
     }
 
     @Test

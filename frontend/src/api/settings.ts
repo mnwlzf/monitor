@@ -127,6 +127,12 @@ export interface BotSettingsInput {
   memoryWindow: number
   /** 是否允许非管理员（平台普通用户 / 陌生人）使用联网搜索。 */
   webSearchForNonAdmin: boolean
+  /** 是否启用 Sub2API 错误突增主动告警。 */
+  errorAlertEnabled: boolean
+  errorAlertWindowMinutes: number
+  errorAlertMinCount: number
+  errorAlertSpikeRatio: number
+  errorAlertCooldownMinutes: number
 }
 
 /** 读取 QQ 机器人设置。 */

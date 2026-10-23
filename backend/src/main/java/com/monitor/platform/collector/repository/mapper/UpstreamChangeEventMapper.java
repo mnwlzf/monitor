@@ -26,6 +26,13 @@ public interface UpstreamChangeEventMapper  {
             @Param("since") java.time.OffsetDateTime since,
             @Param("limit") int limit);
 
+    /** 查询指定平台在时间窗内的全部变更事件，供机器人排障关联。 */
+    List<UpstreamChangeEventEntity> selectEventsBetween(
+            @Param("platformId") Integer platformId,
+            @Param("from") java.time.OffsetDateTime from,
+            @Param("to") java.time.OffsetDateTime to,
+            @Param("limit") int limit);
+
     /** 查询指定时间窗内的渠道变更；inUse 决定取在用的还是非在用的（每日汇总取后者）。 */
     List<UpstreamChangeEventEntity> selectGroupEventsBetween(
             @Param("from") java.time.OffsetDateTime from,
