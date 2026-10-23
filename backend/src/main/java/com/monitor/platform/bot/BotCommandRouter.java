@@ -47,6 +47,8 @@ public class BotCommandRouter {
             - /错误 [时间窗] [状态码|关键词]  最近错误；/错误 #编号 查看单条详情
             - /错误账号 [时间窗] [条数]  按账号统计错误排行
             - /错误用户 <邮箱|ID> [时间窗]  指定用户的错误
+            - /入口拒绝 [时间窗]  无效 Key、IP 限制、分组禁用等入口拒绝统计
+            - /错误日志 [时间窗] [级别] [关键词]  按时间/级别/关键词查系统日志
             - /我的错误 [时间窗]  我自己的错误
             - /任务            定时任务启用状态与最近一次执行结果
             - /订单 <账号> [起] [止]  指定平台用户的订单（默认近 30 天）
@@ -182,6 +184,10 @@ public class BotCommandRouter {
                     platformOnly(identity, platformFeature, () -> errorService.accountReport(arg));
             case "erroruser", "错误用户" ->
                     platformOnly(identity, platformFeature, () -> errorUserReport(arg));
+            case "ingress", "入口拒绝" ->
+                    platformOnly(identity, platformFeature, () -> errorService.ingressReport(arg));
+            case "errorlogs", "错误日志" ->
+                    platformOnly(identity, platformFeature, () -> errorService.systemLogReport(arg));
             case "myerrors", "我的错误" ->
                     selfService(platformFeature, identity, () -> errorService.myReport(identity.email(), arg));
             case "tasks", "任务" -> platformOnly(identity, platformFeature, tools::taskReport);

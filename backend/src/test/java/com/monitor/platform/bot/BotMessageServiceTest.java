@@ -212,6 +212,26 @@ class BotMessageServiceTest {
     }
 
     @Test
+    void shouldRouteAdminIngressRejectQuery() throws Exception {
+        identityIs(admin());
+        when(errorService.ingressReport("1h")).thenReturn(BotReport.fromMarkdown("入口拒绝"));
+
+        service.onEvent(event(privateCommand("/入口拒绝 1h")));
+
+        verify(errorService, timeout(3000)).ingressReport("1h");
+    }
+
+    @Test
+    void shouldRouteAdminSystemLogQuery() throws Exception {
+        identityIs(admin());
+        when(errorService.systemLogReport("1h error 529")).thenReturn(BotReport.fromMarkdown("错误日志"));
+
+        service.onEvent(event(privateCommand("/错误日志 1h error 529")));
+
+        verify(errorService, timeout(3000)).systemLogReport("1h error 529");
+    }
+
+    @Test
     void shouldRouteAdminErrorUserQuery() throws Exception {
         identityIs(admin());
         when(errorService.userReport("user@example.com", "7d"))

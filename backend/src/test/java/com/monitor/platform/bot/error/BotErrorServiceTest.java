@@ -6,6 +6,7 @@ import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorFilter;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorGroup;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorRow;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorSummary;
+import com.monitor.platform.bot.error.Sub2ErrorReader.IngressRejectGroup;
 import com.monitor.platform.bot.error.Sub2ErrorReader.SystemLogRow;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.user.BotUserService;
@@ -17,6 +18,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -71,6 +73,40 @@ class BotErrorServiceTest {
                 .contains("429")
                 .doesNotContain("user@example.com")
                 .doesNotContain("account-a");
+    }
+
+    @Test
+    void shouldBuildIngressRejectReport() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(reader.isAvailable()).thenReturn(true);
+        when(reader.ingressRejectCount(any(), any())).thenReturn(12L);
+        when(reader.topIngressRejects(any(), any(), anyInt())).thenReturn(List.of(
+                new IngressRejectGroup("invalid_api_key", "responses", "openai",
+                        "1.2.3.4", null, null, 10, now, now)));
+
+        BotReport report = service.ingressReport("1h");
+
+        assertThat(report.title()).contains("入口拒绝");
+        assertThat(report.toPlainText())
+                .contains("无效 API Key")
+                .contains("1.2.3.4")
+                .contains("不会出现在普通错误列表");
+    }
+
+    @Test
+    void shouldBuildSystemLogReportWithoutRequestId() {
+        OffsetDateTime now = OffsetDateTime.now();
+        when(reader.isAvailable()).thenReturn(true);
+        when(reader.recentSystemLogs(any(), any(), eq("error"), eq("529"), anyInt()))
+                .thenReturn(List.of(new SystemLogRow(now, "error", "gateway", "upstream 529")));
+
+        BotReport report = service.systemLogReport("1h error 529");
+
+        assertThat(report.title()).contains("错误日志");
+        assertThat(report.toPlainText())
+                .contains("gateway")
+                .contains("upstream 529")
+                .contains("不需要请求 ID");
     }
 
     @Test

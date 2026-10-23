@@ -46,6 +46,20 @@ public class BotErrorTools {
         return service.userReport(user, range).toPlainText();
     }
 
+    @Tool(description = "仅管理员可用：查询入口拒绝统计，包括无效 API Key、Key 禁用、IP 限制、用户禁用、分组禁用或未授权。"
+            + "这些请求通常不会出现在普通错误列表里。range 默认 1h。")
+    public String ingressRejections(String range) {
+        return service.ingressReport(range).toPlainText();
+    }
+
+    @Tool(description = "仅管理员可用：按时间窗、日志级别和关键词查询系统日志，不需要请求 ID。"
+            + "level 可填 warn/error 等；keyword 可填 529、upstream、模型名或组件名。range 默认 1h。")
+    public String recentSystemLogs(String range,
+                                   @ToolParam(required = false, description = "日志级别，如 warn/error") String level,
+                                   @ToolParam(required = false, description = "关键词，如 529、upstream、模型名") String keyword) {
+        return service.systemLogReport(join(join(range, level), keyword)).toPlainText();
+    }
+
     private static String join(String first, String second) {
         if (first == null || first.isBlank()) {
             return second == null ? "" : second;

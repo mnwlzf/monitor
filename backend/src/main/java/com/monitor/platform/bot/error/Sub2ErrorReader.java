@@ -12,6 +12,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 直连 Sub2API 只读库读取机器人排障所需的错误数据。
@@ -82,6 +83,87 @@ public class Sub2ErrorReader {
         }
         Long value = jdbc.template().queryForObject(sql.toString(), Long.class, args.toArray());
         return value == null ? 0L : value;
+    }
+
+    /** 时间窗内入口拒绝总数。入口拒绝不会出现在 ops_error_logs 中。 */
+    public long ingressRejectCount(OffsetDateTime from, OffsetDateTime to) {
+        String sql = """
+                SELECT COALESCE(SUM(request_count), 0)
+                FROM ops_ingress_reject_aggregates
+                WHERE bucket_start >= ? AND bucket_start < ?
+                """;
+        Long value = jdbc.template().queryForObject(sql, Long.class, from, to);
+        return value == null ? 0L : value;
+    }
+
+    /** 入口拒绝排行：原因、路由、协议、IP、用户和 Key。 */
+    public List<IngressRejectGroup> topIngressRejects(OffsetDateTime from, OffsetDateTime to, int limit) {
+        String sql = """
+                SELECT reject_reason,
+                       route_family,
+                       protocol,
+                       host(client_ip) AS client_ip,
+                       user_id,
+                       api_key_id,
+                       SUM(request_count) AS request_count,
+                       MIN(first_seen) AS first_seen,
+                       MAX(last_seen) AS last_seen
+                FROM ops_ingress_reject_aggregates
+                WHERE bucket_start >= ? AND bucket_start < ?
+                GROUP BY reject_reason, route_family, protocol, host(client_ip), user_id, api_key_id
+                ORDER BY request_count DESC
+                LIMIT ?
+                """;
+        return jdbc.template().query(sql, (rs, rowNum) -> new IngressRejectGroup(
+                rs.getString("reject_reason"),
+                rs.getString("route_family"),
+                rs.getString("protocol"),
+                rs.getString("client_ip"),
+                nullableLong(rs, "user_id"),
+                nullableLong(rs, "api_key_id"),
+                rs.getLong("request_count"),
+                time(rs, "first_seen"),
+                time(rs, "last_seen")
+        ), from, to, Math.max(1, Math.min(limit, 20)));
+    }
+
+    /** 不依赖请求 ID 的系统日志查询：按时间、级别和关键词。 */
+    public List<SystemLogRow> recentSystemLogs(OffsetDateTime from, OffsetDateTime to,
+                                               String level, String keyword, int limit) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT created_at,
+                       COALESCE(level, '') AS level,
+                       COALESCE(component, '') AS component,
+                       COALESCE(message, '') AS message
+                FROM ops_system_logs
+                WHERE created_at >= ? AND created_at < ?
+                """);
+        List<Object> args = new ArrayList<>();
+        args.add(from);
+        args.add(to);
+        if (level != null && !level.isBlank()) {
+            sql.append(" AND LOWER(COALESCE(level, '')) = ?");
+            args.add(level.trim().toLowerCase(Locale.ROOT));
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append("""
+                     AND (message ILIKE ?
+                          OR component ILIKE ?
+                          OR COALESCE(extra::text, '') ILIKE ?)
+                    """);
+            String like = "%" + keyword.trim() + "%";
+            args.add(like);
+            args.add(like);
+            args.add(like);
+        }
+        sql.append(" ORDER BY created_at DESC LIMIT ?");
+        args.add(Math.max(1, Math.min(limit, 50)));
+        return jdbc.template().query(sql.toString(), (rs, rowNum) -> new SystemLogRow(
+                time(rs, "created_at"),
+                rs.getString("level"),
+                rs.getString("component"),
+                rs.getString("message")
+        ), args.toArray());
     }
 
     /** 最近错误列表。 */
@@ -549,6 +631,19 @@ public class Sub2ErrorReader {
             Long upstreamLatencyMs,
             Long responseLatencyMs,
             OffsetDateTime resolvedAt
+    ) {
+    }
+
+    public record IngressRejectGroup(
+            String reason,
+            String routeFamily,
+            String protocol,
+            String clientIp,
+            Long userId,
+            Long apiKeyId,
+            long count,
+            OffsetDateTime firstSeen,
+            OffsetDateTime lastSeen
     ) {
     }
 

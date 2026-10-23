@@ -6,6 +6,7 @@ import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorFilter;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorGroup;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorRow;
 import com.monitor.platform.bot.error.Sub2ErrorReader.ErrorSummary;
+import com.monitor.platform.bot.error.Sub2ErrorReader.IngressRejectGroup;
 import com.monitor.platform.bot.error.Sub2ErrorReader.SystemLogRow;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.user.BotUserService;
@@ -40,7 +41,7 @@ public class BotErrorService {
     private static final String NO_DATABASE = """
             没有配置 Sub2API 只读库连接，错误查询不可用。
             需要设置 SUB2API_DB_URL / SUB2API_DB_USERNAME，并给只读账号授予
-            ops_error_logs、ops_system_logs、usage_logs、users、api_keys、accounts、groups 的 SELECT 权限。""";
+            ops_error_logs、ops_system_logs、ops_ingress_reject_aggregates、usage_logs、users、api_keys、accounts、groups 的 SELECT 权限。""";
 
     private final Sub2ErrorReader reader;
     private final BotUserService userService;
@@ -64,7 +65,8 @@ public class BotErrorService {
             List<ErrorGroup> groups = reader.topGroups(window.from(), window.to(), filter, 5);
             List<AccountGroup> accounts = reader.topAccounts(window.from(), window.to(), filter, 5);
             Long success = safeSuccessCount(window, null);
-            return diagnoseReport(window, summary, success, groups, accounts);
+            Long ingressRejects = safeIngressRejectCount(window);
+            return diagnoseReport(window, summary, success, groups, accounts, ingressRejects);
         } catch (RuntimeException ex) {
             return queryError(ex);
         }
@@ -92,6 +94,37 @@ public class BotErrorService {
                     window.from(), window.to(), ErrorFilter.all(null), limit);
             Long success = safeSuccessCount(window, null);
             return accountReport(window, summary, success, accounts);
+        } catch (RuntimeException ex) {
+            return queryError(ex);
+        }
+    }
+
+    /** 管理员：入口拒绝排行。 */
+    public BotReport ingressReport(String arg) {
+        Window window = parseRange(arg, "1h");
+        int limit = parseLimit(arg, 10);
+        if (!reader.isAvailable()) {
+            return message(NO_DATABASE);
+        }
+        try {
+            long total = reader.ingressRejectCount(window.from(), window.to());
+            List<IngressRejectGroup> groups = reader.topIngressRejects(window.from(), window.to(), limit);
+            return ingressReport(window, total, groups);
+        } catch (RuntimeException ex) {
+            return queryError(ex);
+        }
+    }
+
+    /** 管理员：不依赖请求 ID 的系统日志查询。 */
+    public BotReport systemLogReport(String arg) {
+        ParsedSystemLog parsed = parseSystemLogArg(arg);
+        if (!reader.isAvailable()) {
+            return message(NO_DATABASE);
+        }
+        try {
+            List<SystemLogRow> logs = reader.recentSystemLogs(
+                    parsed.window().from(), parsed.window().to(), parsed.level(), parsed.keyword(), parsed.limit());
+            return systemLogReport(parsed, logs);
         } catch (RuntimeException ex) {
             return queryError(ex);
         }
@@ -132,7 +165,8 @@ public class BotErrorService {
     // ============================================================ 报表
 
     private BotReport diagnoseReport(Window window, ErrorSummary summary, Long success,
-                                     List<ErrorGroup> groups, List<AccountGroup> accounts) {
+                                     List<ErrorGroup> groups, List<AccountGroup> accounts,
+                                     Long ingressRejects) {
         long totalRequests = success == null ? 0L : success + summary.totalErrors();
         Double errorRate = success == null || totalRequests <= 0
                 ? null : (double) summary.totalErrors() / totalRequests;
@@ -141,7 +175,7 @@ public class BotErrorService {
         blocks.add(BotReport.paragraph(null, List.of(
                 "结论：" + conclusion(window, summary, groups),
                 "建议：" + action(summary, accounts))));
-        blocks.add(summaryBlock(window, summary, success, errorRate));
+        blocks.add(summaryBlock(window, summary, success, errorRate, ingressRejects));
         if (!groups.isEmpty()) {
             blocks.add(groupsBlock(groups));
         }
@@ -151,6 +185,9 @@ public class BotErrorService {
 
         List<String> notes = new ArrayList<>();
         notes.add("默认排除配额/限流等业务限制；回复 /错误 " + window.raw() + " 全部 可包含。");
+        if (ingressRejects != null && ingressRejects > 0) {
+            notes.add("另有入口拒绝 " + count(ingressRejects) + " 次，回复 /入口拒绝 " + window.raw() + " 查看原因。");
+        }
         if (success == null) {
             notes.add("用量表暂不可用，本次未计算错误率。");
         }
@@ -181,7 +218,7 @@ public class BotErrorService {
                     ? null : (double) summary.totalErrors() / totalRequests;
 
             List<BotReport.Block> blocks = new ArrayList<>();
-            blocks.add(summaryBlock(window, summary, success, errorRate));
+            blocks.add(summaryBlock(window, summary, success, errorRate, null));
             if (!groups.isEmpty()) {
                 blocks.add(groupsBlock(groups));
             }
@@ -211,7 +248,7 @@ public class BotErrorService {
                 ? null : (double) summary.totalErrors() / totalRequests;
 
         List<BotReport.Block> blocks = new ArrayList<>();
-        blocks.add(summaryBlock(window, summary, success, errorRate));
+        blocks.add(summaryBlock(window, summary, success, errorRate, null));
         if (accounts.isEmpty()) {
             blocks.add(BotReport.paragraph("账号排行", List.of("没有找到带账号信息的错误。")));
         } else {
@@ -221,6 +258,86 @@ public class BotErrorService {
         notes.add("默认排除业务限制类错误；如需包含，回复 /错误 " + window.raw() + " 全部。");
         notes.add("账号错误集中在少数账号时，优先检查该账号的上游状态、凭证和调度。");
         return BotReport.of("错误账号排行（" + window.label() + "）", blocks, notes);
+    }
+
+    private BotReport ingressReport(Window window, long total, List<IngressRejectGroup> groups) {
+        List<BotReport.Block> blocks = new ArrayList<>();
+        List<BotReport.Row> summary = new ArrayList<>();
+        summary.add(BotReport.Row.of("时间窗", window.label()));
+        summary.add(BotReport.Row.of("入口拒绝", count(total)));
+        if (!groups.isEmpty()) {
+            summary.add(BotReport.Row.of("主要原因", reasonLabel(groups.get(0).reason())));
+        }
+        blocks.add(new BotReport.Block("概览", List.of(
+                BotReport.Col.left("项目"),
+                BotReport.Col.left("值")), summary, null));
+
+        if (groups.isEmpty()) {
+            blocks.add(BotReport.paragraph("拒绝明细", List.of("没有找到入口拒绝记录。")));
+        } else {
+            List<BotReport.Row> rows = new ArrayList<>();
+            for (IngressRejectGroup group : groups) {
+                rows.add(BotReport.Row.of(
+                        reasonLabel(group.reason()),
+                        safe(group.routeFamily()),
+                        safe(group.protocol()),
+                        safe(group.clientIp()),
+                        ingressIdentity(group),
+                        count(group.count()),
+                        time(group.lastSeen())));
+            }
+            blocks.add(new BotReport.Block("拒绝明细", List.of(
+                    BotReport.Col.left("原因"),
+                    BotReport.Col.left("路由"),
+                    BotReport.Col.left("协议"),
+                    BotReport.Col.left("IP"),
+                    BotReport.Col.left("用户/Key"),
+                    BotReport.Col.right("次数"),
+                    BotReport.Col.left("最近")), rows, null));
+        }
+
+        List<String> notes = new ArrayList<>();
+        notes.add("入口拒绝发生在鉴权/分组校验阶段，不会出现在普通错误列表。");
+        notes.add("常见原因：无效 API Key、Key 禁用、IP 限制、用户禁用、分组禁用或未授权。");
+        return BotReport.of("入口拒绝（" + window.label() + "）", blocks, notes);
+    }
+
+    private BotReport systemLogReport(ParsedSystemLog parsed, List<SystemLogRow> logs) {
+        List<BotReport.Block> blocks = new ArrayList<>();
+        List<BotReport.Row> summary = new ArrayList<>();
+        summary.add(BotReport.Row.of("时间窗", parsed.window().label()));
+        summary.add(BotReport.Row.of("级别", safe(parsed.level()).equals("-") ? "全部" : parsed.level()));
+        if (parsed.keyword() != null && !parsed.keyword().isBlank()) {
+            summary.add(BotReport.Row.of("关键词", parsed.keyword()));
+        }
+        summary.add(BotReport.Row.of("显示条数", count(logs.size())));
+        blocks.add(new BotReport.Block("查询条件", List.of(
+                BotReport.Col.left("项目"),
+                BotReport.Col.left("值")), summary, null));
+
+        if (logs.isEmpty()) {
+            blocks.add(BotReport.paragraph("日志明细", List.of("没有找到符合条件的系统日志。")));
+        } else {
+            List<BotReport.Row> rows = new ArrayList<>();
+            for (SystemLogRow log : logs) {
+                rows.add(BotReport.Row.of(
+                        time(log.createdAt()),
+                        safe(log.level()),
+                        safe(log.component()),
+                        truncate(log.message(), 220)));
+            }
+            blocks.add(new BotReport.Block("日志明细", List.of(
+                    BotReport.Col.left("时间"),
+                    BotReport.Col.left("级别"),
+                    BotReport.Col.left("组件"),
+                    BotReport.Col.left("消息")), rows, null));
+        }
+
+        List<String> notes = new ArrayList<>();
+        notes.add("不需要请求 ID；可以按时间、级别和关键词直接查系统日志。");
+        notes.add("默认索引 warning / error / audit 日志；访问日志是否落库取决于 Sub2API 运行时配置。");
+        notes.add("可以加级别或关键词，例如：/错误日志 1h error 529");
+        return BotReport.of("错误日志（" + parsed.window().label() + "）", blocks, notes);
     }
 
     private BotReport detailReport(long id, Long userId, boolean admin) {
@@ -283,7 +400,8 @@ public class BotErrorService {
 
     // ============================================================ blocks
 
-    private BotReport.Block summaryBlock(Window window, ErrorSummary summary, Long success, Double errorRate) {
+    private BotReport.Block summaryBlock(Window window, ErrorSummary summary, Long success,
+                                           Double errorRate, Long ingressRejects) {
         List<BotReport.Row> rows = new ArrayList<>();
         rows.add(BotReport.Row.of("时间窗", window.label()));
         if (success != null) {
@@ -296,6 +414,9 @@ public class BotErrorService {
         rows.add(BotReport.Row.of("401 / 403", count(summary.authErrors())));
         rows.add(BotReport.Row.of("5xx", count(summary.serverErrors())));
         rows.add(BotReport.Row.of("未解决", count(summary.unresolved())));
+        if (ingressRejects != null) {
+            rows.add(BotReport.Row.of("入口拒绝", count(ingressRejects)));
+        }
         return new BotReport.Block("关键指标", List.of(
                 BotReport.Col.left("项目"),
                 BotReport.Col.right("值")), rows, null);
@@ -501,6 +622,45 @@ public class BotErrorService {
         return fallback;
     }
 
+    private ParsedSystemLog parseSystemLogArg(String arg) {
+        Window window = null;
+        String level = null;
+        int limit = 10;
+        List<String> keywordParts = new ArrayList<>();
+        String raw = arg == null ? "" : arg.trim();
+        for (String token : raw.isEmpty() ? new String[0] : raw.split("\\s+")) {
+            String value = token.trim();
+            if (value.isEmpty()) {
+                continue;
+            }
+            if (window == null && isRange(value)) {
+                window = window(value, "1h");
+                continue;
+            }
+            if (level == null && isLogLevel(value)) {
+                level = value.toLowerCase(Locale.ROOT);
+                continue;
+            }
+            if (value.matches("\\d{1,2}")) {
+                limit = Math.max(1, Math.min(Integer.parseInt(value), 20));
+                continue;
+            }
+            keywordParts.add(value);
+        }
+        if (window == null) {
+            window = window("1h", "1h");
+        }
+        return new ParsedSystemLog(window, level,
+                keywordParts.isEmpty() ? null : String.join(" ", keywordParts), limit);
+    }
+
+    private static boolean isLogLevel(String value) {
+        return switch (value == null ? "" : value.toLowerCase(Locale.ROOT)) {
+            case "debug", "info", "warn", "warning", "error", "fatal", "panic", "dpanic" -> true;
+            default -> false;
+        };
+    }
+
     private Long resolveUser(String userArg) {
         String value = userArg == null ? "" : userArg.trim();
         if (value.matches("\\d+")) {
@@ -614,6 +774,36 @@ public class BotErrorService {
             return "检查余额、配额、并发和订阅限制。";
         }
         return "查看最近错误详情，确认具体模型、账号和错误消息。";
+    }
+
+    private static String reasonLabel(String reason) {
+        return switch (reason == null ? "" : reason.trim().toLowerCase(Locale.ROOT)) {
+            case "query_api_key_deprecated" -> "URL 携带 Key";
+            case "api_key_required" -> "缺少 API Key";
+            case "invalid_api_key" -> "无效 API Key";
+            case "invalid_auth_rate_limited" -> "鉴权失败限流";
+            case "api_key_auth_overloaded" -> "鉴权过载";
+            case "api_key_disabled" -> "API Key 已禁用";
+            case "ip_restricted" -> "IP 限制";
+            case "user_inactive" -> "用户已禁用";
+            case "group_deleted" -> "分组已删除";
+            case "group_disabled" -> "分组已禁用";
+            case "group_not_allowed" -> "分组未授权";
+            case "group_unassigned" -> "未分配分组";
+            case "other" -> "其他";
+            default -> safe(reason);
+        };
+    }
+
+    private static String ingressIdentity(IngressRejectGroup group) {
+        String user = group.userId() != null && group.userId() > 0
+                ? "用户 " + group.userId() : "";
+        String key = group.apiKeyId() != null && group.apiKeyId() > 0
+                ? "Key " + group.apiKeyId() : "";
+        if (!user.isBlank() && !key.isBlank()) {
+            return user + " / " + key;
+        }
+        return !user.isBlank() ? user : (!key.isBlank() ? key : "-");
     }
 
     private static String category(String phase, String type) {
@@ -755,6 +945,15 @@ public class BotErrorService {
         return BotReport.fromMarkdown(value);
     }
 
+    private Long safeIngressRejectCount(Window window) {
+        try {
+            return reader.ingressRejectCount(window.from(), window.to());
+        } catch (RuntimeException ex) {
+            log.warn("查询入口拒绝数失败: {}", ex.getMessage());
+            return null;
+        }
+    }
+
     private Long safeSuccessCount(Window window, Long userId) {
         try {
             return reader.successCount(window.from(), window.to(), userId);
@@ -776,6 +975,9 @@ public class BotErrorService {
     }
 
     private record Window(OffsetDateTime from, OffsetDateTime to, String label, String raw) {
+    }
+
+    private record ParsedSystemLog(Window window, String level, String keyword, int limit) {
     }
 
     private record ParsedErrors(

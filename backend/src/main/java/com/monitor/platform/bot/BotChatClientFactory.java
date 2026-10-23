@@ -67,7 +67,7 @@ public class BotChatClientFactory {
                * 管理员确认具体人员后，调用 previewBalanceIncreaseForUser(userId...) 生成预览，禁止直接声称已充值；
                * 只有管理员在下一条消息明确回复「确认充值 <确认码>」后，才调用 confirmBalanceIncrease；
                * 余额操作只允许增加，禁止 set / subtract；成功后如实返回充值前后余额与累计充值。
-            10. 查错误时优先使用 diagnoseErrors / recentErrors / topErrorAccounts / errorsByUser，
+            10. 查错误时优先使用 diagnoseErrors / recentErrors / topErrorAccounts / errorsByUser / ingressRejections / recentSystemLogs，
                 不要要求用户提供请求 ID。用户端看不到请求 ID；需要单条详情时使用机器人返回的「错误编号 #数字」。
             """;
 
