@@ -21,6 +21,8 @@ import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.error.BotErrorService;
+import com.monitor.platform.bot.error.BotErrorTools;
 import com.monitor.platform.bot.image.ImageGenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,6 +64,8 @@ class BotMessageServiceTest {
     private BotOrderTools orderTools;
     private BotUsageTools usageTools;
     private BotChannelStatusService channelStatusService;
+    private BotErrorService errorService;
+    private BotErrorTools errorTools;
     private ImageGenService imageGenService;
     private BotRuntimeStatus runtimeStatus;
     private Sub2ApiUserCache userCache;
@@ -88,6 +92,8 @@ class BotMessageServiceTest {
         orderTools = mock(BotOrderTools.class);
         usageTools = mock(BotUsageTools.class);
         channelStatusService = mock(BotChannelStatusService.class);
+        errorService = mock(BotErrorService.class);
+        errorTools = mock(BotErrorTools.class);
         imageGenService = mock(ImageGenService.class);
         runtimeStatus = new BotRuntimeStatus();
         userCache = mock(Sub2ApiUserCache.class);
@@ -105,12 +111,12 @@ class BotMessageServiceTest {
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
 
-        BotChatClientFactory chatClients = new BotChatClientFactory(tools, orderTools, usageTools, weatherTools,
+        BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, botUserService, weatherTools, bindings, userCache, imageGenService);
+                tools, orderTools, usageTools, channelStatusService, errorService, botUserService, weatherTools, bindings, userCache, imageGenService);
         service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -182,6 +188,60 @@ class BotMessageServiceTest {
         service.onEvent(event(privateCommand("/平台")));
 
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
+    }
+
+    @Test
+    void shouldRouteAdminErrorDiagnosis() throws Exception {
+        identityIs(admin());
+        when(errorService.diagnoseReport("1h")).thenReturn(BotReport.fromMarkdown("诊断内容"));
+
+        service.onEvent(event(privateCommand("/诊断 1h")));
+
+        verify(errorService, timeout(3000)).diagnoseReport("1h");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
+    }
+
+    @Test
+    void shouldRouteAdminErrorAccountRanking() throws Exception {
+        identityIs(admin());
+        when(errorService.accountReport("1h 5")).thenReturn(BotReport.fromMarkdown("账号错误"));
+
+        service.onEvent(event(privateCommand("/错误账号 1h 5")));
+
+        verify(errorService, timeout(3000)).accountReport("1h 5");
+    }
+
+    @Test
+    void shouldRouteAdminErrorUserQuery() throws Exception {
+        identityIs(admin());
+        when(errorService.userReport("user@example.com", "7d"))
+                .thenReturn(BotReport.fromMarkdown("用户错误"));
+
+        service.onEvent(event(privateCommand("/错误用户 user@example.com 7d")));
+
+        verify(errorService, timeout(3000)).userReport("user@example.com", "7d");
+    }
+
+    @Test
+    void shouldRouteSelfErrorQueryForPlatformUser() throws Exception {
+        identityIs(normalUser());
+        when(errorService.myReport("2755457558@qq.com", "24h"))
+                .thenReturn(BotReport.fromMarkdown("我的错误内容"));
+
+        service.onEvent(event(tempSessionCommand(222L, "/我的错误 24h")));
+
+        verify(errorService, timeout(3000)).myReport("2755457558@qq.com", "24h");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
+    }
+
+    @Test
+    void shouldHideAdminErrorCommandsFromPlatformUser() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(tempSessionCommand(222L, "/错误 1h 429")));
+
+        verify(errorService, never()).recentReport(anyString());
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("仅管理员"));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import com.monitor.platform.bot.error.BotErrorTools;
 import com.monitor.platform.bot.key.Sub2KeyTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.search.WebSearchProperties;
@@ -66,6 +67,8 @@ public class BotChatClientFactory {
                * 管理员确认具体人员后，调用 previewBalanceIncreaseForUser(userId...) 生成预览，禁止直接声称已充值；
                * 只有管理员在下一条消息明确回复「确认充值 <确认码>」后，才调用 confirmBalanceIncrease；
                * 余额操作只允许增加，禁止 set / subtract；成功后如实返回充值前后余额与累计充值。
+            10. 查错误时优先使用 diagnoseErrors / recentErrors / topErrorAccounts / errorsByUser，
+                不要要求用户提供请求 ID。用户端看不到请求 ID；需要单条详情时使用机器人返回的「错误编号 #数字」。
             """;
 
     private static final String MONITOR_USER_PROMPT = """
@@ -73,7 +76,7 @@ public class BotChatClientFactory {
             当前对话者是本平台的普通用户（不是管理员）。
 
             平台相关的问题：
-            1. 对方可以查询**自己**的余额、用量、API Key，用 myBalance / myUsage / myApiKeys 工具；
+            1. 对方可以查询**自己**的余额、用量、API Key、最近错误，用 myBalance / myUsage / myApiKeys / myRecentErrors 工具；
                这些工具只返回发送者本人的数据，不要试图查询别人；
             2. 平台级数据（全部账号列表、号池、变更记录等）只有管理员能查询；
                对方问到这类内容时，直接说明「该数据仅管理员可查」，不要猜测、不要编造；
@@ -106,6 +109,7 @@ public class BotChatClientFactory {
             """;
 
     private final MonitorChatTools tools;
+    private final BotErrorTools errorTools;
     private final BotOrderTools orderTools;
     private final BotUsageTools usageTools;
     private final WeatherTools weatherTools;
@@ -119,6 +123,7 @@ public class BotChatClientFactory {
     private volatile boolean unavailable;
 
     public BotChatClientFactory(MonitorChatTools tools,
+                                BotErrorTools errorTools,
                                 BotOrderTools orderTools,
                                 BotUsageTools usageTools,
                                 WeatherTools weatherTools,
@@ -127,6 +132,7 @@ public class BotChatClientFactory {
                                 WebSearchProperties webSearchProperties,
                                 ObjectProvider<ChatClient.Builder> chatClientBuilder) {
         this.tools = tools;
+        this.errorTools = errorTools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
         this.weatherTools = weatherTools;
@@ -208,8 +214,8 @@ public class BotChatClientFactory {
             if (persona.usesTools()) {
                 // 管理员专属：建密钥工具只挂管理员人设，普通人 / 陌生人拿不到
                 configured = attachWebSearch
-                        ? configured.defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools)
-                        : configured.defaultTools(tools, orderTools, usageTools, weatherTools, sub2KeyTools);
+                        ? configured.defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools)
+                        : configured.defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, sub2KeyTools);
             } else {
                 configured = attachWebSearch
                         ? configured.defaultTools(weatherTools, webSearchTools)

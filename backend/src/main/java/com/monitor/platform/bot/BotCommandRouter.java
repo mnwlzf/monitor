@@ -1,6 +1,7 @@
 package com.monitor.platform.bot;
 
 import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.error.BotErrorService;
 import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.identity.Sub2ApiUserCache;
@@ -42,6 +43,11 @@ public class BotCommandRouter {
             - /变更 [条数|关键字]  最近的账号/密钥/渠道变更；「/变更 倍率」只看涨价
             - /消耗 [条数]     全平台账号消耗排行（余额 / 今日 / 累计）
             - /异常            停用、采集失败、凭证失效的账号
+            - /诊断 [时间窗]   错误概览、主要问题和处理建议（默认近 1 小时）
+            - /错误 [时间窗] [状态码|关键词]  最近错误；/错误 #编号 查看单条详情
+            - /错误账号 [时间窗] [条数]  按账号统计错误排行
+            - /错误用户 <邮箱|ID> [时间窗]  指定用户的错误
+            - /我的错误 [时间窗]  我自己的错误
             - /任务            定时任务启用状态与最近一次执行结果
             - /订单 <账号> [起] [止]  指定平台用户的订单（默认近 30 天）
             - /用户余额 <账号>       指定平台用户的余额与累计充值
@@ -57,6 +63,7 @@ public class BotCommandRouter {
             - /天气 <城市>     实时天气与预报（所有人都能用）
             - /画图 <提示词>   生成一张图片（所有人都能用，全局一分钟最多 3 张）
             也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」
+            错误排障也可以直接问：「最近一小时错误最多的账号是谁？」「今天 401 多不多？」「现在系统有什么问题？」
             需要新建 Sub2API 密钥时，直接说清五项：厂商 / 名称 / 分组 / 额度限制 / 有效期（天数或 yyyy-MM-dd HH:mm:ss）。
             需要外部实时信息（新闻、版本发布、价格、官方文档）时，我会自动联网搜索。
             问机器人功能 / 命令时直接回答，不会联网。
@@ -73,6 +80,7 @@ public class BotCommandRouter {
             - /天气 <城市>     实时天气与预报（所有人都能用）
             - /画图 <提示词>   生成一张图片（所有人都能用，全局一分钟最多 3 张）
             - /渠道状态 [时间窗]  我可用分组的渠道状态（默认近 1 小时）
+            - /我的错误 [时间窗]  我自己的错误（默认近 24 小时）
             平台级数据（账号、号池、变更记录）仅管理员可查。""";
 
     private static final String GUEST_HELP = """
@@ -91,6 +99,7 @@ public class BotCommandRouter {
     private final BotOrderTools orderTools;
     private final BotUsageTools usageTools;
     private final BotChannelStatusService channelStatusService;
+    private final BotErrorService errorService;
     private final BotUserService botUserService;
     private final WeatherTools weatherTools;
     private final QqUserBindingService bindings;
@@ -101,6 +110,7 @@ public class BotCommandRouter {
                             BotOrderTools orderTools,
                             BotUsageTools usageTools,
                             BotChannelStatusService channelStatusService,
+                            BotErrorService errorService,
                             BotUserService botUserService,
                             WeatherTools weatherTools,
                             QqUserBindingService bindings,
@@ -110,6 +120,7 @@ public class BotCommandRouter {
         this.orderTools = orderTools;
         this.usageTools = usageTools;
         this.channelStatusService = channelStatusService;
+        this.errorService = errorService;
         this.botUserService = botUserService;
         this.weatherTools = weatherTools;
         this.bindings = bindings;
@@ -163,6 +174,16 @@ public class BotCommandRouter {
             case "cost", "消耗", "用量榜" ->
                     platformOnly(identity, platformFeature, () -> tools.usageReport(parseInt(arg, 10)));
             case "abnormal", "异常" -> platformOnly(identity, platformFeature, tools::abnormalReport);
+            case "diagnose", "诊断", "错误诊断" ->
+                    platformOnly(identity, platformFeature, () -> errorService.diagnoseReport(arg));
+            case "errors", "错误", "最近错误" ->
+                    platformOnly(identity, platformFeature, () -> errorService.recentReport(arg));
+            case "erroraccounts", "错误账号" ->
+                    platformOnly(identity, platformFeature, () -> errorService.accountReport(arg));
+            case "erroruser", "错误用户" ->
+                    platformOnly(identity, platformFeature, () -> errorUserReport(arg));
+            case "myerrors", "我的错误" ->
+                    selfService(platformFeature, identity, () -> errorService.myReport(identity.email(), arg));
             case "tasks", "任务" -> platformOnly(identity, platformFeature, tools::taskReport);
             case "订单", "orders" -> platformOnly(identity, platformFeature, () -> orderReport(arg));
             case "用户余额", "userbalance" ->
@@ -269,6 +290,17 @@ public class BotCommandRouter {
             return null;
         }
         return userCache.userId(identity.email()).orElse(null);
+    }
+
+    /**
+     * {@code /错误用户 <邮箱或ID> [时间窗]}。
+     */
+    private BotReport errorUserReport(String arg) {
+        String[] parts = arg == null || arg.isBlank() ? new String[0] : arg.trim().split("\\s+", 2);
+        if (parts.length == 0) {
+            return text("用法：/错误用户 <邮箱或用户ID> [时间窗] [状态码|关键词]");
+        }
+        return errorService.userReport(parts[0], parts.length > 1 ? parts[1] : "");
     }
 
     /**

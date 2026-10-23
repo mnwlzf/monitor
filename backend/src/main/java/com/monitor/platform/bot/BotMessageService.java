@@ -8,6 +8,8 @@ import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.user.BotUserTools;
 import com.monitor.platform.bot.channel.BotChannelStatusTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
+import com.monitor.platform.bot.error.BotErrorService;
+import com.monitor.platform.bot.error.BotMyErrorTools;
 import com.monitor.platform.bot.image.GeneratedImages;
 import com.monitor.platform.bot.image.ImageGenService;
 import com.monitor.platform.bot.image.ImageGenTools;
@@ -86,6 +88,7 @@ public class BotMessageService {
     private final BotMessageParser parser;
     private final MonitorChatTools tools;
     private final BotChannelStatusService channelStatusService;
+    private final BotErrorService errorService;
     private final ImageGenService imageGenService;
     private final BotRuntimeStatus runtimeStatus;
     private final BotUserService botUserService;
@@ -109,6 +112,7 @@ public class BotMessageService {
                              BotMessageParser parser,
                              MonitorChatTools tools,
                              BotChannelStatusService channelStatusService,
+                             BotErrorService errorService,
                              ImageGenService imageGenService,
                              BotRuntimeStatus runtimeStatus,
                              BotUserService botUserService,
@@ -125,6 +129,7 @@ public class BotMessageService {
         this.parser = parser;
         this.tools = tools;
         this.channelStatusService = channelStatusService;
+        this.errorService = errorService;
         this.imageGenService = imageGenService;
         this.runtimeStatus = runtimeStatus;
         this.botUserService = botUserService;
@@ -320,6 +325,8 @@ public class BotMessageService {
         // 用户端工具按请求绑定发送者邮箱：大模型只能查到发送者本人的数据
         if (platformFeature && identity.hasEmail()) {
             request = request.tools(new BotUserTools(botUserService, identity.email()));
+            // 普通用户只能查自己的错误；工具在构造时绑定邮箱，不接受用户标识参数。
+            request = request.tools(new BotMyErrorTools(errorService, identity.email()));
         }
         // 管理员余额调整：按请求绑定管理员身份和当前消息，二次确认必须出现在当前消息里
         if (platformFeature && identity.admin() && identity.hasEmail()) {

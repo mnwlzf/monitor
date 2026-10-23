@@ -148,6 +148,19 @@ public class BotUserService {
 
     // ============================================================ 解析
 
+    /**
+     * 邮箱对应的 Sub2API 用户 ID。
+     *
+     * <p>供机器人其它只读工具复用；解析失败返回 null，不向调用方暴露连接细节。</p>
+     */
+    public Long resolveUserId(String email) {
+        Conn conn = connect(email);
+        if (conn.error() != null) {
+            return null;
+        }
+        return userId(conn, email);
+    }
+
     /** 解析平台连接信息（地址 + 管理员密钥）。 */
     private Conn connect(String email) {
         if (email == null || email.isBlank()) {

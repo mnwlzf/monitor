@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import com.monitor.platform.bot.error.BotErrorTools;
 import com.monitor.platform.bot.key.Sub2KeyTools;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.search.WebSearchProperties;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.when;
 class BotChatClientFactoryTest {
 
     private final MonitorChatTools tools = mock(MonitorChatTools.class);
+    private final BotErrorTools errorTools = mock(BotErrorTools.class);
     private final BotOrderTools orderTools = mock(BotOrderTools.class);
     private final BotUsageTools usageTools = mock(BotUsageTools.class);
     private final WeatherTools weatherTools = mock(WeatherTools.class);
@@ -39,7 +41,7 @@ class BotChatClientFactoryTest {
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(builder);
         return new BotChatClientFactory(
-                tools, orderTools, usageTools, weatherTools,
+                tools, errorTools, orderTools, usageTools, weatherTools,
                 webSearchTools, sub2KeyTools, webSearchProperties, provider);
     }
 
@@ -68,7 +70,7 @@ class BotChatClientFactoryTest {
 
         factory(builder).get(BotChatClientFactory.Persona.MONITOR_ADMIN, settings(false), true);
 
-        verify(builder).defaultTools(tools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools);
+        verify(builder).defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools);
     }
 
     /**
