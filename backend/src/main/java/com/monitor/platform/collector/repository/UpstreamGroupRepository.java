@@ -37,6 +37,19 @@ public class UpstreamGroupRepository {
                 entity.setIsActive(true);
             }
             groupMapper.insertGroup(entity);
+            if (entity.getId() == null) {
+                // ON CONFLICT 命中已有行时 JDBC 未必回填主键，再按唯一身份取一次。
+                UpstreamGroupEntity persisted = groupMapper.selectGroupByAccountAndExternalId(
+                        entity.getAccountId(), entity.getPlatformType(), entity.getExternalGroupId());
+                if (persisted == null) {
+                    throw new IllegalStateException("分组 upsert 后无法读取记录: accountId="
+                            + entity.getAccountId() + ", platformType=" + entity.getPlatformType()
+                            + ", externalGroupId=" + entity.getExternalGroupId());
+                }
+                entity.setId(persisted.getId());
+                // 冲突时保留数据库里的首次发现时间，不能被本轮临时对象覆盖。
+                entity.setFirstSeenAt(persisted.getFirstSeenAt());
+            }
         } else {
             groupMapper.updateGroup(entity);
         }
@@ -58,6 +71,15 @@ public class UpstreamGroupRepository {
      */
     public List<UpstreamGroupEntity> findByAccount(Integer accountId, boolean activeOnly) {
         return groupMapper.selectGroupsByAccount(accountId, activeOnly);
+    }
+
+    /**
+     * 查询账号指定平台类型下的渠道，可选择只返回有效渠道。
+     */
+    public List<UpstreamGroupEntity> findByAccountAndPlatformType(Integer accountId,
+                                                                  String platformType,
+                                                                  boolean activeOnly) {
+        return groupMapper.selectGroupsByAccountAndPlatformType(accountId, platformType, activeOnly);
     }
 
     /**

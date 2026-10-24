@@ -28,6 +28,12 @@ public interface UpstreamGroupMapper  {
     List<UpstreamGroupEntity> selectGroupsByAccount(@Param("accountId") Integer accountId,
                                                     @Param("activeOnly") boolean activeOnly);
 
+    /** 查询账号指定平台类型下的渠道，可选择只返回有效渠道。 */
+    List<UpstreamGroupEntity> selectGroupsByAccountAndPlatformType(
+            @Param("accountId") Integer accountId,
+            @Param("platformType") String platformType,
+            @Param("activeOnly") boolean activeOnly);
+
     /** 将未出现在本轮采集结果中的渠道标记为下线。 */
     int deactivateMissingGroups(@Param("accountId") Integer accountId,
                                 @Param("platformType") String platformType,

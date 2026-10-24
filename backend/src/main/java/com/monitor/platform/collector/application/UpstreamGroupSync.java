@@ -15,6 +15,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -54,7 +55,14 @@ public class UpstreamGroupSync {
      */
     public void sync(AccountEntity account, String platformType, Long collectionRunId,
                      List<GroupSnapshot> groups, String platformLabel) {
-        Map<String, UpstreamGroupEntity> existing = activeGroupMap(account.getId());
+        // 必须把已下线分组也读出来：它们再次出现时应恢复原行，而不是重新 INSERT 撞唯一键。
+        Map<String, UpstreamGroupEntity> existing = groupMap(account.getId(), platformType);
+        Map<String, GroupSnapshot> groupsByExternalId = new LinkedHashMap<>();
+        for (GroupSnapshot group : groups) {
+            if (group.externalId() != null && !group.externalId().isBlank()) {
+                groupsByExternalId.put(group.externalId(), group);
+            }
+        }
         // 「我正在使用」的渠道：渠道里有本平台号池账号绑定的 Key（一次查完，逐条判定不再打库）
         Set<String> inUseChannelNames = changeRecorder.inUseChannelNames(account.getId());
         Set<String> activeExternalIds = new HashSet<>();
@@ -62,21 +70,22 @@ public class UpstreamGroupSync {
         int added = 0;
         int updated = 0;
 
-        for (GroupSnapshot group : groups) {
+        for (GroupSnapshot group : groupsByExternalId.values()) {
             String externalGroupId = group.externalId();
             activeExternalIds.add(externalGroupId);
 
             UpstreamGroupEntity entity = existing.get(externalGroupId);
             boolean isNew = entity == null;
+            boolean restored = !isNew && !Boolean.TRUE.equals(entity.getIsActive());
             if (isNew) {
                 entity = newGroup(account, platformType, externalGroupId, now);
             }
 
-            boolean changed = isNew;
+            boolean changed = isNew || restored;
             if (!isNew) {
                 changed = recordGroupChanges(account, platformType, collectionRunId, entity,
                         externalGroupId, group.ratio(), group.baseRatio(), group.status(),
-                        group.name(), group.platform(), group.description(), inUseChannelNames);
+                        group.name(), group.platform(), group.description(), inUseChannelNames) || changed;
             }
 
             entity.setGroupName(group.name());
@@ -98,26 +107,34 @@ public class UpstreamGroupSync {
                 changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
                         UpstreamChangeTypes.GROUP_ADDED, null, null, group.rawData(),
                         "渠道新增: " + group.name(), inUseChannelNames);
+            } else if (restored) {
+                updated++;
+                changeRecorder.recordGroupChange(account, platformType, collectionRunId, entity,
+                        UpstreamChangeTypes.GROUP_UPDATED, "is_active", false, true,
+                        "渠道恢复: " + group.name(), inUseChannelNames);
             } else if (changed) {
                 updated++;
             }
 
             saveGroupSnapshot(entity, collectionRunId, group.ratio(), group.baseRatio(),
                     group.status(), true, group.rawData());
+            // 同一批响应如果重复返回同一外部分组，后续项按更新处理，不再尝试插入。
+            existing.put(externalGroupId, entity);
         }
 
         int removed = deactivateMissingGroups(account, platformType, collectionRunId,
                 existing, activeExternalIds, now, inUseChannelNames);
         log.info("{} 分组同步完成: accountId={}, total={}, added={}, updated={}, removed={}",
-                platformLabel, account.getId(), groups.size(), added, updated, removed);
+                platformLabel, account.getId(), groupsByExternalId.size(), added, updated, removed);
     }
 
     /**
-     * 查询账号当前有效分组，并以外部分组 ID 建立索引，便于本轮采集做增量对比。
+     * 查询账号指定平台类型下的全部分组（含已下线），并以外部分组 ID 建立索引。
      */
-    private Map<String, UpstreamGroupEntity> activeGroupMap(Integer accountId) {
+    private Map<String, UpstreamGroupEntity> groupMap(Integer accountId, String platformType) {
         Map<String, UpstreamGroupEntity> result = new HashMap<>();
-        for (UpstreamGroupEntity group : groupRepository.findByAccount(accountId, true)) {
+        for (UpstreamGroupEntity group : groupRepository.findByAccountAndPlatformType(
+                accountId, platformType, false)) {
             result.put(group.getExternalGroupId(), group);
         }
         return result;
@@ -152,6 +169,9 @@ public class UpstreamGroupSync {
                                         Set<String> inUseChannelNames) {
         int removed = 0;
         for (UpstreamGroupEntity group : existing.values()) {
+            if (!Boolean.TRUE.equals(group.getIsActive())) {
+                continue;
+            }
             if (activeExternalIds.contains(group.getExternalGroupId())) {
                 continue;
             }

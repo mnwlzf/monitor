@@ -26,7 +26,12 @@
         first_seen_at, last_seen_at, last_changed_at, metadata
     </sql>
 
-    <insert id="insertGroup" useGeneratedKeys="true" keyProperty="id">
+    <!--
+        分组身份由 (account_id, platform_type, external_group_id) 唯一确定。
+        采集任务可能与手动刷新并发，或分组下线后再次出现；这里用 upsert 保证幂等，
+        避免直接 INSERT 撞上 uk_upstream_groups_identity。
+    -->
+    <insert id="insertGroup">
         INSERT INTO upstream_groups (
             account_id, platform_type, external_group_id, group_name, description,
             platform, current_ratio, current_base_ratio, status, is_active,
@@ -36,6 +41,22 @@
             #{platform}, #{currentRatio}, #{currentBaseRatio}, #{status}, #{isActive},
             #{firstSeenAt}, #{lastSeenAt}, #{lastChangedAt}, #{metadata,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler}
         )
+        ON CONFLICT (account_id, platform_type, external_group_id)
+        DO UPDATE SET
+            group_name = EXCLUDED.group_name,
+            description = EXCLUDED.description,
+            platform = EXCLUDED.platform,
+            current_ratio = EXCLUDED.current_ratio,
+            current_base_ratio = EXCLUDED.current_base_ratio,
+            status = EXCLUDED.status,
+            is_active = EXCLUDED.is_active,
+            last_seen_at = EXCLUDED.last_seen_at,
+            last_changed_at = CASE
+                WHEN upstream_groups.last_changed_at IS NULL THEN EXCLUDED.last_changed_at
+                WHEN EXCLUDED.last_changed_at IS NULL THEN upstream_groups.last_changed_at
+                ELSE GREATEST(upstream_groups.last_changed_at, EXCLUDED.last_changed_at)
+            END,
+            metadata = EXCLUDED.metadata
     </insert>
 
     <update id="updateGroup">
@@ -66,6 +87,17 @@
         SELECT <include refid="UpstreamGroupColumns"/>
         FROM upstream_groups
         WHERE account_id = #{accountId}
+        <if test="activeOnly">
+            AND is_active = TRUE
+        </if>
+        ORDER BY group_name ASC
+    </select>
+
+    <select id="selectGroupsByAccountAndPlatformType" resultMap="UpstreamGroupResultMap">
+        SELECT <include refid="UpstreamGroupColumns"/>
+        FROM upstream_groups
+        WHERE account_id = #{accountId}
+          AND platform_type = #{platformType}
         <if test="activeOnly">
             AND is_active = TRUE
         </if>

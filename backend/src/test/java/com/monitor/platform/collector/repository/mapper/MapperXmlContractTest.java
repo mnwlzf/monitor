@@ -44,6 +44,10 @@ class MapperXmlContractTest {
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountMetricSnapshotMapper.selectLatestSnapshot"));
         assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper.insertGroup"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper.selectGroupsByAccountAndPlatformType"));
+        assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper.deactivateMissingGroups"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper.selectRecentEvents"));
