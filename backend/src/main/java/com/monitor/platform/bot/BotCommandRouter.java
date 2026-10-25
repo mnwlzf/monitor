@@ -16,6 +16,7 @@ import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.weather.WeatherTools;
+import com.monitor.platform.status.OpenAiStatusService;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
@@ -65,6 +66,7 @@ public class BotCommandRouter {
             - 直接说「给用户 <ID/邮箱/用户名> 充值 <金额>」：先返回候选，选择用户 ID 后预览，再回复「确认充值 <确认码>」执行
             - /用户消耗 [日期]       所有用户在指定日期的余额消耗（默认今天）
             - /渠道状态 [时间窗]     各分组的渠道健康（对外口径，默认近 1 小时）
+            - /openai           OpenAI 官方服务状态（中文）
             - /我的余额        我自己的账户余额与状态
             - /我的用量 [窗]   我自己的用量（today / week / month）
             - /我的密钥        我自己的 API Key 列表
@@ -91,6 +93,7 @@ public class BotCommandRouter {
             - /天气 <城市>     实时天气与预报（所有人都能用）
             - /画图 <提示词>   生成一张图片（所有人都能用，全局一分钟最多 3 张）
             - /渠道状态 [时间窗]  我可用分组的渠道状态（默认近 1 小时）
+            - /openai          OpenAI 官方服务状态（中文）
             - /我的错误 [时间窗]  我自己的错误（默认近 24 小时）
             平台级数据（账号、号池、变更记录）仅管理员可查。""";
 
@@ -119,6 +122,7 @@ public class BotCommandRouter {
     private final QqUserBindingService bindings;
     private final Sub2ApiUserCache userCache;
     private final ImageGenService imageGenService;
+    private final OpenAiStatusService openAiStatusService;
 
     public BotCommandRouter(MonitorChatTools tools,
                             BotOrderTools orderTools,
@@ -132,7 +136,8 @@ public class BotCommandRouter {
                             WeatherTools weatherTools,
                             QqUserBindingService bindings,
                             Sub2ApiUserCache userCache,
-                            ImageGenService imageGenService) {
+                            ImageGenService imageGenService,
+                            OpenAiStatusService openAiStatusService) {
         this.tools = tools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
@@ -146,6 +151,7 @@ public class BotCommandRouter {
         this.bindings = bindings;
         this.userCache = userCache;
         this.imageGenService = imageGenService;
+        this.openAiStatusService = openAiStatusService;
     }
 
     /**
@@ -179,6 +185,11 @@ public class BotCommandRouter {
 
             // 生图同样与平台无关，所有人都能用；限频在 ImageGenService 里做（全局一分钟 3 张）
             case "draw", "画图", "生图" -> draw(arg, generated, imageStartNotice);
+
+            // OpenAI 官方状态是公开信息：管理员与指定群内的平台用户都能查
+            case "openai", "openai状态", "openai服务状态" -> platformFeature
+                    ? text(openAiStatusService.statusReport())
+                    : text(UNKNOWN_COMMAND);
 
             // 渠道状态：对外功能，管理员与平台用户都能看；非平台用户按未知命令处理
             case "渠道状态", "channelstatus" -> platformFeature

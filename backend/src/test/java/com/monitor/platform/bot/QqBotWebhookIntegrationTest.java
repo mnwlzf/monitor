@@ -16,6 +16,7 @@ import com.monitor.platform.bot.key.Sub2KeyTools;
 import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
 import com.monitor.platform.bot.weather.WeatherTools;
+import com.monitor.platform.status.OpenAiStatusService;
 import com.monitor.platform.bot.order.BotOrderTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.channel.BotChannelStatusService;
@@ -100,13 +101,14 @@ class QqBotWebhookIntegrationTest {
         Sub2ApiUserCache userCache = mock(Sub2ApiUserCache.class);
         BotUserService botUserService = mock(BotUserService.class);
         ImageGenService imageGenService = mock(ImageGenService.class);
+        OpenAiStatusService openAiStatusService = mock(OpenAiStatusService.class);
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService, openAiStatusService);
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

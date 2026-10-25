@@ -27,6 +27,7 @@ import com.monitor.platform.bot.error.BotErrorService;
 import com.monitor.platform.bot.error.BotInstanceErrorService;
 import com.monitor.platform.bot.error.BotErrorTools;
 import com.monitor.platform.bot.image.ImageGenService;
+import com.monitor.platform.status.OpenAiStatusService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -83,6 +84,7 @@ class BotMessageServiceTest {
     private BotMessageArchiveService archive;
     private BotImageFetcher imageFetcher;
     private BotVisionProperties visionProperties;
+    private OpenAiStatusService openAiStatusService;
     private BotMessageService service;
 
     @BeforeEach
@@ -117,6 +119,8 @@ class BotMessageServiceTest {
         archive = mock(BotMessageArchiveService.class);
         imageFetcher = mock(BotImageFetcher.class);
         visionProperties = new BotVisionProperties();
+        openAiStatusService = mock(OpenAiStatusService.class);
+        when(openAiStatusService.statusReport()).thenReturn("【OpenAI 服务状态】\n总体状态：全部系统正常");
 
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
@@ -124,9 +128,9 @@ class BotMessageServiceTest {
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService, openAiStatusService);
         service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -387,6 +391,31 @@ class BotMessageServiceTest {
         verify(tools, timeout(3000)).platformReport();
     }
 
+    /** OpenAI 官方状态对指定群内的普通用户开放，回复必须是中文。 */
+    @Test
+    void shouldAllowOpenAiStatusForNormalUserInDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/openai")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertTrue(reply.getValue().contains("OpenAI 服务状态"));
+        verify(openAiStatusService, timeout(3000)).statusReport();
+    }
+
+    /** 非指定群不暴露 OpenAI 状态命令。 */
+    @Test
+    void shouldHideOpenAiStatusOutsideDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(mentionedGroupCommand(333L, "/openai")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(333L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(openAiStatusService);
+    }
     @Test
     void shouldIgnoreNonMessageEvents() throws Exception {
         service.onEvent(event("""

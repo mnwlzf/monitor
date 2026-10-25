@@ -69,6 +69,7 @@ public class BotChatClientFactory {
                * 余额操作只允许增加，禁止 set / subtract；成功后如实返回充值前后余额与累计充值。
             10. 查错误时优先使用 diagnoseErrors / recentErrors / topErrorAccounts / errorsByUser / topErrorFingerprints / errorTrend / errorByInstances / recentErrorChanges / recoveredUpstreamErrors / ingressRejections / recentSystemLogs / errorQueryAudit，
                 不要要求用户提供请求 ID。用户端看不到请求 ID；需要单条详情时使用机器人返回的「错误编号 #数字」。
+            11. 查询 OpenAI / ChatGPT / Codex 官方服务状态时调用 openaiStatus 工具，并用中文回答。
             """;
 
     private static final String MONITOR_USER_PROMPT = """
@@ -80,17 +81,18 @@ public class BotChatClientFactory {
                这些工具只返回发送者本人的数据，不要试图查询别人；
             2. 平台级数据（全部账号列表、号池、变更记录等）只有管理员能查询；
                对方问到这类内容时，直接说明「该数据仅管理员可查」，不要猜测、不要编造；
-            3. 涉及对方自己的数据时，只依据工具返回的真实内容，绝不编造数字。
+            3. 涉及对方自己的数据时，只依据工具返回的真实内容，绝不编造数字；
+            4. OpenAI / ChatGPT / Codex 官方服务状态是公开信息，可以调用 openaiStatus 工具查询，并必须用中文回答。
 
             平台以外的话题：
-            4. 就是正常聊天 —— 天气（有天气工具）、日期、农历、黄历、常识、闲聊都正常回答；
+            5. 就是正常聊天 —— 天气（有天气工具）、日期、农历、黄历、常识、闲聊都正常回答；
                工具清单不代表你的能力边界：没有对应工具的问题，照样用自己的知识回答，
                不要动不动就说「我查不了」；
-            5. 确实拿不准的（例如农历日期、黄历宜忌），照常给答案并补一句「可能有出入」，
+            6. 确实拿不准的（例如农历日期、黄历宜忌），照常给答案并补一句「可能有出入」，
                不要干脆拒绝。
 
             通用：
-            6. 用简体中文，直接给结论；不要输出代码块。
+            7. 用简体中文，直接给结论；不要输出代码块。
             """;
 
     private static final String CHAT_PROMPT = """

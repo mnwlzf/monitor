@@ -268,7 +268,7 @@
             <el-option v-for="item in botForm.platformGroups" :key="item" :label="item" :value="item" />
           </el-select>
           <small class="admin-form-hint">
-            必须是「允许的群号」的子集；群聊与群临时会话都按这里的群号判定。留空 = 任何群都不给平台功能
+            必须是「允许的群号」的子集；群聊与群临时会话都按这里的群号判定。OpenAI 状态异常告警也会发送到这些群。留空 = 任何群都不给平台功能
           </small>
         </el-form-item>
 

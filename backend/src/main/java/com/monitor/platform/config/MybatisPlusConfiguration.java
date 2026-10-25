@@ -17,7 +17,8 @@ import org.springframework.context.annotation.Configuration;
         "com.monitor.platform.mail",
         "com.monitor.platform.notify",
         "com.monitor.platform.pool",
-        "com.monitor.platform.bot"
+        "com.monitor.platform.bot",
+        "com.monitor.platform.status"
 })
 public class MybatisPlusConfiguration {
 }

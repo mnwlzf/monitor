@@ -22,6 +22,8 @@ import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.vision.BotImageFetcher;
 import com.monitor.platform.bot.vision.BotVisionProperties;
 import com.monitor.platform.bot.report.BotReportRenderer;
+import com.monitor.platform.status.OpenAiStatusService;
+import com.monitor.platform.status.OpenAiStatusTools;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,6 +107,7 @@ public class BotMessageService {
     private final BotReportRenderer reportRenderer;
     private final BotChatClientFactory chatClients;
     private final BotCommandRouter commandRouter;
+    private final OpenAiStatusService openAiStatusService;
 
     private final ExecutorService executor = Executors.newFixedThreadPool(4, runnable -> {
         Thread thread = new Thread(runnable, "qq-bot");
@@ -130,7 +133,8 @@ public class BotMessageService {
                              BotIdentityResolver identityResolver,
                              BotReportRenderer reportRenderer,
                              BotChatClientFactory chatClients,
-                             BotCommandRouter commandRouter) {
+                             BotCommandRouter commandRouter,
+                             OpenAiStatusService openAiStatusService) {
         this.settingsService = settingsService;
         this.client = client;
         this.parser = parser;
@@ -150,6 +154,7 @@ public class BotMessageService {
         this.reportRenderer = reportRenderer;
         this.chatClients = chatClients;
         this.commandRouter = commandRouter;
+        this.openAiStatusService = openAiStatusService;
     }
 
     /** 入口：OneBot 反向 HTTP 推过来的一条事件。 */
@@ -345,6 +350,8 @@ public class BotMessageService {
         if (platformFeature) {
             request = request.tools(new BotChannelStatusTools(
                     channelStatusService, identity.admin(), commandRouter.viewerUserId(identity)));
+            // OpenAI 官方状态是公开信息，管理员和指定群内的平台用户都能查。
+            request = request.tools(new OpenAiStatusTools(openAiStatusService));
         }
         // 生图：所有人都能用，图片归属到本条消息（按请求构造，避免串到别人的回复里）
         request = request.tools(new ImageGenTools(imageGenService, generated,
