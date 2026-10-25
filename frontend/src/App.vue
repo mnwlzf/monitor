@@ -47,6 +47,8 @@
       <el-main
         v-loading="loading && hasLoadedOnce"
         element-loading-text="正在加载监控数据…"
+        element-loading-custom-class="admin-refresh-loading"
+        element-loading-background="rgba(244, 247, 246, 0.76)"
         class="admin-main"
       >
         <!-- 首次加载展示骨架屏，避免白屏；后续刷新用遮罩 -->
