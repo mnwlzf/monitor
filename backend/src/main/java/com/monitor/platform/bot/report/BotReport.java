@@ -2,6 +2,7 @@ package com.monitor.platform.bot.report;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 /**
  * 机器人可渲染的结构化报表。
@@ -107,6 +108,28 @@ public record BotReport(String title, List<Block> blocks, List<String> notes) {
         return new BotReport(title, blocks, notes);
     }
 
+    /**
+     * 对报表内所有用户可见文本做统一变换（例如群聊脱敏）。
+     *
+     * <p>标题、分节标题、表头、单元格、分节底注和页脚都会处理；样式、对齐和热力值保持不变。</p>
+     */
+    public BotReport mapText(UnaryOperator<String> mapper) {
+        String mappedTitle = mapper.apply(title);
+        List<Block> mappedBlocks = new ArrayList<>(blocks.size());
+        for (Block block : blocks) {
+            List<Col> cols = block.cols() == null ? List.of() : block.cols().stream()
+                    .map(col -> new Col(mapper.apply(col.header()), col.align(), col.minWidth(), col.heat()))
+                    .toList();
+            List<Row> rows = block.rows() == null ? List.of() : block.rows().stream()
+                    .map(row -> new Row(row.cells().stream()
+                            .map(cell -> new Cell(mapper.apply(cell.text()), cell.heat()))
+                            .toList()))
+                    .toList();
+            mappedBlocks.add(new Block(mapper.apply(block.heading()), cols, rows, mapper.apply(block.note())));
+        }
+        List<String> mappedNotes = notes == null ? List.of() : notes.stream().map(mapper).toList();
+        return new BotReport(mappedTitle, mappedBlocks, mappedNotes);
+    }
     /** 构造一个段落块（每行一个字符串）。 */
     public static Block paragraph(String heading, List<String> lines) {
         List<Row> rows = new ArrayList<>(lines.size());

@@ -176,7 +176,7 @@ public class BotCommandRouter {
                     ? text(UNKNOWN_COMMAND)
                     : text(whoami(identity));
 
-            // 用户级平台功能：只能在管理员好友私聊中查「自己」的数据；群内一律不展示
+            // 用户级平台功能：指定群内可查自己，最终输出由群聊脱敏器处理
             case "我的余额", "余额", "balance" ->
                     selfService(platformFeature, identity, () -> botUserService.balanceReport(identity.email()));
             case "我的用量", "用量", "usage" ->
@@ -195,12 +195,12 @@ public class BotCommandRouter {
                     ? text(openAiStatusService.statusReport())
                     : text(UNKNOWN_COMMAND);
 
-            // 渠道状态：只允许管理员好友私聊；群聊/群临时会话按未知命令处理
+            // 渠道状态：指定群内可查，最终输出由群聊脱敏器处理
             case "渠道状态", "channelstatus" -> platformFeature
                     ? channelStatusService.report(identity.admin(), viewerUserId(identity), arg)
                     : text(UNKNOWN_COMMAND);
 
-            // 平台级命令：群聊、群临时会话、普通用户和陌生人都按「未知命令」处理
+            // 平台级命令：指定群内管理员可用；普通用户和陌生人仍按「未知命令」处理
             case "platform", "平台", "overview" -> platformOnly(identity, platformFeature, tools::platformReport);
             case "pool", "号池" -> platformOnly(identity, platformFeature, () -> tools.poolReport(arg));
             case "ingest", "采集" -> platformOnly(identity, platformFeature, tools::ingestReport);
@@ -273,16 +273,18 @@ public class BotCommandRouter {
 
     String help(BotIdentity identity, boolean platformFeature, boolean openAiStatusAllowed,
                 boolean groupContext) {
+        String base;
         if (!platformFeature) {
-            String base = openAiStatusAllowed
+            base = openAiStatusAllowed
                     ? GUEST_HELP.replace("也可以直接和我聊天。",
                     "- /openai          OpenAI 官方服务状态（中文）\n也可以直接和我聊天。")
                     : GUEST_HELP;
-            return groupContext
-                    ? base.replace("- /我的信息        查看当前绑定\n", "")
-                    : base;
+        } else {
+            base = identity.admin() ? ADMIN_HELP : USER_HELP;
         }
-        return identity.admin() ? ADMIN_HELP : USER_HELP;
+        return groupContext
+                ? base.replaceAll("(?m)^.*?/我的信息.*(?:\\R|$)", "")
+                : base;
     }
 
     /**
@@ -304,8 +306,8 @@ public class BotCommandRouter {
     /**
      * 用户级平台功能的统一闸门：查「自己」的数据。
      *
-     * <p>没有平台功能（群聊 / 群临时会话 / 普通用户 / 陌生人）时，和平台级命令一样回
-     * 「未知命令」，不暴露功能存在。邮箱在解析身份时就已确定，不接受任何用户标识参数。</p>
+     * <p>没有平台功能（非指定群 / 普通用户 / 陌生人）时，和平台级命令一样回「未知命令」，
+     * 不暴露功能存在。邮箱在解析身份时就已确定，不接受任何用户标识参数。</p>
      */
     private BotReport selfService(boolean platformFeature, BotIdentity identity, Supplier<BotReport> action) {
         if (!platformFeature || !identity.hasEmail()) {

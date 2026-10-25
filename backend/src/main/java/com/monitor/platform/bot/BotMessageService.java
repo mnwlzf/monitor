@@ -18,6 +18,7 @@ import com.monitor.platform.bot.image.ImageGenTools;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
+import com.monitor.platform.bot.report.BotGroupRedactor;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.vision.BotImageFetcher;
 import com.monitor.platform.bot.vision.BotVisionProperties;
@@ -52,15 +53,15 @@ import java.util.regex.Pattern;
  * <p>回调本身必须尽快返回（OneBot 有超时），所以真正的处理丢到后台线程里做。</p>
  *
  * <h2>身份与人设</h2>
- * 平台数据采用严格隐私边界：<strong>任何群聊和群临时会话都不展示上游平台、账号、
- * 余额、密钥、号池、渠道、变更等私有信息，管理员也不例外</strong>。判定见
+ * 群聊和群临时会话可以正常触发平台查询，但最终输出会统一脱敏：
+ * <strong>账号名称、上游平台名称/地址和邮箱不会直接展示</strong>。判定见
  * {@link BotAccessPolicy}：
  * <ul>
- *     <li><b>管理员</b>：仅好友私聊可用全部只读查询工具；群聊/群临时会话只给公开功能；</li>
- *     <li><b>平台普通用户</b>：不能查询平台级数据；群内也不展示自己的余额/用量/密钥；</li>
+ *     <li><b>管理员</b>：好友私聊可用全部只读查询工具；指定群内可用但输出脱敏；</li>
+ *     <li><b>平台普通用户</b>：指定群内可查自己的数据，输出同样脱敏；</li>
  *     <li><b>其他人</b>：纯聊天机器人，<strong>绝不能出现任何平台相关信息</strong>。</li>
  * </ul>
- * <p>OpenAI 官方服务状态是公开信息，单独放行，不受群内平台数据禁令影响。</p>
+ * <p>OpenAI 官方服务状态是公开信息，单独放行。</p>
  *
  * <h2>回复形态</h2>
  * 命令与模型回答统一产出 {@link BotReport}：内容不长就发纯文本，
@@ -109,6 +110,7 @@ public class BotMessageService {
     private final BotChatClientFactory chatClients;
     private final BotCommandRouter commandRouter;
     private final OpenAiStatusService openAiStatusService;
+    private final BotGroupRedactor groupRedactor;
 
     private final ExecutorService executor = Executors.newFixedThreadPool(4, runnable -> {
         Thread thread = new Thread(runnable, "qq-bot");
@@ -135,7 +137,8 @@ public class BotMessageService {
                              BotReportRenderer reportRenderer,
                              BotChatClientFactory chatClients,
                              BotCommandRouter commandRouter,
-                             OpenAiStatusService openAiStatusService) {
+                             OpenAiStatusService openAiStatusService,
+                             BotGroupRedactor groupRedactor) {
         this.settingsService = settingsService;
         this.client = client;
         this.parser = parser;
@@ -156,6 +159,7 @@ public class BotMessageService {
         this.chatClients = chatClients;
         this.commandRouter = commandRouter;
         this.openAiStatusService = openAiStatusService;
+        this.groupRedactor = groupRedactor;
     }
 
     /** 入口：OneBot 反向 HTTP 推过来的一条事件。 */
@@ -243,6 +247,11 @@ public class BotMessageService {
                     report = BotReport.fromMarkdown(platformFeature
                             ? "处理这条消息时出错了：" + ex.getMessage()
                             : "处理这条消息时出错了，请稍后再试。");
+                }
+
+                // 群聊功能照常执行，但最终输出统一脱敏：不展示账号名称、上游平台名称/地址和邮箱。
+                if (BotCommandRouter.inGroupContext(event)) {
+                    report = groupRedactor.redact(report);
                 }
 
                 SendOutcome outcome;
@@ -355,7 +364,7 @@ public class BotMessageService {
         if (platformFeature && identity.admin() && identity.hasEmail()) {
             request = request.tools(new BotBalanceTools(botBalanceService, identity.email(), text));
         }
-        // 渠道状态只在管理员好友私聊中开放；群内 platformFeature 恒为 false
+        // 渠道状态在指定群和好友私聊中开放；群内最终输出由脱敏器处理
         if (platformFeature) {
             request = request.tools(new BotChannelStatusTools(
                     channelStatusService, identity.admin(), commandRouter.viewerUserId(identity)));

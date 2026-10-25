@@ -9,7 +9,7 @@ import java.util.Set;
  * @param enabled         运行时开关；false 时机器人收到消息也不响应（部署级总开关仍在环境变量）
  * @param allowedGroups   允许响应的群号（启用群）；为空表示不限制
  * @param allowedUsers    允许响应的私聊 QQ；为空表示不限制
- * @param platformGroups  指定群（OpenAI 公开状态）；必须是启用群的子集；为空表示任何群都不给 OpenAI 状态
+ * @param platformGroups  指定群（平台功能/OpenAI 状态）；必须是启用群的子集；群内输出自动脱敏；为空表示任何群都不给平台功能
  * @param requireMention  群里是否必须 @机器人
  * @param commandPrefix   命令前缀
  * @param maxReplyLength  单条回复最大字符数

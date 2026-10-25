@@ -8,7 +8,7 @@ import java.util.List;
  * <p>只有 {@code enabled} 是必填；其余字段为空时按默认值处理（前缀回退 "/"、
  * 回复长度回退 900、记忆窗口回退 10）。</p>
  *
- * <p>{@code platformGroups} 是「指定群（OpenAI 公开状态）」——必须是 {@code allowedGroups} 的子集，
+ * <p>{@code platformGroups} 是「指定群（平台功能/OpenAI 状态）」——必须是 {@code allowedGroups} 的子集，
  * 超出子集范围会被拒绝保存。</p>
  */
 public record BotSettingsRequest(

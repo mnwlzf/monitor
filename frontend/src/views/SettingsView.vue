@@ -254,7 +254,7 @@
           <small class="admin-form-hint">只有这些群里 @机器人 才会响应</small>
         </el-form-item>
 
-        <el-form-item label="指定群（OpenAI 状态）">
+        <el-form-item label="指定群（平台功能 / OpenAI 状态）">
           <el-select
             v-model="botForm.platformGroups"
             multiple
@@ -262,13 +262,13 @@
             allow-create
             default-first-option
             :reserve-keyword="false"
-            placeholder="只有这些群允许查询 OpenAI 官方状态；留空表示都不给"
+            placeholder="只有这些群才允许平台功能和 OpenAI 状态查询；留空表示都不给"
             style="width: 100%"
           >
             <el-option v-for="item in botForm.platformGroups" :key="item" :label="item" :value="item" />
           </el-select>
           <small class="admin-form-hint">
-            必须是「允许的群号」的子集。群聊和群临时会话永远不能查询上游账号/平台数据；这里只控制 OpenAI 公开状态查询和异常告警。留空 = 任何群都不给 OpenAI 状态
+            必须是「允许的群号」的子集。群聊和群临时会话可正常查询，但账号名称、上游平台名称/地址和邮箱会自动脱敏；OpenAI 异常告警也发送到这些群。留空 = 任何群都不给平台功能
           </small>
         </el-form-item>
 

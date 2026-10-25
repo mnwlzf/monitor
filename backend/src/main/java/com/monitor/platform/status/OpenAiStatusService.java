@@ -23,7 +23,7 @@ import java.util.Set;
  * <p>状态页字段默认是英文。对 QQ 用户展示时只使用中文映射：总体 indicator、组件名、
  * 组件状态和事件状态都翻译后输出，不再把英文原文直接抛给用户。</p>
  *
- * <p>告警发送到页面配置的「指定群（OpenAI 状态）」，与 /openai 命令复用同一份群配置。
+ * <p>告警发送到页面配置的「指定群（平台功能 / OpenAI 状态）」，与 /openai 命令复用同一份群配置。
  * 同一次连续异常只成功发送一次；恢复后状态清零，下一次异常重新发送。</p>
  */
 @Service
@@ -156,7 +156,7 @@ public class OpenAiStatusService {
     }
 
     /**
-     * 向「指定群（OpenAI 状态）」发送告警。
+     * 向「指定群（平台功能 / OpenAI 状态）」发送告警。
      *
      * <p>只使用页面已有配置，不新增收件人表。任意一个群发送成功即视为本次异常已提醒，
      * 避免某个群失效导致每 10 分钟重复轰炸其它群。</p>
@@ -173,7 +173,7 @@ public class OpenAiStatusService {
         }
         Set<String> groups = settings.platformGroups();
         if (groups == null || groups.isEmpty()) {
-            log.warn("OpenAI 状态告警未发送：页面尚未配置「指定群（OpenAI 状态）」");
+            log.warn("OpenAI 状态告警未发送：页面尚未配置「指定群（平台功能 / OpenAI 状态）」");
             return false;
         }
 

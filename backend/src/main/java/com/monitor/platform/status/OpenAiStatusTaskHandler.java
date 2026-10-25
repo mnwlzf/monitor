@@ -27,7 +27,7 @@ public class OpenAiStatusTaskHandler implements ScheduledTaskHandler {
 
     @Override
     public String description() {
-        return "每 10 分钟读取 OpenAI 官方状态页；连续异常只向「指定群（OpenAI 状态）」发送一次，恢复后再次异常会重新提醒";
+        return "每 10 分钟读取 OpenAI 官方状态页；连续异常只向「指定群（平台功能 / OpenAI 状态）」发送一次，恢复后再次异常会重新提醒";
     }
 
     @Override

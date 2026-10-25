@@ -8,7 +8,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 群聊隐私边界：任何群上下文都不能查询平台私有数据。
+ * 群聊允许触发平台功能，但最终输出由 BotGroupRedactor 脱敏。
  */
 class BotAccessPolicyTest {
 
@@ -20,22 +20,28 @@ class BotAccessPolicyTest {
             true, "/", 900, 10, false, false, 15, 5, 1.5, 30);
 
     @Test
-    void groupNeverAllowsPrivatePlatformData() {
-        assertThat(BotAccessPolicy.platformFeatureAllowed(ADMIN, BotChannel.GROUP, 100L, SETTINGS)).isFalse();
-        assertThat(BotAccessPolicy.platformFeatureAllowed(USER, BotChannel.GROUP, 100L, SETTINGS)).isFalse();
+    void designatedGroupAllowsPlatformFeatureForPlatformIdentities() {
+        assertThat(BotAccessPolicy.platformFeatureAllowed(ADMIN, BotChannel.GROUP, 100L, SETTINGS)).isTrue();
+        assertThat(BotAccessPolicy.platformFeatureAllowed(USER, BotChannel.GROUP, 100L, SETTINGS)).isTrue();
         assertThat(BotAccessPolicy.platformFeatureAllowed(GUEST, BotChannel.GROUP, 100L, SETTINGS)).isFalse();
     }
 
     @Test
-    void groupTemporarySessionNeverAllowsPrivatePlatformData() {
-        assertThat(BotAccessPolicy.platformFeatureAllowed(
-                ADMIN, BotChannel.TEMP_SESSION, 100L, SETTINGS)).isFalse();
-        assertThat(BotAccessPolicy.platformFeatureAllowed(
-                USER, BotChannel.TEMP_SESSION, 100L, SETTINGS)).isFalse();
+    void nonDesignatedGroupDoesNotAllowPlatformFeature() {
+        assertThat(BotAccessPolicy.platformFeatureAllowed(ADMIN, BotChannel.GROUP, 200L, SETTINGS)).isFalse();
+        assertThat(BotAccessPolicy.platformFeatureAllowed(USER, BotChannel.GROUP, 200L, SETTINGS)).isFalse();
     }
 
     @Test
-    void onlyAdminFriendPrivateAllowsPrivatePlatformData() {
+    void designatedGroupTemporarySessionAllowsPlatformFeature() {
+        assertThat(BotAccessPolicy.platformFeatureAllowed(
+                ADMIN, BotChannel.TEMP_SESSION, 100L, SETTINGS)).isTrue();
+        assertThat(BotAccessPolicy.platformFeatureAllowed(
+                USER, BotChannel.TEMP_SESSION, 100L, SETTINGS)).isTrue();
+    }
+
+    @Test
+    void onlyAdminFriendPrivateAllowsPlatformFeature() {
         assertThat(BotAccessPolicy.platformFeatureAllowed(
                 ADMIN, BotChannel.PRIVATE, null, SETTINGS)).isTrue();
         assertThat(BotAccessPolicy.platformFeatureAllowed(
@@ -45,20 +51,14 @@ class BotAccessPolicyTest {
     }
 
     @Test
-    void designatedGroupCanStillQueryPublicOpenAiStatus() {
+    void openAiStatusUsesTheSameDesignatedGroupScope() {
         assertThat(BotAccessPolicy.openAiStatusAllowed(
                 ADMIN, BotChannel.GROUP, 100L, SETTINGS)).isTrue();
         assertThat(BotAccessPolicy.openAiStatusAllowed(
                 USER, BotChannel.GROUP, 100L, SETTINGS)).isTrue();
         assertThat(BotAccessPolicy.openAiStatusAllowed(
-                GUEST, BotChannel.GROUP, 100L, SETTINGS)).isFalse();
-    }
-
-    @Test
-    void nonDesignatedGroupCannotQueryOpenAiStatus() {
-        assertThat(BotAccessPolicy.openAiStatusAllowed(
                 ADMIN, BotChannel.GROUP, 200L, SETTINGS)).isFalse();
         assertThat(BotAccessPolicy.openAiStatusAllowed(
-                USER, BotChannel.GROUP, 200L, SETTINGS)).isFalse();
+                GUEST, BotChannel.GROUP, 100L, SETTINGS)).isFalse();
     }
 }

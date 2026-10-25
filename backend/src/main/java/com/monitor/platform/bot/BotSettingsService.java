@@ -150,7 +150,7 @@ public class BotSettingsService {
         entity.setEnabled(true);
         entity.setAllowedGroups(join(properties.getAllowedGroups()));
         entity.setAllowedUsers(join(properties.getAllowedUsers()));
-        // 指定群没有环境变量来源，首次初始化为空（不给任何群开 OpenAI 公开状态）
+        // 指定群没有环境变量来源，首次初始化为空（不给任何群开平台功能）
         entity.setPlatformGroups(null);
         entity.setRequireMention(properties.isRequireMention());
         entity.setCommandPrefix(normalizePrefix(properties.getCommandPrefix()));

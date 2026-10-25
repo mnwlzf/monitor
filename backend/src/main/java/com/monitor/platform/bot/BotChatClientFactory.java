@@ -93,6 +93,7 @@ public class BotChatClientFactory {
 
             通用：
             7. 用简体中文，直接给结论；不要输出代码块。
+            8. 在群聊或群临时会话中，不要直接写账号名称、上游平台名称或平台地址；统一用「上游账号」「上游平台」代替。
             """;
 
     private static final String CHAT_PROMPT = """

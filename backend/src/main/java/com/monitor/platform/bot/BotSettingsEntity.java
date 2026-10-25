@@ -13,7 +13,7 @@ public class BotSettingsEntity {
     private Boolean enabled;
     private String allowedGroups;
     private String allowedUsers;
-    /** 指定群（OpenAI 公开状态），逗号分隔；必须是 allowedGroups 的子集。 */
+    /** 指定群（平台功能/OpenAI 状态），逗号分隔；必须是 allowedGroups 的子集。 */
     private String platformGroups;
     private Boolean requireMention;
     private String commandPrefix;
