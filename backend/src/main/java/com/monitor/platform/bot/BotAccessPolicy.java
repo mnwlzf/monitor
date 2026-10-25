@@ -5,18 +5,12 @@ import com.monitor.platform.bot.identity.BotIdentity;
 /**
  * 平台功能的准入判定。
  *
- * <p><strong>不再只看邮箱</strong>：身份匹配之外，还要在「指定群」这一层再匹配一次群上下文，
- * 双重命中才触发平台功能。</p>
+ * <p><strong>隐私边界：</strong>任何群聊或从群发起的临时会话，都不允许查询上游平台、
+ * 账号、余额、号池、密钥、渠道、变更等私有信息，即使发送者是管理员也一样。</p>
  *
- * <h2>规则</h2>
- * <ul>
- *     <li><b>管理员</b>：好友私聊 / 群临时会话放行；群里<strong>仅指定群</strong>放行；</li>
- *     <li><b>普通平台用户</b>：仅「指定群」及其临时会话放行，<strong>好友私聊一律不给</strong>；</li>
- *     <li><b>陌生人</b>：一律不给。</li>
- * </ul>
- *
- * <p>「指定群」是独立的配置项（{@link BotSettings#platformGroups()}），是「启用群」的子集；
- * 为空表示任何群都不给平台功能（fail-closed）。</p>
+ * <p>管理员只有在好友私聊中才能使用平台级数据；普通平台用户不能查询平台级数据。
+ * OpenAI 官方服务状态属于公开信息，单独通过 {@link #openAiStatusAllowed} 放行，
+ * 不受群内平台数据禁令影响。</p>
  */
 public final class BotAccessPolicy {
 
@@ -24,24 +18,40 @@ public final class BotAccessPolicy {
     }
 
     /**
-     * 平台功能是否可用。
+     * 是否允许平台级/上游私有数据。
      *
-     * @param identity     发送者身份（邮箱匹配结果）
-     * @param channel      消息通道
-     * @param contextGroup 群上下文：群聊为本群、临时会话为发起群、好友私聊为 {@code null}
-     * @param settings     当前机器人设置（提供「指定群」名单）
+     * <p>群聊和群临时会话一律返回 {@code false}，避免任何群成员截图或转发造成隐私泄露。
+     * 管理员好友私聊仍可使用；普通用户和陌生人始终不可用。</p>
      */
     public static boolean platformFeatureAllowed(BotIdentity identity, BotChannel channel,
                                                  Long contextGroup, BotSettings settings) {
+        if (channel == BotChannel.GROUP || contextGroup != null) {
+            return false;
+        }
+        return identity != null
+                && identity.platformUser()
+                && identity.admin()
+                && channel != null
+                && settings != null;
+    }
+
+    /**
+     * 是否允许查询 OpenAI 官方服务状态。
+     *
+     * <p>这是公开信息，沿用原来的“指定群 + 平台身份”口径：管理员在好友私聊、
+     * 管理员和平台用户在指定群/指定群临时会话中可用。它不会返回任何本平台数据。</p>
+     */
+    public static boolean openAiStatusAllowed(BotIdentity identity, BotChannel channel,
+                                              Long contextGroup, BotSettings settings) {
         if (identity == null || !identity.platformUser() || channel == null || settings == null) {
             return false;
         }
         boolean inDesignatedGroup = contextGroup != null && settings.isPlatformGroup(contextGroup);
         if (identity.admin()) {
-            // 管理员：私聊（好友 / 临时会话）放行；群里只认指定群
+            // 管理员：好友私聊 / 群临时会话放行；群里只认指定群
             return channel != BotChannel.GROUP || inDesignatedGroup;
         }
-        // 普通平台用户：只有「指定群」以及「指定群的临时会话」；好友私聊不给
+        // 普通平台用户：只有指定群以及指定群的临时会话
         return inDesignatedGroup;
     }
 }

@@ -52,14 +52,15 @@ import java.util.regex.Pattern;
  * <p>回调本身必须尽快返回（OneBot 有超时），所以真正的处理丢到后台线程里做。</p>
  *
  * <h2>身份与人设</h2>
- * 平台功能要<strong>双重命中</strong>才触发：邮箱匹配出身份，且消息落在「指定群」上下文里
- * （群聊取本群，群临时会话取发起群）。判定见 {@link BotAccessPolicy}：
+ * 平台数据采用严格隐私边界：<strong>任何群聊和群临时会话都不展示上游平台、账号、
+ * 余额、密钥、号池、渠道、变更等私有信息，管理员也不例外</strong>。判定见
+ * {@link BotAccessPolicy}：
  * <ul>
- *     <li><b>管理员</b>：好友私聊 / 群临时会话 / 指定群 → 监控助手 + 全部只读查询工具；</li>
- *     <li><b>平台普通用户</b>：仅指定群及其临时会话 → 监控助手，但<strong>不挂平台级工具</strong>，
- *         问到平台数据只回「仅管理员可查」；好友私聊只给正常功能；</li>
- *     <li><b>其他人</b>（陌生人 / 非指定群）：纯聊天机器人，<strong>绝不能出现任何平台相关信息</strong>。</li>
+ *     <li><b>管理员</b>：仅好友私聊可用全部只读查询工具；群聊/群临时会话只给公开功能；</li>
+ *     <li><b>平台普通用户</b>：不能查询平台级数据；群内也不展示自己的余额/用量/密钥；</li>
+ *     <li><b>其他人</b>：纯聊天机器人，<strong>绝不能出现任何平台相关信息</strong>。</li>
  * </ul>
+ * <p>OpenAI 官方服务状态是公开信息，单独放行，不受群内平台数据禁令影响。</p>
  *
  * <h2>回复形态</h2>
  * 命令与模型回答统一产出 {@link BotReport}：内容不长就发纯文本，
@@ -210,10 +211,12 @@ public class BotMessageService {
                 Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
                 boolean platformFeature =
                         BotAccessPolicy.platformFeatureAllowed(identity, channel, contextGroup, settings);
+                boolean openAiStatusAllowed =
+                        BotAccessPolicy.openAiStatusAllowed(identity, channel, contextGroup, settings);
                 if (channel == BotChannel.TEMP_SESSION) {
                     // 临时会话探针：确认 OneBot 实现是否带了发起群号（拿不到就按「不在指定群」处理）
-                    log.info("收到群临时会话: user={}, 发起群={}, 触发平台功能={}",
-                            event.userId(), event.groupId(), platformFeature);
+                    log.info("收到群临时会话: user={}, 发起群={}, 平台数据={}, OpenAI状态={}",
+                            event.userId(), event.groupId(), platformFeature, openAiStatusAllowed);
                 }
                 // 下载图片放在后台线程里做，不占用回调线程；自己发的与被引用的分开下，存档时能说清来源
                 List<BotImageFetcher.FetchedImage> ownImages = imageFetcher.fetch(ownImageRefs);
@@ -230,7 +233,8 @@ public class BotMessageService {
                 GeneratedImages generated = new GeneratedImages();
                 BotReport report;
                 try {
-                    report = answer(event, text, quoted, !quotedImages.isEmpty(), settings, identity, platformFeature, channel, images, generated);
+                    report = answer(event, text, quoted, !quotedImages.isEmpty(), settings, identity, platformFeature,
+                            openAiStatusAllowed, channel, images, generated);
                 } catch (Exception ex) {
                     log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                             event.userId(), identity.platformUser(), ex.getMessage());
@@ -293,15 +297,16 @@ public class BotMessageService {
 
     private BotReport answer(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
                              boolean quotedHasImages, BotSettings settings, BotIdentity identity,
-                             boolean platformFeature, BotChannel channel,
+                             boolean platformFeature, boolean openAiStatusAllowed, BotChannel channel,
                              List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         String prefix = settings.commandPrefix();
         // 只发图片时 text 为空，不能当命令处理，直接交给模型
         if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
             return commandRouter.route(text.substring(prefix.length()).trim(), identity, platformFeature,
-                    event, generated, () -> notifyImageStart(event, generated));
+                    openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
         }
-        return askModel(event, text, quoted, quotedHasImages, settings, identity, platformFeature, channel, images, generated);
+        return askModel(event, text, quoted, quotedHasImages, settings, identity, platformFeature,
+                openAiStatusAllowed, channel, images, generated);
     }
 
     /** 纯文本包成报表：短内容仍按纯文本发出，长内容走段落渲染。 */
@@ -311,14 +316,18 @@ public class BotMessageService {
 
     private BotReport askModel(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
                                boolean quotedHasImages, BotSettings settings, BotIdentity identity,
-                               boolean platformFeature, BotChannel channel,
+                               boolean platformFeature, boolean openAiStatusAllowed, BotChannel channel,
                                List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
         BotChatClientFactory.Persona persona = personaOf(identity, platformFeature);
         ChatClient chatClient = chatClients.get(persona, settings, identity.admin());
         if (chatClient == null) {
             String message = images.isEmpty()
-                    ? "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n" + commandRouter.help(identity, platformFeature)
-                    : "看图片需要开启大模型（SPRING_AI_MODEL_CHAT）。当前可用命令：\n" + commandRouter.help(identity, platformFeature);
+                    ? "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n"
+                    + commandRouter.help(identity, platformFeature, openAiStatusAllowed,
+                    BotCommandRouter.inGroupContext(event))
+                    : "看图片需要开启大模型（SPRING_AI_MODEL_CHAT）。当前可用命令：\n"
+                    + commandRouter.help(identity, platformFeature, openAiStatusAllowed,
+                    BotCommandRouter.inGroupContext(event));
             return text(message);
         }
         String promptText = parser.buildPrompt(text, quoted.text(), !images.isEmpty(), quotedHasImages);
@@ -346,11 +355,13 @@ public class BotMessageService {
         if (platformFeature && identity.admin() && identity.hasEmail()) {
             request = request.tools(new BotBalanceTools(botBalanceService, identity.email(), text));
         }
-        // 渠道状态对「管理员 + 平台用户」都开放，按请求绑定可见范围，普通用户只看自己的分组
+        // 渠道状态只在管理员好友私聊中开放；群内 platformFeature 恒为 false
         if (platformFeature) {
             request = request.tools(new BotChannelStatusTools(
                     channelStatusService, identity.admin(), commandRouter.viewerUserId(identity)));
-            // OpenAI 官方状态是公开信息，管理员和指定群内的平台用户都能查。
+        }
+        // OpenAI 官方状态是公开信息，和上游账号数据分开授权。
+        if (openAiStatusAllowed) {
             request = request.tools(new OpenAiStatusTools(openAiStatusService));
         }
         // 生图：所有人都能用，图片归属到本条消息（按请求构造，避免串到别人的回复里）

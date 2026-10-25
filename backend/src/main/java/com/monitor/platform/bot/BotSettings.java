@@ -7,9 +7,9 @@ import java.util.Set;
  *
  * <p>{@code allowedGroups} / {@code allowedUsers} 为空表示不限制。</p>
  *
- * <p>{@code platformGroups} 是「指定群」——只有这些群（以及从这些群发起的临时会话）
- * 才触发平台功能。它是 {@code allowedGroups} 的子集，且语义与白名单相反：
- * <strong>为空表示任何群都不给平台功能</strong>（fail-closed）。</p>
+ * <p>{@code platformGroups} 是「指定群」——只控制 OpenAI 官方公开状态查询和告警；
+ * 上游平台/账号等私有数据在任何群聊或群临时会话中都不可用。它是 {@code allowedGroups}
+ * 的子集，且语义与白名单相反：<strong>为空表示任何群都不给 OpenAI 状态</strong>（fail-closed）。</p>
  */
 public record BotSettings(
         boolean enabled,
@@ -43,7 +43,7 @@ public record BotSettings(
     }
 
     /**
-     * 是否「指定群」（平台功能群）。
+     * 是否「指定群」（OpenAI 公开状态群）。
      *
      * <p>与白名单不同：留空表示<strong>一个都不给</strong>，而不是不限制。</p>
      */

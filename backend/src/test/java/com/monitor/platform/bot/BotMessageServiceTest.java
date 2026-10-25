@@ -201,6 +201,7 @@ class BotMessageServiceTest {
 
         service.onEvent(event(privateCommand("/平台")));
 
+        verify(tools, timeout(3000)).platformReport();
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
     }
 
@@ -317,15 +318,15 @@ class BotMessageServiceTest {
     }
 
     @Test
-    void shouldRouteSelfErrorQueryForPlatformUser() throws Exception {
+    void shouldHideSelfErrorQueryInGroupTempSession() throws Exception {
         identityIs(normalUser());
-        when(errorService.myReport("2755457558@qq.com", "24h"))
-                .thenReturn(BotReport.fromMarkdown("我的错误内容"));
 
         service.onEvent(event(tempSessionCommand(222L, "/我的错误 24h")));
 
-        verify(errorService, timeout(3000)).myReport("2755457558@qq.com", "24h");
-        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(errorService);
     }
 
     @Test
@@ -335,7 +336,9 @@ class BotMessageServiceTest {
         service.onEvent(event(tempSessionCommand(222L, "/错误 1h 429")));
 
         verify(errorService, never()).recentReport(anyString());
-        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("仅管理员"));
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
     }
 
     @Test
@@ -378,7 +381,7 @@ class BotMessageServiceTest {
     }
 
     @Test
-    void shouldReplyToMentionedGroupCommandForAdmin() throws Exception {
+    void shouldHidePlatformCommandFromAdminInGroup() throws Exception {
         identityIs(admin());
 
         service.onEvent(event("""
@@ -387,8 +390,10 @@ class BotMessageServiceTest {
                  "message":[{"type":"at","data":{"qq":"1"}},{"type":"text","data":{"text":" /平台"}}]}
                 """));
 
-        verify(client, timeout(3000)).sendGroupMessage(eq(222L), anyString());
-        verify(tools, timeout(3000)).platformReport();
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(tools);
     }
 
     /** OpenAI 官方状态对指定群内的普通用户开放，回复必须是中文。 */
@@ -416,6 +421,32 @@ class BotMessageServiceTest {
         assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
         verifyNoInteractions(openAiStatusService);
     }
+    /** 群内 /help 只能出现公开功能，不能出现平台数据命令。 */
+    @Test
+    void shouldShowOnlyPublicCommandsInGroupHelp() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/help")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        String text = reply.getValue();
+        assertTrue(text.contains("OpenAI 官方服务状态"), text);
+        assertFalse(text.contains("号池"), text);
+        assertFalse(text.contains("我的余额"), text);
+        assertFalse(text.contains("账号"), text);
+    }
+    /** 群内不展示绑定邮箱等个人数据。 */
+    @Test
+    void shouldHideBindingInfoInGroup() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/我的信息")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+    }
     @Test
     void shouldIgnoreNonMessageEvents() throws Exception {
         service.onEvent(event("""
@@ -435,7 +466,7 @@ class BotMessageServiceTest {
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
-        assertEquals("平台级数据仅管理员可查。", reply.getValue());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
         verifyNoInteractions(tools);
     }
 
@@ -461,7 +492,7 @@ class BotMessageServiceTest {
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
-        assertEquals("平台级数据仅管理员可查。", reply.getValue());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
         verifyNoInteractions(tools);
     }
 
@@ -491,14 +522,17 @@ class BotMessageServiceTest {
         verifyNoInteractions(tools);
     }
 
-    /** 管理员在指定群里：平台功能可用。 */
+    /** 管理员在指定群里也不能查平台数据，避免群成员看到上游信息。 */
     @Test
-    void shouldAllowPlatformForAdminInDesignatedGroup() throws Exception {
+    void shouldHidePlatformCommandFromAdminInDesignatedGroup() throws Exception {
         identityIs(admin());
 
         service.onEvent(event(mentionedGroupCommand(222L, "/平台")));
 
-        verify(tools, timeout(3000)).platformReport();
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(tools);
     }
 
     /** 陌生人发平台命令：必须看起来「没有这个功能」，不能暴露平台的存在。 */
@@ -822,17 +856,17 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("渠道状态内容"));
     }
 
-    /** 平台用户在指定群用 /渠道状态：按自己的 Sub2API 用户 ID 限定可见分组。 */
+    /** 指定群内不展示渠道状态，即使发送者是平台用户。 */
     @Test
-    void shouldScopeChannelStatusToViewerGroups() throws Exception {
+    void shouldHideChannelStatusInDesignatedGroup() throws Exception {
         identityIs(normalUser());
-        when(userCache.userId("2755457558@qq.com")).thenReturn(java.util.Optional.of(42L));
-        when(channelStatusService.report(false, 42L, "")).thenReturn(BotReport.fromMarkdown("渠道状态内容"));
 
         service.onEvent(event(mentionedGroupCommand(222L, "/渠道状态")));
 
-        verify(channelStatusService, timeout(3000)).report(false, 42L, "");
-        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("渠道状态内容"));
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(channelStatusService);
     }
 
     /** 陌生人问 /渠道状态：按未知命令处理，既不暴露功能也不去查。 */
@@ -977,18 +1011,21 @@ class BotMessageServiceTest {
         service.onEvent(event(tempSessionCommandFrom(777L, 999L, "/help")));
 
         verify(client, never()).sendPrivateMessage(anyLong(), anyString());
-    }    // ============================================================ 用户端：只能查自己
+    }
 
-    /** 平台用户在指定群里查自己的余额：放行，且用的是发送者自己的邮箱。 */
+    // ============================================================ 群内不展示用户/平台数据
+
+    /** 指定群内不展示余额，避免其他群成员看到用户隐私。 */
     @Test
-    void shouldReturnMyBalanceInDesignatedGroup() throws Exception {
+    void shouldHideMyBalanceInDesignatedGroup() throws Exception {
         identityIs(normalUser());
-        when(botUserService.balanceReport(anyString())).thenReturn(BotReport.fromMarkdown("余额 12.34"));
 
         service.onEvent(event(mentionedGroupCommand(222L, "/我的余额")));
 
-        verify(botUserService, timeout(3000)).balanceReport("2755457558@qq.com");
-        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("余额 12.34"));
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(botUserService);
     }
 
     /** 平台用户在好友私聊查自己的数据：不给平台功能，按未知命令处理。 */
@@ -1015,26 +1052,30 @@ class BotMessageServiceTest {
         verifyNoInteractions(botUserService);
     }
 
-    /** 用量命令把时间窗透传下去。 */
+    /** 指定群内不展示用量。 */
     @Test
-    void shouldPassUsageRangeThrough() throws Exception {
+    void shouldHideMyUsageInDesignatedGroup() throws Exception {
         identityIs(normalUser());
-        when(botUserService.usageReport(anyString(), anyString())).thenReturn(BotReport.fromMarkdown("请求数 10"));
 
         service.onEvent(event(mentionedGroupCommand(222L, "/我的用量 7d")));
 
-        verify(botUserService, timeout(3000)).usageReport("2755457558@qq.com", "7d");
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(botUserService);
     }
 
-    /** 密钥命令。 */
+    /** 指定群内不展示 API Key。 */
     @Test
-    void shouldReturnMyApiKeysInDesignatedGroup() throws Exception {
+    void shouldHideMyApiKeysInDesignatedGroup() throws Exception {
         identityIs(normalUser());
-        when(botUserService.apiKeysReport(anyString())).thenReturn(BotReport.fromMarkdown("密钥 A"));
 
         service.onEvent(event(mentionedGroupCommand(222L, "/我的密钥")));
 
-        verify(botUserService, timeout(3000)).apiKeysReport("2755457558@qq.com");
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), reply.capture());
+        assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
+        verifyNoInteractions(botUserService);
     }
 
     /** 陌生人即使在指定群里问「我的余额」，也不能触发用户端查询。 */
@@ -1075,7 +1116,7 @@ class BotMessageServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<BotImageFetcher.ImageRef>> captor = ArgumentCaptor.forClass(List.class);
-        verify(imageFetcher, timeout(3000).atLeastOnce()).fetch(captor.capture());
+        verify(imageFetcher, timeout(5000).times(2)).fetch(captor.capture());
         assertTrue(captor.getAllValues().stream()
                         .flatMap(refs -> refs.stream())
                         .anyMatch(ref -> "https://example.com/a.png".equals(ref.url())),

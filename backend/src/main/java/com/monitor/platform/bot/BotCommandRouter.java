@@ -162,17 +162,21 @@ public class BotCommandRouter {
      *                         并且只在通过限频、真的要开始画时触发。
      */
     public BotReport route(String commandLine, BotIdentity identity, boolean platformFeature,
-                           OneBotEvent event, GeneratedImages generated, Runnable imageStartNotice) {
+                           boolean openAiStatusAllowed, OneBotEvent event,
+                           GeneratedImages generated, Runnable imageStartNotice) {
         String[] parts = commandLine.split("\\s+", 2);
         String name = parts[0].toLowerCase(Locale.ROOT);
         String arg = parts.length > 1 ? parts[1].trim() : "";
         return switch (name) {
-            case "help", "帮助", "?" -> text(help(identity, platformFeature));
+            case "help", "帮助", "?" -> text(help(identity, platformFeature, openAiStatusAllowed,
+                    inGroupContext(event)));
             case "bind", "绑定" -> text(bind(arg, event));
             case "unbind", "解绑" -> text(unbind(event));
-            case "whoami", "我的信息", "me" -> text(whoami(identity));
+            case "whoami", "我的信息", "me" -> inGroupContext(event)
+                    ? text(UNKNOWN_COMMAND)
+                    : text(whoami(identity));
 
-            // 用户级平台功能：只能查「自己」的数据（需要命中指定群 + 邮箱）
+            // 用户级平台功能：只能在管理员好友私聊中查「自己」的数据；群内一律不展示
             case "我的余额", "余额", "balance" ->
                     selfService(platformFeature, identity, () -> botUserService.balanceReport(identity.email()));
             case "我的用量", "用量", "usage" ->
@@ -187,16 +191,16 @@ public class BotCommandRouter {
             case "draw", "画图", "生图" -> draw(arg, generated, imageStartNotice);
 
             // OpenAI 官方状态是公开信息：管理员与指定群内的平台用户都能查
-            case "openai", "openai状态", "openai服务状态" -> platformFeature
+            case "openai", "openai状态", "openai服务状态" -> openAiStatusAllowed
                     ? text(openAiStatusService.statusReport())
                     : text(UNKNOWN_COMMAND);
 
-            // 渠道状态：对外功能，管理员与平台用户都能看；非平台用户按未知命令处理
+            // 渠道状态：只允许管理员好友私聊；群聊/群临时会话按未知命令处理
             case "渠道状态", "channelstatus" -> platformFeature
                     ? channelStatusService.report(identity.admin(), viewerUserId(identity), arg)
                     : text(UNKNOWN_COMMAND);
 
-            // 平台级命令：没有平台功能（未命中指定群 / 陌生人）一律按「未知命令」处理，不暴露功能存在
+            // 平台级命令：群聊、群临时会话、普通用户和陌生人都按「未知命令」处理
             case "platform", "平台", "overview" -> platformOnly(identity, platformFeature, tools::platformReport);
             case "pool", "号池" -> platformOnly(identity, platformFeature, () -> tools.poolReport(arg));
             case "ingest", "采集" -> platformOnly(identity, platformFeature, tools::ingestReport);
@@ -252,7 +256,8 @@ public class BotCommandRouter {
                     platformOnly(identity, platformFeature, () -> usageTools.userConsumptionReport(arg.trim()));
 
             default -> text(platformFeature
-                    ? "未知命令：" + name + "\n" + help(identity, platformFeature)
+                    ? "未知命令：" + name + "\n" + help(identity, platformFeature, openAiStatusAllowed,
+                    inGroupContext(event))
                     : UNKNOWN_COMMAND);
         };
     }
@@ -262,9 +267,20 @@ public class BotCommandRouter {
      *
      * <p>大模型不可用时会把它拼进「自然语言问答未启用」的提示里，所以包内可见。</p>
      */
-    String help(BotIdentity identity, boolean platformFeature) {
+    String help(BotIdentity identity, boolean platformFeature, boolean openAiStatusAllowed) {
+        return help(identity, platformFeature, openAiStatusAllowed, false);
+    }
+
+    String help(BotIdentity identity, boolean platformFeature, boolean openAiStatusAllowed,
+                boolean groupContext) {
         if (!platformFeature) {
-            return GUEST_HELP;
+            String base = openAiStatusAllowed
+                    ? GUEST_HELP.replace("也可以直接和我聊天。",
+                    "- /openai          OpenAI 官方服务状态（中文）\n也可以直接和我聊天。")
+                    : GUEST_HELP;
+            return groupContext
+                    ? base.replace("- /我的信息        查看当前绑定\n", "")
+                    : base;
         }
         return identity.admin() ? ADMIN_HELP : USER_HELP;
     }
@@ -288,8 +304,8 @@ public class BotCommandRouter {
     /**
      * 用户级平台功能的统一闸门：查「自己」的数据。
      *
-     * <p>没有平台功能（未命中指定群 / 陌生人）时，和平台级命令一样回「未知命令」，
-     * 不暴露功能存在。邮箱在解析身份时就已确定，不接受任何用户标识参数。</p>
+     * <p>没有平台功能（群聊 / 群临时会话 / 普通用户 / 陌生人）时，和平台级命令一样回
+     * 「未知命令」，不暴露功能存在。邮箱在解析身份时就已确定，不接受任何用户标识参数。</p>
      */
     private BotReport selfService(boolean platformFeature, BotIdentity identity, Supplier<BotReport> action) {
         if (!platformFeature || !identity.hasEmail()) {
@@ -335,6 +351,11 @@ public class BotCommandRouter {
             long durationMs = (System.nanoTime() - start) / 1_000_000;
             errorQueryAuditService.record(userId, action, query, true, durationMs);
         }
+    }
+
+    /** 群聊或群临时会话都不展示绑定邮箱等个人数据。 */
+    static boolean inGroupContext(OneBotEvent event) {
+        return event != null && ("group".equals(event.messageType()) || "group".equals(event.subType()));
     }
 
     /** 纯文本包成报表：短内容仍按纯文本发出，长内容走段落渲染。 */
