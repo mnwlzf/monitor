@@ -143,8 +143,8 @@ MONITOR_BOT_REQUIRE_MENTION=true
 
 - `/openai`、`/openai状态` 或直接问「OpenAI 现在正常吗」，都会读取
   <https://status.openai.com/api/v2/summary.json>。
-- 回复里的「查询时间」是机器人本次读取状态页的北京时间；「状态页最后更新」来自官方 `page.updated_at`，
-  表示官方页面最近一次变更时间，可能是几天前，不等于本次查询时间。
+- 回复里的「查询时间」是机器人本次实时读取状态页的北京时间。
+- 官方响应中的 `page.updated_at` 是页面元数据更新时间，不会随每次健康检查刷新，因此不展示给用户，避免被误认为当前时间。
 - 返回内容统一翻译为中文：`none/minor/major/critical/maintenance` 会显示为
   「全部系统正常 / 轻微服务异常 / 重大服务异常 / 严重服务异常 / 计划维护中」，
   当前已收录的组件名和组件状态也会翻译。

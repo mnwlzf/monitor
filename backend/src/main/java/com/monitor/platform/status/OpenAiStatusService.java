@@ -8,7 +8,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -232,7 +231,6 @@ public class OpenAiStatusService {
         StringBuilder text = new StringBuilder(title).append('\n');
         text.append("查询时间：").append(TIME_FORMAT.format(OffsetDateTime.now(ZONE))).append('\n');
         text.append("总体状态：").append(indicatorLabel(indicator)).append('\n');
-        text.append("状态页最后更新：").append(displayTime(summary)).append('\n');
 
         if (abnormalComponents.isEmpty()) {
             text.append("组件状态：");
@@ -307,17 +305,6 @@ public class OpenAiStatusService {
         };
     }
 
-    private static String displayTime(OpenAiStatusSummary summary) {
-        String raw = summary.page() == null ? null : summary.page().updatedAt();
-        if (raw == null || raw.isBlank()) {
-            return "未知";
-        }
-        try {
-            return Instant.parse(raw).atZone(ZONE).format(TIME_FORMAT);
-        } catch (RuntimeException ex) {
-            return "未知";
-        }
-    }
 
     private static String statusPageUrl(OpenAiStatusSummary summary) {
         String url = summary.page() == null ? null : summary.page().url();

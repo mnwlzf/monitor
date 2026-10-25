@@ -66,7 +66,6 @@ class OpenAiStatusServiceTest {
         verify(oneBotClient, times(2)).sendGroupMessage(eq(123L), messages.capture());
         assertThat(messages.getAllValues().get(0))
                 .contains("查询时间：")
-                .contains("状态页最后更新：2026-10-25 10:03:04")
                 .contains("轻微服务异常")
                 .contains("对话补全：性能下降")
                 .doesNotContain("degraded_performance");
@@ -125,8 +124,8 @@ class OpenAiStatusServiceTest {
 
         assertThat(report)
                 .contains("OpenAI 服务状态")
+                .doesNotContain("状态页最后更新")
                 .contains("查询时间：")
-                .contains("状态页最后更新：2026-10-25 10:03:04")
                 .contains("轻微服务异常")
                 .contains("对话补全：性能下降")
                 .contains("进行中事件：1 个")
