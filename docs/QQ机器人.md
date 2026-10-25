@@ -143,6 +143,8 @@ MONITOR_BOT_REQUIRE_MENTION=true
 
 - `/openai`、`/openai状态` 或直接问「OpenAI 现在正常吗」，都会读取
   <https://status.openai.com/api/v2/summary.json>。
+- 回复里的「查询时间」是机器人本次读取状态页的北京时间；「状态页最后更新」来自官方 `page.updated_at`，
+  表示官方页面最近一次变更时间，可能是几天前，不等于本次查询时间。
 - 返回内容统一翻译为中文：`none/minor/major/critical/maintenance` 会显示为
   「全部系统正常 / 轻微服务异常 / 重大服务异常 / 严重服务异常 / 计划维护中」，
   当前已收录的组件名和组件状态也会翻译。
@@ -150,6 +152,7 @@ MONITOR_BOT_REQUIRE_MENTION=true
 - 「OpenAI 服务状态监控」定时任务每 10 分钟采集一次。连续异常期间只向
   「指定群（平台功能）」发送一次告警；恢复正常后再次异常才会重新发送。
 - 状态页本身不可访问时，定时任务会标记为 `FAILED`，但不会误判为 OpenAI 服务异常。
+
 ### 错误排障（不需要请求 ID）
 
 用户端通常看不到请求 ID，因此错误命令按时间窗、状态码、模型、账号和关键词查询；

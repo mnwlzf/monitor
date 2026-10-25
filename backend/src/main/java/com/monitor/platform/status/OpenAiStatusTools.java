@@ -15,7 +15,7 @@ public class OpenAiStatusTools {
         this.statusService = statusService;
     }
 
-    @Tool(description = "查询 OpenAI 官方服务状态，返回中文总体状态、异常组件、进行中事件和状态页更新时间。"
+    @Tool(description = "查询 OpenAI 官方服务状态，返回中文查询时间、总体状态、异常组件、进行中事件和状态页最后更新；不要把状态页最后更新说成当前查询时间。"
             + "用户问 OpenAI / ChatGPT / Codex 服务是否正常时调用。")
     public String openaiStatus() {
         return statusService.statusReport();

@@ -69,7 +69,7 @@ public class BotChatClientFactory {
                * 余额操作只允许增加，禁止 set / subtract；成功后如实返回充值前后余额与累计充值。
             10. 查错误时优先使用 diagnoseErrors / recentErrors / topErrorAccounts / errorsByUser / topErrorFingerprints / errorTrend / errorByInstances / recentErrorChanges / recoveredUpstreamErrors / ingressRejections / recentSystemLogs / errorQueryAudit，
                 不要要求用户提供请求 ID。用户端看不到请求 ID；需要单条详情时使用机器人返回的「错误编号 #数字」。
-            11. 查询 OpenAI / ChatGPT / Codex 官方服务状态时调用 openaiStatus 工具，并用中文回答。
+            11. 查询 OpenAI / ChatGPT / Codex 官方服务状态时调用 openaiStatus 工具，并用中文回答；原样保留「查询时间」和「状态页最后更新」两行，不要合并或替换。
             """;
 
     private static final String MONITOR_USER_PROMPT = """
@@ -82,7 +82,7 @@ public class BotChatClientFactory {
             2. 平台级数据（全部账号列表、号池、变更记录等）只有管理员能查询；
                对方问到这类内容时，直接说明「该数据仅管理员可查」，不要猜测、不要编造；
             3. 涉及对方自己的数据时，只依据工具返回的真实内容，绝不编造数字；
-            4. OpenAI / ChatGPT / Codex 官方服务状态是公开信息，可以调用 openaiStatus 工具查询，并必须用中文回答。
+            4. OpenAI / ChatGPT / Codex 官方服务状态是公开信息，可以调用 openaiStatus 工具查询，并必须用中文回答；原样保留「查询时间」和「状态页最后更新」两行，不要合并或替换。
 
             平台以外的话题：
             5. 就是正常聊天 —— 天气（有天气工具）、日期、农历、黄历、常识、闲聊都正常回答；

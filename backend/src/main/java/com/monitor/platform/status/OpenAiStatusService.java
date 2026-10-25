@@ -230,8 +230,9 @@ public class OpenAiStatusService {
                 .count();
 
         StringBuilder text = new StringBuilder(title).append('\n');
+        text.append("查询时间：").append(TIME_FORMAT.format(OffsetDateTime.now(ZONE))).append('\n');
         text.append("总体状态：").append(indicatorLabel(indicator)).append('\n');
-        text.append("状态页更新时间：").append(displayTime(summary)).append('\n');
+        text.append("状态页最后更新：").append(displayTime(summary)).append('\n');
 
         if (abnormalComponents.isEmpty()) {
             text.append("组件状态：");
