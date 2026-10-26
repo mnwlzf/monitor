@@ -326,6 +326,84 @@ public record BotReport(String title, List<Block> blocks, List<String> notes) {
         return String.join("\n", lines);
     }
 
+    /**
+     * 移动端文本布局：两列保持键值格式，三列以上短表格改为逐行卡片。
+     * 热力表保留 Markdown 表格，避免在文本兜底时丢失矩阵结构。
+     */
+    public String toMobileText() {
+        List<String> lines = new ArrayList<>();
+        if (title != null && !title.isBlank()) {
+            lines.add(title);
+        }
+        for (Block block : blocks) {
+            if (block.heading() != null && !block.heading().isBlank()) {
+                lines.add(block.heading());
+            }
+            if (block.plain()) {
+                for (Row row : block.rows()) {
+                    String text = row.cells().isEmpty() ? null : row.cells().get(0).text();
+                    if (text != null) {
+                        lines.add(text);
+                    }
+                }
+            } else if (block.cols().size() <= 2 || hasHeatColumn(block)) {
+                appendReadableTable(block, lines);
+            } else {
+                for (int rowIndex = 0; rowIndex < block.rows().size(); rowIndex++) {
+                    if (rowIndex > 0) {
+                        lines.add("");
+                    }
+                    Row row = block.rows().get(rowIndex);
+                    for (int colIndex = 0; colIndex < block.cols().size(); colIndex++) {
+                        String value = cellText(row, colIndex);
+                        if (value.isBlank()) {
+                            continue;
+                        }
+                        String header = block.cols().get(colIndex).header();
+                        if (colIndex == 0) {
+                            lines.add("- " + (header == null || header.isBlank()
+                                    ? value : header + "：" + value));
+                        } else {
+                            lines.add("  " + (header == null || header.isBlank()
+                                    ? value : header + "：" + value));
+                        }
+                    }
+                }
+            }
+            if (block.note() != null && !block.note().isBlank()) {
+                lines.add(block.note());
+            }
+        }
+        for (String note : notes) {
+            if (note != null && !note.isBlank()) {
+                lines.add(note);
+            }
+        }
+        return String.join("\n", lines);
+    }
+
+    private static boolean hasHeatColumn(Block block) {
+        return block.cols().stream().anyMatch(Col::heat);
+    }
+
+    private static void appendReadableTable(Block block, List<String> lines) {
+        if (block.cols().size() == 2) {
+            for (Row row : block.rows()) {
+                lines.add(cellText(row, 0) + "：" + cellText(row, 1));
+            }
+            return;
+        }
+        lines.add(tableRow(block.cols().stream().map(Col::header).toList()));
+        lines.add("|" + "---|".repeat(block.cols().size()));
+        for (Row row : block.rows()) {
+            List<String> cells = new ArrayList<>();
+            for (int i = 0; i < block.cols().size(); i++) {
+                cells.add(cellText(row, i));
+            }
+            lines.add(tableRow(cells));
+        }
+    }
+
     private static String tableRow(List<String> cells) {
         return "| " + String.join(" | ", cells) + " |";
     }

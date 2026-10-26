@@ -83,4 +83,20 @@ class BotReportTest {
         assertEquals("", BotReport.fromMarkdown(null).toPlainText());
         assertEquals("", BotReport.fromMarkdown("   ").toPlainText());
     }
+    @Test
+    void shouldRenderWideTableAsMobileCards() {
+        BotReport report = BotReport.fromMarkdown("""
+                | 平台 | 账号数 | 余额 |
+                |---|---:|---:|
+                | NewAPI 主站 | 12 | 1234.56 |
+                """);
+
+        String text = report.toMobileText();
+
+        assertTrue(text.contains("- 平台：NewAPI 主站"));
+        assertTrue(text.contains("  账号数：12"));
+        assertTrue(text.contains("  余额：1234.56"));
+        assertFalse(text.contains("| 平台 |"));
+    }
+
 }

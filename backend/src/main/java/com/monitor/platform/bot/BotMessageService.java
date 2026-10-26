@@ -467,7 +467,7 @@ public class BotMessageService {
                 sendText(event, group, "图片发送失败了，请稍后再试。");
             }
         }
-        String plain = report.toPlainText();
+        String plain = report.toMobileText();
         // 兜底：本轮没出图、工具又留了话（例如生图被限频），就必须让用户看到原因。
         // 工具的失败原因是作为「工具返回值」回到模型手里的，模型有可能吞掉甚至答成空白。
         String notice = generated.notice();
