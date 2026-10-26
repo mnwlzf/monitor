@@ -133,6 +133,8 @@ export interface BotSettingsInput {
   errorAlertMinCount: number
   errorAlertSpikeRatio: number
   errorAlertCooldownMinutes: number
+  defaultVoice: string
+  defaultVoiceStyle: string
 }
 
 /** 读取 QQ 机器人设置。 */

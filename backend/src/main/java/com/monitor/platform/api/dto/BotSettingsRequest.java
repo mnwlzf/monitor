@@ -31,6 +31,23 @@ public record BotSettingsRequest(
         /** 突增倍数，空按 1.5。 */
         Double errorAlertSpikeRatio,
         /** 冷却分钟数，空按 30。 */
-        Integer errorAlertCooldownMinutes
+        Integer errorAlertCooldownMinutes,
+        /** 默认 MOSS 音色，空按 fnlp/MOSS-TTSD-v0.5:alex。 */
+        String defaultVoice,
+        /** 默认语音语气/风格，空按「自然、友好、简洁」。 */
+        String defaultVoiceStyle
 ) {
+
+    /** 兼容旧调用方：语音字段使用默认值。 */
+    public BotSettingsRequest(boolean enabled, List<String> allowedGroups, List<String> allowedUsers,
+                              List<String> platformGroups, Boolean requireMention, String commandPrefix,
+                              Integer maxReplyLength, Integer memoryWindow, Boolean webSearchForNonAdmin,
+                              Boolean errorAlertEnabled, Integer errorAlertWindowMinutes,
+                              Integer errorAlertMinCount, Double errorAlertSpikeRatio,
+                              Integer errorAlertCooldownMinutes) {
+        this(enabled, allowedGroups, allowedUsers, platformGroups, requireMention, commandPrefix,
+                maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
+                errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
+                null, null);
+    }
 }

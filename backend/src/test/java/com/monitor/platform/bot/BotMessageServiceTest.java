@@ -16,6 +16,7 @@ import com.monitor.platform.bot.report.BotReportRenderer;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
 import com.monitor.platform.bot.vision.BotImageFetcher;
 import com.monitor.platform.bot.vision.BotVisionProperties;
+import com.monitor.platform.bot.voice.BotSpeechService;
 import com.monitor.platform.bot.key.Sub2KeyTools;
 import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
@@ -38,6 +39,7 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -86,6 +88,7 @@ class BotMessageServiceTest {
     private BotMessageArchiveService archive;
     private BotImageFetcher imageFetcher;
     private BotVisionProperties visionProperties;
+    private BotSpeechService speechService;
     private OpenAiStatusService openAiStatusService;
     private BotGroupRedactor groupRedactor;
     private BotMessageService service;
@@ -121,7 +124,8 @@ class BotMessageServiceTest {
         weatherTools = mock(WeatherTools.class);
         archive = mock(BotMessageArchiveService.class);
         imageFetcher = mock(BotImageFetcher.class);
-        visionProperties = new BotVisionProperties();
+        BotVisionProperties visionProperties = new BotVisionProperties();
+        speechService = mock(BotSpeechService.class);
         openAiStatusService = mock(OpenAiStatusService.class);
         groupRedactor = mock(BotGroupRedactor.class);
         when(groupRedactor.redact(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -135,7 +139,7 @@ class BotMessageServiceTest {
         BotCommandRouter commandRouter = new BotCommandRouter(
                 tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService, openAiStatusService);
         service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor);
     }
 
     private OneBotEvent event(String json) throws Exception {
@@ -206,6 +210,40 @@ class BotMessageServiceTest {
 
         service.onEvent(event(privateCommand("/平台")));
 
+        verify(tools, timeout(3000)).platformReport();
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
+    }
+
+    @Test
+    void shouldSendVoiceReplyWhenExplicitlyRequested() throws Exception {
+        identityIs(admin());
+        when(speechService.synthesisAvailable()).thenReturn(true);
+        when(speechService.synthesize(anyString(), anyString())).thenReturn(Optional.of(new byte[]{1, 2, 3}));
+        when(speechService.maxTtsChars()).thenReturn(800);
+        when(client.sendPrivateVoice(eq(999L), any(byte[].class))).thenReturn(true);
+
+        service.onEvent(event(privateCommand("/平台 语音回复")));
+
+        verify(tools, timeout(3000)).platformReport();
+        verify(speechService, timeout(3000)).synthesize(anyString(), eq("fnlp/MOSS-TTSD-v0.5:alex"));
+        verify(client, timeout(3000)).sendPrivateVoice(eq(999L), any(byte[].class));
+    }
+
+    @Test
+    void shouldTranscribeVoiceMessageBeforeAnswering() throws Exception {
+        identityIs(admin());
+        when(speechService.transcriptionAvailable()).thenReturn(true);
+        when(speechService.transcribe(any())).thenReturn(Optional.of("/平台"));
+        when(speechService.synthesisAvailable()).thenReturn(false);
+
+        String body = """
+                {"post_type":"message","message_type":"private","user_id":999,
+                 "self_id":1,"raw_message":"[CQ:record,file=voice.mp3]",
+                 "message":[{"type":"record","data":{"file":"voice.mp3","url":"https://example.com/voice.mp3"}}]}
+                """;
+        service.onEvent(event(body));
+
+        verify(speechService, timeout(3000)).transcribe(any());
         verify(tools, timeout(3000)).platformReport();
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), anyString());
     }

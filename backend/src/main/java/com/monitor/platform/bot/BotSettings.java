@@ -31,8 +31,33 @@ public record BotSettings(
         /** 相对上一周期的突增倍数。 */
         double errorAlertSpikeRatio,
         /** 同一告警的冷却分钟数。 */
-        int errorAlertCooldownMinutes
+        int errorAlertCooldownMinutes,
+        /** 默认 MOSS 音色（页面可配），例如 fnlp/MOSS-TTSD-v0.5:alex。 */
+        String defaultVoice,
+        /** 默认语气/风格（页面可配），用于组织语音回复的文字措辞。 */
+        String defaultVoiceStyle
 ) {
+
+    /** 兼容旧测试/调用方：新增语音字段使用内置默认值。 */
+    public BotSettings(boolean enabled,
+                       Set<String> allowedGroups,
+                       Set<String> allowedUsers,
+                       Set<String> platformGroups,
+                       boolean requireMention,
+                       String commandPrefix,
+                       int maxReplyLength,
+                       int memoryWindow,
+                       boolean webSearchForNonAdmin,
+                       boolean errorAlertEnabled,
+                       int errorAlertWindowMinutes,
+                       int errorAlertMinCount,
+                       double errorAlertSpikeRatio,
+                       int errorAlertCooldownMinutes) {
+        this(enabled, allowedGroups, allowedUsers, platformGroups, requireMention, commandPrefix,
+                maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
+                errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
+                "fnlp/MOSS-TTSD-v0.5:alex", "自然、友好、简洁");
+    }
 
     public boolean isGroupAllowed(Long groupId) {
         return matches(allowedGroups, groupId);

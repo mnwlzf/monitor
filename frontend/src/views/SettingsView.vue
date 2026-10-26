@@ -308,6 +308,26 @@
           <span class="admin-form-hint" style="margin-left: 10px">保留最近几条对话，用于「那 30 天呢？」这类追问</span>
         </el-form-item>
 
+        <el-divider content-position="left">语音消息与语音回复</el-divider>
+
+        <el-form-item label="MOSS 默认音色">
+          <el-select v-model="botForm.defaultVoice" filterable allow-create default-first-option style="width: 360px" placeholder="例如 fnlp/MOSS-TTSD-v0.5:alex">
+            <el-option label="alex（MOSS 默认）" value="fnlp/MOSS-TTSD-v0.5:alex" />
+          </el-select>
+          <small class="admin-form-hint">用户说「用 alex 音色语音回复」时会临时覆盖；保存后立即生效</small>
+        </el-form-item>
+
+        <el-form-item label="默认语音风格">
+          <el-select v-model="botForm.defaultVoiceStyle" filterable allow-create default-first-option style="width: 360px" placeholder="例如：自然、友好、简洁">
+            <el-option label="自然、友好、简洁" value="自然、友好、简洁" />
+            <el-option label="温柔亲切" value="温柔亲切" />
+            <el-option label="沉稳专业" value="沉稳专业" />
+            <el-option label="活泼轻松" value="活泼轻松" />
+            <el-option label="播音腔" value="播音腔" />
+          </el-select>
+          <small class="admin-form-hint">用户明确要求语音回复时生效；这个风格用于组织回复措辞，实际音色由上面的 MOSS 音色决定</small>
+        </el-form-item>
+
         <el-form-item label="普通人可用联网搜索">
           <el-switch v-model="botForm.webSearchForNonAdmin" />
           <span class="admin-form-hint" style="margin-left: 10px">
@@ -619,6 +639,8 @@ const botForm = reactive<BotSettingsInput>({
   errorAlertMinCount: 5,
   errorAlertSpikeRatio: 1.5,
   errorAlertCooldownMinutes: 30,
+  defaultVoice: 'fnlp/MOSS-TTSD-v0.5:alex',
+  defaultVoiceStyle: '自然、友好、简洁',
 })
 
 function applyBotSettings(settings: BotSettings) {
@@ -637,6 +659,8 @@ function applyBotSettings(settings: BotSettings) {
     errorAlertMinCount: settings.errorAlertMinCount || 5,
     errorAlertSpikeRatio: settings.errorAlertSpikeRatio ?? 1.5,
     errorAlertCooldownMinutes: settings.errorAlertCooldownMinutes || 30,
+    defaultVoice: settings.defaultVoice || 'fnlp/MOSS-TTSD-v0.5:alex',
+    defaultVoiceStyle: settings.defaultVoiceStyle || '自然、友好、简洁',
   })
   botUpdatedAt.value = settings.updatedAt ? new Date(settings.updatedAt).toLocaleString('zh-CN') : ''
 }

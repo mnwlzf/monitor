@@ -38,6 +38,7 @@ public class BotMessageArchiveService {
     public static final String KIND_TEXT = "TEXT";
     public static final String KIND_COMMAND = "COMMAND";
     public static final String KIND_IMAGE = "IMAGE";
+    public static final String KIND_VOICE = "VOICE";
 
     /** 待写队列容量。正常消息量下远远用不满；真满了说明数据库出了问题。 */
     private static final int WRITE_QUEUE_CAPACITY = 2000;

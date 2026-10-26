@@ -94,6 +94,7 @@
                   >{{ roleLabel(m.senderRole) }}</el-tag>
                   <el-tag v-else size="small" effect="plain">{{ personaLabel(m.persona) }}</el-tag>
                   <el-tag v-if="m.contentKind === 'IMAGE'" size="small" type="warning" effect="plain">图片</el-tag>
+                  <el-tag v-else-if="m.contentKind === 'VOICE'" size="small" type="success" effect="plain">语音</el-tag>
                   <el-tag v-else-if="m.contentKind === 'COMMAND'" size="small" effect="plain">命令</el-tag>
                   <span class="chat-time">{{ formatTime(m.createdAt) }}</span>
                 </div>

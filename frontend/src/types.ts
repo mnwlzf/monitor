@@ -448,6 +448,10 @@ export interface BotSettings {
   errorAlertMinCount: number
   errorAlertSpikeRatio: number
   errorAlertCooldownMinutes: number
+  /** MOSS-TTSD 默认音色，例如 fnlp/MOSS-TTSD-v0.5:alex。 */
+  defaultVoice: string
+  /** 默认语音语气/风格。 */
+  defaultVoiceStyle: string
   updatedAt: string | null
 }
 /** 监控项目侧登记的自定义管理员。 */
@@ -487,7 +491,7 @@ export interface BotMessage {
   senderRole: 'ADMIN' | 'USER' | 'GUEST' | null
   persona: string | null
   content: string
-  contentKind: 'TEXT' | 'IMAGE' | 'COMMAND'
+  contentKind: 'TEXT' | 'IMAGE' | 'COMMAND' | 'VOICE'
   /** 同一问一答共用的关联 ID */
   correlationId: string | null
   messageId: string | null

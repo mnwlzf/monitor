@@ -39,6 +39,8 @@ public class BotSettingsService {
     private static final int DEFAULT_ERROR_ALERT_MIN_COUNT = 5;
     private static final double DEFAULT_ERROR_ALERT_SPIKE_RATIO = 1.5;
     private static final int DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES = 30;
+    private static final String DEFAULT_VOICE = "fnlp/MOSS-TTSD-v0.5:alex";
+    private static final String DEFAULT_VOICE_STYLE = "自然、友好、简洁";
 
     private final BotSettingsRepository repository;
     private final QqBotProperties properties;
@@ -110,6 +112,8 @@ public class BotSettingsService {
                 1.0, 100.0, DEFAULT_ERROR_ALERT_SPIKE_RATIO));
         entity.setErrorAlertCooldownMinutes(clamp(request.errorAlertCooldownMinutes(),
                 1, 1440, DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES));
+        entity.setDefaultVoice(normalizeVoice(request.defaultVoice()));
+        entity.setDefaultVoiceStyle(normalizeVoiceStyle(request.defaultVoiceStyle()));
         entity.setUpdatedAt(OffsetDateTime.now());
         repository.save(entity);
 
@@ -163,6 +167,8 @@ public class BotSettingsService {
         entity.setErrorAlertMinCount(DEFAULT_ERROR_ALERT_MIN_COUNT);
         entity.setErrorAlertSpikeRatio(DEFAULT_ERROR_ALERT_SPIKE_RATIO);
         entity.setErrorAlertCooldownMinutes(DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES);
+        entity.setDefaultVoice(DEFAULT_VOICE);
+        entity.setDefaultVoiceStyle(DEFAULT_VOICE_STYLE);
         entity.setUpdatedAt(OffsetDateTime.now());
         repository.save(entity);
         log.info("已用环境变量初始化机器人设置（之后请在页面上维护）: groups={}, users={}",
@@ -185,7 +191,9 @@ public class BotSettingsService {
                 DEFAULT_ERROR_ALERT_WINDOW_MINUTES,
                 DEFAULT_ERROR_ALERT_MIN_COUNT,
                 DEFAULT_ERROR_ALERT_SPIKE_RATIO,
-                DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES);
+                DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES,
+                DEFAULT_VOICE,
+                DEFAULT_VOICE_STYLE);
     }
 
     private BotSettings toSettings(BotSettingsEntity entity) {
@@ -203,7 +211,9 @@ public class BotSettingsService {
                 clamp(entity.getErrorAlertWindowMinutes(), 1, 1440, DEFAULT_ERROR_ALERT_WINDOW_MINUTES),
                 clamp(entity.getErrorAlertMinCount(), 1, 100000, DEFAULT_ERROR_ALERT_MIN_COUNT),
                 clamp(entity.getErrorAlertSpikeRatio(), 1.0, 100.0, DEFAULT_ERROR_ALERT_SPIKE_RATIO),
-                clamp(entity.getErrorAlertCooldownMinutes(), 1, 1440, DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES));
+                clamp(entity.getErrorAlertCooldownMinutes(), 1, 1440, DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES),
+                normalizeVoice(entity.getDefaultVoice()),
+                normalizeVoiceStyle(entity.getDefaultVoiceStyle()));
     }
 
     private BotSettingsResponse toResponse(BotSettingsEntity entity) {
@@ -222,6 +232,8 @@ public class BotSettingsService {
                 clamp(entity.getErrorAlertMinCount(), 1, 100000, DEFAULT_ERROR_ALERT_MIN_COUNT),
                 clamp(entity.getErrorAlertSpikeRatio(), 1.0, 100.0, DEFAULT_ERROR_ALERT_SPIKE_RATIO),
                 clamp(entity.getErrorAlertCooldownMinutes(), 1, 1440, DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES),
+                normalizeVoice(entity.getDefaultVoice()),
+                normalizeVoiceStyle(entity.getDefaultVoiceStyle()),
                 entity.getUpdatedAt());
     }
 
@@ -250,6 +262,22 @@ public class BotSettingsService {
             }
         }
         return cleaned.isEmpty() ? null : String.join(",", cleaned);
+    }
+
+    private static String normalizeVoice(String voice) {
+        if (voice == null || voice.isBlank()) {
+            return DEFAULT_VOICE;
+        }
+        String value = voice.trim();
+        return value.length() > 120 ? value.substring(0, 120) : value;
+    }
+
+    private static String normalizeVoiceStyle(String style) {
+        if (style == null || style.isBlank()) {
+            return DEFAULT_VOICE_STYLE;
+        }
+        String value = style.trim().replaceAll("\\s+", " ");
+        return value.length() > 80 ? value.substring(0, 80) : value;
     }
 
     private static String normalizePrefix(String prefix) {

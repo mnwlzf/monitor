@@ -23,6 +23,8 @@ import com.monitor.platform.bot.report.BotGroupRedactor;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.vision.BotImageFetcher;
 import com.monitor.platform.bot.vision.BotVisionProperties;
+import com.monitor.platform.bot.voice.BotSpeechService;
+import com.monitor.platform.bot.voice.VoiceReplyIntent;
 import com.monitor.platform.bot.report.BotReportRenderer;
 import com.monitor.platform.status.OpenAiStatusService;
 import com.monitor.platform.status.OpenAiStatusTools;
@@ -107,6 +109,7 @@ public class BotMessageService {
     private final BotMessageArchiveService archive;
     private final BotImageFetcher imageFetcher;
     private final BotVisionProperties visionProperties;
+    private final BotSpeechService speechService;
     private final BotIdentityResolver identityResolver;
     private final BotReportRenderer reportRenderer;
     private final BotChatClientFactory chatClients;
@@ -136,6 +139,7 @@ public class BotMessageService {
                              BotMessageArchiveService archive,
                              BotImageFetcher imageFetcher,
                              BotVisionProperties visionProperties,
+                             BotSpeechService speechService,
                              BotIdentityResolver identityResolver,
                              BotReportRenderer reportRenderer,
                              BotChatClientFactory chatClients,
@@ -158,6 +162,7 @@ public class BotMessageService {
         this.archive = archive;
         this.imageFetcher = imageFetcher;
         this.visionProperties = visionProperties;
+        this.speechService = speechService;
         this.identityResolver = identityResolver;
         this.reportRenderer = reportRenderer;
         this.chatClients = chatClients;
@@ -194,6 +199,8 @@ public class BotMessageService {
             return;
         }
         String text = parser.extractText(event);
+        BotSpeechService.VoiceInput voiceInput = BotSpeechService.extract(event.message(), event.rawMessage());
+        boolean hasVoice = voiceInput.present();
         // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见；
         // 被引用的消息本身可能就是图片（「引用这张图，总结一下」），所以连图片一起取回来
         BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event);
@@ -204,15 +211,18 @@ public class BotMessageService {
         List<BotImageFetcher.ImageRef> quotedImageRefs = visionProperties.isEnabled()
                 ? quoted.images()
                 : List.of();
-        if (text.isBlank() && quoted.text().isBlank() && ownImageRefs.isEmpty() && quotedImageRefs.isEmpty()) {
-            // 既没文字、没引用也没图片（表情、语音等），目前不支持
-            runtimeStatus.dropped(channel, event.groupId(), event.userId(), "空消息（表情/语音等暂不支持）");
+        if (text.isBlank() && quoted.text().isBlank() && ownImageRefs.isEmpty()
+                && quotedImageRefs.isEmpty() && !hasVoice) {
+            // 既没文字、没引用、没图片也没语音（表情等），暂不支持
+            runtimeStatus.dropped(channel, event.groupId(), event.userId(), "空消息（表情等暂不支持）");
             return;
         }
         runtimeStatus.inbound();
         // 「机器人状态」页要能看到正在和谁对话、说的什么；只引用一条消息时把引用内容当内容
-        String turnId = runtimeStatus.beginTurn(channel, event.groupId(), event.userId(),
-                !text.isBlank() ? text : (quoted.text().isBlank() ? "" : "（引用了：" + quoted.text() + "）"));
+        String turnContent = !text.isBlank()
+                ? text
+                : hasVoice ? "（语音消息）" : (quoted.text().isBlank() ? "" : "（引用了：" + quoted.text() + "）");
+        String turnId = runtimeStatus.beginTurn(channel, event.groupId(), event.userId(), turnContent);
         executor.submit(() -> {
             try {
                 BotIdentity identity = identityResolver.resolve(event.userId());
@@ -226,23 +236,57 @@ public class BotMessageService {
                     log.info("收到群临时会话: user={}, 发起群={}, 平台数据={}, OpenAI状态={}",
                             event.userId(), event.groupId(), platformFeature, openAiStatusAllowed);
                 }
+
+                String effectiveText = text;
+                if (hasVoice) {
+                    if (!speechService.transcriptionAvailable()) {
+                        if (text.isBlank()) {
+                            sendVoiceFailure(event, group, turnId, identity, platformFeature, text,
+                                    ownImageRefs.size(), 0, quotedImageRefs.size(), 0,
+                                    "语音识别还没有启用，请先发文字消息。");
+                            return;
+                        }
+                        log.info("语音识别未启用，只处理同一条消息里的文字: user={}", event.userId());
+                    } else {
+                        String transcript = speechService.transcribe(voiceInput).orElse("");
+                        if (transcript.isBlank()) {
+                            if (text.isBlank()) {
+                                sendVoiceFailure(event, group, turnId, identity, platformFeature, text,
+                                        ownImageRefs.size(), 0, quotedImageRefs.size(), 0,
+                                        "这条语音没听清，麻烦再发一次，或者直接发文字。");
+                                return;
+                            }
+                            log.info("语音识别失败，只处理同一条消息里的文字: user={}", event.userId());
+                        } else {
+                            effectiveText = joinText(text, transcript);
+                        }
+                    }
+                }
+
                 // 下载图片放在后台线程里做，不占用回调线程；自己发的与被引用的分开下，存档时能说清来源
                 List<BotImageFetcher.FetchedImage> ownImages = imageFetcher.fetch(ownImageRefs);
                 List<BotImageFetcher.FetchedImage> quotedImages = imageFetcher.fetch(quotedImageRefs);
                 List<BotImageFetcher.FetchedImage> images = new ArrayList<>(ownImages);
                 images.addAll(quotedImages);
+                boolean hasImages = !ownImageRefs.isEmpty() || !quotedImageRefs.isEmpty();
 
-                // 先存档用户消息：即使后面回答失败，也能查证「他说了什么、发了什么图」
+                // 先存档用户消息：即使后面回答失败，也能查证「他说了什么、发了什么图/语音」
                 String correlationId = archive.recordInbound(event,
-                        describeIncoming(text, ownImageRefs.size(), ownImages.size(),
-                                quotedImageRefs.size(), quotedImages.size()),
-                        kindOf(text, settings, !ownImageRefs.isEmpty() || !quotedImageRefs.isEmpty()), identity);
+                        describeIncoming(effectiveText, ownImageRefs.size(), ownImages.size(),
+                                quotedImageRefs.size(), quotedImages.size(), hasVoice),
+                        kindOf(effectiveText, settings, hasImages, hasVoice), identity);
+
+                VoiceReplyIntent voiceReply = VoiceReplyIntent.parse(effectiveText);
+                String requestText = voiceReply.requested() ? voiceReply.cleanedText() : effectiveText;
+                if (requestText.isBlank()) {
+                    requestText = "请用简短自然的方式回应我。";
+                }
 
                 GeneratedImages generated = new GeneratedImages();
                 BotReport report;
                 try {
-                    report = answer(event, text, quoted, !quotedImages.isEmpty(), settings, identity, platformFeature,
-                            openAiStatusAllowed, channel, images, generated);
+                    report = answer(event, requestText, quoted, !quotedImages.isEmpty(), settings, identity,
+                            platformFeature, openAiStatusAllowed, channel, images, generated, voiceReply);
                 } catch (Exception ex) {
                     log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                             event.userId(), identity.platformUser(), ex.getMessage());
@@ -260,7 +304,7 @@ public class BotMessageService {
 
                 SendOutcome outcome;
                 try {
-                    outcome = send(event, group, report, settings.maxReplyLength(), generated);
+                    outcome = send(event, group, report, settings, generated, voiceReply);
                 } catch (RuntimeException sendError) {
                     // 发送失败也要把这一轮从「正在处理」里摘掉，否则会永远挂在那儿
                     runtimeStatus.finishTurn(turnId, "发送失败：" + sendError.getMessage());
@@ -311,7 +355,8 @@ public class BotMessageService {
     private BotReport answer(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
                              boolean quotedHasImages, BotSettings settings, BotIdentity identity,
                              boolean platformFeature, boolean openAiStatusAllowed, BotChannel channel,
-                             List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
+                             List<BotImageFetcher.FetchedImage> images, GeneratedImages generated,
+                             VoiceReplyIntent voiceReply) {
         String prefix = settings.commandPrefix();
         // 只发图片时 text 为空，不能当命令处理，直接交给模型
         if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
@@ -319,7 +364,7 @@ public class BotMessageService {
                     openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
         }
         return askModel(event, text, quoted, quotedHasImages, settings, identity, platformFeature,
-                openAiStatusAllowed, channel, images, generated);
+                openAiStatusAllowed, channel, images, generated, voiceReply);
     }
 
     /** 纯文本包成报表：短内容仍按纯文本发出，长内容走段落渲染。 */
@@ -330,7 +375,8 @@ public class BotMessageService {
     private BotReport askModel(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
                                boolean quotedHasImages, BotSettings settings, BotIdentity identity,
                                boolean platformFeature, boolean openAiStatusAllowed, BotChannel channel,
-                               List<BotImageFetcher.FetchedImage> images, GeneratedImages generated) {
+                               List<BotImageFetcher.FetchedImage> images, GeneratedImages generated,
+                               VoiceReplyIntent voiceReply) {
         BotChatClientFactory.Persona persona = personaOf(identity, platformFeature);
         ChatClient chatClient = chatClients.get(persona, settings, identity.admin());
         if (chatClient == null) {
@@ -344,9 +390,17 @@ public class BotMessageService {
             return text(message);
         }
         String promptText = parser.buildPrompt(text, quoted.text(), !images.isEmpty(), quotedHasImages);
+        if (voiceReply != null && voiceReply.requested()) {
+            String style = voiceReply.style() == null || voiceReply.style().isBlank()
+                    ? settings.defaultVoiceStyle() : voiceReply.style();
+            if (style != null && !style.isBlank()) {
+                promptText = "（请用" + style + "的口吻组织回答；回答稍后会转成语音，不要提及这段说明。）\n" + promptText;
+            }
+        }
+        String finalPromptText = promptText;
         ChatClient.ChatClientRequestSpec request = chatClient.prompt()
                 .user(spec -> {
-                    spec.text(promptText);
+                    spec.text(finalPromptText);
                     // 图片以多模态附件交给模型；模型不支持视觉时上游会报错，由外层统一兜底
                     for (BotImageFetcher.FetchedImage image : images) {
                         byte[] bytes = image.bytes();
@@ -452,12 +506,12 @@ public class BotMessageService {
     /**
      * 发送回复。
      *
-     * <p>超过 {@code maxReplyLength} 的内容会被截断，此时改为渲染成表格 / 热力图图片 ——
-     * 渠道状态、账户余额这类内容本质是表格，图片才能完整呈现。渲染或发送图片失败时
-     * 再退回截断文本，保证「至少有东西发出去」。</p>
+     * <p>用户明确要求语音回复时，优先发送 MOSS-TTSD 合成的语音；语音不可用或发送失败时
+     * 退回文字，保证用户至少能收到答案。长回答只朗读开头，并补发完整文字。</p>
      */
-    private SendOutcome send(OneBotEvent event, boolean group, BotReport report, int maxReplyLength,
-                            GeneratedImages generated) {
+    private SendOutcome send(OneBotEvent event, boolean group, BotReport report, BotSettings settings,
+                            GeneratedImages generated, VoiceReplyIntent voiceReply) {
+        int maxReplyLength = settings.maxReplyLength();
         List<byte[]> generatedImages = generated.snapshot();
         // 先生成的图：这是用户明确要的东西，发失败要让他知道，而不是只回一句文字
         for (byte[] image : generatedImages) {
@@ -484,6 +538,27 @@ public class BotMessageService {
             report = BotReport.fromMarkdown(plain);
         }
         String truncated = parser.truncate(plain, maxReplyLength);
+
+        if (voiceReply != null && voiceReply.requested()) {
+            if (!speechService.synthesisAvailable()) {
+                sendText(event, group, "语音回复还没有启用，先用文字回复：\n" + truncated);
+                return new SendOutcome(archiveContent(truncated, generatedImages), BotMessageArchiveService.KIND_TEXT);
+            }
+            String voice = voiceReply.voice() == null || voiceReply.voice().isBlank()
+                    ? settings.defaultVoice() : voiceReply.voice();
+            var audio = speechService.synthesize(plain, voice);
+            if (audio.isPresent() && sendVoice(event, group, audio.get())) {
+                log.info("已发送语音回复: user={}, voice={}, bytes={}", event.userId(), voice, audio.get().length);
+                if (plain.length() > speechService.maxTtsChars()) {
+                    // 语音只朗读开头，长表格/长报告再补发完整文字
+                    sendText(event, group, truncated);
+                }
+                return new SendOutcome(archiveContent(plain, generatedImages), BotMessageArchiveService.KIND_VOICE);
+            }
+            sendText(event, group, "语音发送失败了，先用文字回复：\n" + truncated);
+            return new SendOutcome(archiveContent(truncated, generatedImages), BotMessageArchiveService.KIND_TEXT);
+        }
+
         if (truncated.equals(plain)) {
             sendText(event, group, plain);
             return new SendOutcome(archiveContent(plain, generatedImages), archiveKind(generatedImages));
@@ -500,8 +575,36 @@ public class BotMessageService {
         return new SendOutcome(truncated, BotMessageArchiveService.KIND_TEXT);
     }
 
+    /** 语音识别不可用或没听清时，仍然给用户一个明确回复并完成存档。 */
+    private void sendVoiceFailure(OneBotEvent event, boolean group, String turnId, BotIdentity identity,
+                                  boolean platformFeature, String text, int ownTotal, int ownFetched,
+                                  int quotedTotal, int quotedFetched, String reply) {
+        String correlationId = archive.recordInbound(event,
+                describeIncoming(text, ownTotal, ownFetched, quotedTotal, quotedFetched, true),
+                BotMessageArchiveService.KIND_VOICE, identity);
+        sendText(event, group, reply);
+        runtimeStatus.replied();
+        runtimeStatus.finishTurn(turnId, reply);
+        archive.recordOutbound(event, reply, BotMessageArchiveService.KIND_TEXT, identity,
+                personaOf(identity, platformFeature).name(), correlationId);
+    }
+
+    /** 合并同一条消息里的文字与语音转写结果。 */
+    private static String joinText(String text, String transcript) {
+        if (text == null || text.isBlank()) {
+            return transcript == null ? "" : transcript.trim();
+        }
+        if (transcript == null || transcript.isBlank()) {
+            return text.trim();
+        }
+        return text.trim() + "\n" + transcript.trim();
+    }
+
     /** 判断这条用户消息的形态，用于存档分类。 */
-    private static String kindOf(String text, BotSettings settings, boolean hasImages) {
+    private static String kindOf(String text, BotSettings settings, boolean hasImages, boolean hasVoice) {
+        if (hasVoice) {
+            return BotMessageArchiveService.KIND_VOICE;
+        }
         String prefix = settings.commandPrefix();
         if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
             return BotMessageArchiveService.KIND_COMMAND;
@@ -516,8 +619,11 @@ public class BotMessageService {
      * 配合文字内容足够用于事后查证。</p>
      */
     private static String describeIncoming(String text, int total, int fetched,
-                                           int quotedTotal, int quotedFetched) {
+                                           int quotedTotal, int quotedFetched, boolean hasVoice) {
         StringBuilder sb = new StringBuilder();
+        if (hasVoice) {
+            sb.append("[语音]");
+        }
         if (total > 0) {
             sb.append("[图片 ×").append(total);
             if (fetched < total) {
@@ -580,6 +686,12 @@ public class BotMessageService {
         } else {
             client.sendPrivateMessage(event.userId(), text);
         }
+    }
+
+    private boolean sendVoice(OneBotEvent event, boolean group, byte[] audio) {
+        return group
+                ? client.sendGroupVoice(event.groupId(), audio)
+                : client.sendPrivateVoice(event.userId(), audio);
     }
 
     private boolean sendImage(OneBotEvent event, boolean group, byte[] png) {

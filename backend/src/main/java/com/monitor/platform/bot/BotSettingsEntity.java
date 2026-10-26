@@ -27,6 +27,10 @@ public class BotSettingsEntity {
     private Integer errorAlertMinCount;
     private Double errorAlertSpikeRatio;
     private Integer errorAlertCooldownMinutes;
+    /** 默认 MOSS 音色，例如 fnlp/MOSS-TTSD-v0.5:alex。 */
+    private String defaultVoice;
+    /** 默认语音语气/风格。 */
+    private String defaultVoiceStyle;
     private OffsetDateTime updatedAt;
 
     public Integer getId() { return id; }
@@ -59,6 +63,10 @@ public class BotSettingsEntity {
     public void setErrorAlertSpikeRatio(Double errorAlertSpikeRatio) { this.errorAlertSpikeRatio = errorAlertSpikeRatio; }
     public Integer getErrorAlertCooldownMinutes() { return errorAlertCooldownMinutes; }
     public void setErrorAlertCooldownMinutes(Integer errorAlertCooldownMinutes) { this.errorAlertCooldownMinutes = errorAlertCooldownMinutes; }
+    public String getDefaultVoice() { return defaultVoice; }
+    public void setDefaultVoice(String defaultVoice) { this.defaultVoice = defaultVoice; }
+    public String getDefaultVoiceStyle() { return defaultVoiceStyle; }
+    public void setDefaultVoiceStyle(String defaultVoiceStyle) { this.defaultVoiceStyle = defaultVoiceStyle; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

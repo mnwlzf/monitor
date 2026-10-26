@@ -20,6 +20,8 @@ import java.util.Set;
  * @param errorAlertMinCount 最小触发数量
  * @param errorAlertSpikeRatio 突增倍数
  * @param errorAlertCooldownMinutes 告警冷却分钟数
+ * @param defaultVoice MOSS 默认音色
+ * @param defaultVoiceStyle 默认语音语气/风格
  * @param updatedAt       最后保存时间
  */
 public record BotSettingsResponse(
@@ -37,6 +39,21 @@ public record BotSettingsResponse(
         int errorAlertMinCount,
         double errorAlertSpikeRatio,
         int errorAlertCooldownMinutes,
+        String defaultVoice,
+        String defaultVoiceStyle,
         OffsetDateTime updatedAt
 ) {
+
+    /** 兼容旧调用方：语音字段使用默认值。 */
+    public BotSettingsResponse(boolean enabled, Set<String> allowedGroups, Set<String> allowedUsers,
+                               Set<String> platformGroups, boolean requireMention, String commandPrefix,
+                               int maxReplyLength, int memoryWindow, boolean webSearchForNonAdmin,
+                               boolean errorAlertEnabled, int errorAlertWindowMinutes, int errorAlertMinCount,
+                               double errorAlertSpikeRatio, int errorAlertCooldownMinutes,
+                               OffsetDateTime updatedAt) {
+        this(enabled, allowedGroups, allowedUsers, platformGroups, requireMention, commandPrefix,
+                maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
+                errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
+                "fnlp/MOSS-TTSD-v0.5:alex", "自然、友好、简洁", updatedAt);
+    }
 }

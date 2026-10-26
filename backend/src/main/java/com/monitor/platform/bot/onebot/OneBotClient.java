@@ -64,6 +64,16 @@ public class OneBotClient {
         return sendImage("/send_private_msg", "user_id", userId, png);
     }
 
+    /** 发语音到群；MOSS-TTSD 返回的 mp3 直接以 base64 record 消息段发送。 */
+    public boolean sendGroupVoice(long groupId, byte[] audio) {
+        return sendVoice("/send_group_msg", "group_id", groupId, audio);
+    }
+
+    /** 发语音到私聊/临时会话；返回值含义同上。 */
+    public boolean sendPrivateVoice(long userId, byte[] audio) {
+        return sendVoice("/send_private_msg", "user_id", userId, audio);
+    }
+
     /** OneBot 地址（仅用于状态展示）。 */
     public String baseUrl() {
         return properties.getApiBaseUrl();
@@ -111,6 +121,25 @@ public class OneBotClient {
      */
     public String fetchMessageText(String messageId) {
         return textOf(fetchMessage(messageId));
+    }
+
+    /**
+     * 让 OneBot 把语音转成可读取的文件（通常是 mp3）。
+     */
+    public JsonNode getRecord(String file, String fileId, String outFormat) {
+        if (!properties.isConfigured() || ((file == null || file.isBlank()) && (fileId == null || fileId.isBlank()))) {
+            return null;
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        if (file != null && !file.isBlank()) body.put("file", file.trim());
+        if (fileId != null && !fileId.isBlank()) body.put("file_id", fileId.trim());
+        if (outFormat != null && !outFormat.isBlank()) body.put("out_format", outFormat.trim());
+        try {
+            return postData("/get_record", body);
+        } catch (RuntimeException ex) {
+            log.debug("获取语音文件失败: file={}, fileId={}, err={}", file, fileId, ex.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -221,6 +250,16 @@ public class OneBotClient {
                 "type", "image",
                 "data", Map.of("file", "base64://" + Base64.getEncoder().encodeToString(png)));
         return dispatch(path, idField, id, List.of(segment), "image(" + png.length + " bytes)");
+    }
+
+    private boolean sendVoice(String path, String idField, long id, byte[] audio) {
+        if (audio == null || audio.length == 0) {
+            return false;
+        }
+        Map<String, Object> segment = Map.of(
+                "type", "record",
+                "data", Map.of("file", "base64://" + Base64.getEncoder().encodeToString(audio)));
+        return dispatch(path, idField, id, List.of(segment), "record(" + audio.length + " bytes)");
     }
 
     /**

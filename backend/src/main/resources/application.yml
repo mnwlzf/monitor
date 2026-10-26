@@ -97,6 +97,22 @@ monitor:
       max-images-per-message: ${MONITOR_BOT_VISION_MAX_IMAGES:3}
       timeout: ${MONITOR_BOT_VISION_TIMEOUT:15s}
 
+    # 语音消息：SiliconFlow 语音转写 + MOSS-TTSD 语音回复。
+    # 只有用户明确说「语音回复 / 用某音色语音回复」时才合成语音。
+    speech:
+      enabled: ${MONITOR_BOT_SPEECH_ENABLED:false}
+      base-url: ${MONITOR_BOT_SPEECH_BASE_URL:https://api.siliconflow.cn}
+      api-key: ${MONITOR_BOT_SPEECH_API_KEY:}
+      transcribe-model: ${MONITOR_BOT_SPEECH_TRANSCRIBE_MODEL:XingChenAGI/XingChenASR-V3.2}
+      fallback-transcribe-model: ${MONITOR_BOT_SPEECH_FALLBACK_TRANSCRIBE_MODEL:FunAudioLLM/SenseVoiceSmall}
+      tts-model: ${MONITOR_BOT_SPEECH_TTS_MODEL:fnlp/MOSS-TTSD-v0.5}
+      fallback-voice: ${MONITOR_BOT_SPEECH_FALLBACK_VOICE:fnlp/MOSS-TTSD-v0.5:alex}
+      response-format: ${MONITOR_BOT_SPEECH_RESPONSE_FORMAT:mp3}
+      record-format: ${MONITOR_BOT_SPEECH_RECORD_FORMAT:mp3}
+      max-audio-bytes: ${MONITOR_BOT_SPEECH_MAX_AUDIO_BYTES:15728640}
+      timeout: ${MONITOR_BOT_SPEECH_TIMEOUT:90s}
+      max-tts-chars: ${MONITOR_BOT_SPEECH_MAX_TTS_CHARS:800}
+
     # 消息存档：记录「谁说了什么、机器人回了什么、当时是什么身份」，
     # 用于事后查证。写入是 best-effort，失败不影响机器人回复。
     archive:

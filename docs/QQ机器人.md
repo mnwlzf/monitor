@@ -96,6 +96,26 @@ MONITOR_BOT_REQUIRE_MENTION=true
 
 重启后日志会出现 `QQ 机器人已接入大模型，支持自然语言问答` 或 `未配置大模型，QQ 机器人只支持命令`。
 
+## 语音消息与语音回复
+
+语音能力使用 **SiliconFlow**，与聊天模型相互独立：
+
+```dotenv
+MONITOR_BOT_SPEECH_ENABLED=true
+MONITOR_BOT_SPEECH_API_KEY=<SiliconFlow API Key>
+MONITOR_BOT_SPEECH_TRANSCRIBE_MODEL=XingChenAGI/XingChenASR-V3.2
+MONITOR_BOT_SPEECH_FALLBACK_TRANSCRIBE_MODEL=FunAudioLLM/SenseVoiceSmall
+MONITOR_BOT_SPEECH_TTS_MODEL=fnlp/MOSS-TTSD-v0.5
+MONITOR_BOT_SPEECH_FALLBACK_VOICE=fnlp/MOSS-TTSD-v0.5:alex
+```
+
+- 用户发语音时，先由 `XingChenASR-V3.2` 转成文字；失败自动回退 `SenseVoiceSmall`。
+- 只有明确说「语音回复」「发条语音」「用 alex 音色语音回复」时才合成语音。
+- 语音回复由 `MOSS-TTSD-v0.5` 合成，OneBot 以 `record` 消息段发送。
+- 页面「系统设置 → QQ 机器人 → 语音消息与语音回复」可配置默认 MOSS 音色和默认语气；保存即生效。
+- MOSS-TTSD 负责音色/音质；默认语气用于约束大模型组织回复措辞。
+
+
 ## 3. 使用
 
 在**指定群**里 `@机器人`，或（仅管理员）私聊机器人后发送。

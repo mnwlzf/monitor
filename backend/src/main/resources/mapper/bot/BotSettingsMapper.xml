@@ -18,6 +18,8 @@
         <result column="error_alert_min_count" property="errorAlertMinCount"/>
         <result column="error_alert_spike_ratio" property="errorAlertSpikeRatio"/>
         <result column="error_alert_cooldown_minutes" property="errorAlertCooldownMinutes"/>
+        <result column="default_voice" property="defaultVoice"/>
+        <result column="default_voice_style" property="defaultVoiceStyle"/>
         <result column="updated_at" property="updatedAt"/>
     </resultMap>
 
@@ -25,7 +27,8 @@
         SELECT id, enabled, allowed_groups, allowed_users, platform_groups, require_mention,
                command_prefix, max_reply_length, memory_window, web_search_for_non_admin,
                error_alert_enabled, error_alert_window_minutes, error_alert_min_count,
-               error_alert_spike_ratio, error_alert_cooldown_minutes, updated_at
+               error_alert_spike_ratio, error_alert_cooldown_minutes, default_voice,
+               default_voice_style, updated_at
         FROM bot_settings
         WHERE id = 1
     </select>
@@ -35,12 +38,14 @@
             id, enabled, allowed_groups, allowed_users, platform_groups, require_mention,
             command_prefix, max_reply_length, memory_window, web_search_for_non_admin,
             error_alert_enabled, error_alert_window_minutes, error_alert_min_count,
-            error_alert_spike_ratio, error_alert_cooldown_minutes, updated_at
+            error_alert_spike_ratio, error_alert_cooldown_minutes, default_voice,
+            default_voice_style, updated_at
         ) VALUES (
             1, #{enabled}, #{allowedGroups}, #{allowedUsers}, #{platformGroups}, #{requireMention},
             #{commandPrefix}, #{maxReplyLength}, #{memoryWindow}, #{webSearchForNonAdmin},
             #{errorAlertEnabled}, #{errorAlertWindowMinutes}, #{errorAlertMinCount},
-            #{errorAlertSpikeRatio}, #{errorAlertCooldownMinutes}, #{updatedAt}
+            #{errorAlertSpikeRatio}, #{errorAlertCooldownMinutes}, #{defaultVoice},
+            #{defaultVoiceStyle}, #{updatedAt}
         )
         ON CONFLICT (id) DO UPDATE SET
             enabled = EXCLUDED.enabled,
@@ -57,6 +62,8 @@
             error_alert_min_count = EXCLUDED.error_alert_min_count,
             error_alert_spike_ratio = EXCLUDED.error_alert_spike_ratio,
             error_alert_cooldown_minutes = EXCLUDED.error_alert_cooldown_minutes,
+            default_voice = EXCLUDED.default_voice,
+            default_voice_style = EXCLUDED.default_voice_style,
             updated_at = EXCLUDED.updated_at
     </insert>
 </mapper>
