@@ -418,6 +418,14 @@ public class Sub2ApiAdapter {
     /**
      * 获取访问令牌；缓存不存在时先登录，再重新读取缓存。
      */
+    /** 是否已有该账号的 Sub2API JWT 缓存。 */
+    public boolean hasCachedAccessToken(String baseUrl, String email) {
+        if (StrUtil.isBlank(email)) {
+            return false;
+        }
+        return StrUtil.isNotEmpty(stringRedisTemplate.opsForValue().get(tokenKey(baseUrl, email)));
+    }
+
     private String resolveAccessToken(String baseUrl, String email, String password) {
         String token = stringRedisTemplate.opsForValue().get(tokenKey(baseUrl, email));
         if (StrUtil.isNotEmpty(token)) {

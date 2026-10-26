@@ -2,7 +2,6 @@ package com.monitor.platform.bot.key;
 
 import com.monitor.platform.adapter.sub2api.Sub2ApiAdapter;
 import com.monitor.platform.adapter.sub2api.model.Sub2GroupsResponse;
-import com.monitor.platform.adapter.sub2api.model.Sub2ProfileResponse;
 import com.monitor.platform.adapter.sub2api.model.Sub2KeysResponse;
 import com.monitor.platform.collector.application.AccountCredentialService;
 import com.monitor.platform.collector.repository.AccountRepository;
@@ -166,50 +165,42 @@ public class Sub2KeyTools {
                         "没有配置「号池监控源」平台（用户自建的 Sub2API），请先在平台页面勾选"));
 
         List<AccountEntity> accounts = accountRepository.findEnabledByPlatformId(platform.getId());
-        if (accounts.isEmpty()) {
-            throw new IllegalStateException("号池监控源平台下没有启用账号：" + platform.getPlatformName());
+        List<String> adminEmails = userCache.adminEmails();
+        if (adminEmails.isEmpty()) {
+            throw new IllegalStateException(
+                    "Redis 缓存 monitor:sub2api:users 中没有 Sub2API 管理员，请先在身份识别页面同步用户");
         }
 
-        // 系统设置「身份识别与管理员」的 Sub2API 用户缓存里已经有 role 信息，
-        // 优先用它精确匹配账号，避免不必要的逐个登录探测。
-        for (AccountEntity account : accounts) {
-            if (!isBlank(account.getEmail()) && userCache.isAdmin(account.getEmail())) {
+        for (String adminEmail : adminEmails) {
+            AccountEntity matched = accounts.stream()
+                    .filter(account -> adminEmail.equalsIgnoreCase(account.getEmail()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (matched != null) {
                 try {
-                    String password = preparePassword(platform, account);
-                    log.info("建密钥使用 Sub2API 系统管理员账号: platformId={}, email={}",
-                            platform.getId(), account.getEmail());
-                    return new Context(platform.getUrl(), account.getEmail(), password);
+                    String password = preparePassword(platform, matched);
+                    log.info("建密钥使用 Sub2API 系统管理员账号: platformId={}, email={}, source=account",
+                            platform.getId(), adminEmail);
+                    return new Context(platform.getUrl(), adminEmail, password);
                 } catch (Exception ex) {
-                    log.warn("准备 Sub2API 管理员账号失败: platformId={}, email={}, reason={}",
-                            platform.getId(), account.getEmail(), ex.getMessage());
+                    log.warn("准备 Sub2API 管理员账号凭证失败，尝试使用 JWT 缓存: email={}, reason={}",
+                            adminEmail, ex.getMessage());
                 }
             }
-        }
 
-        // 创建密钥必须使用 Sub2API 系统管理员账号，不能使用第一个普通账号，
-        // 也不能使用监控平台当前发命令的管理员身份。
-        for (AccountEntity account : accounts) {
-            if (isBlank(account.getEmail())) {
-                continue;
+            if (sub2ApiAdapter.hasCachedAccessToken(platform.getUrl(), adminEmail)) {
+                log.info("建密钥使用 Sub2API 系统管理员账号: platformId={}, email={}, source=redis-token",
+                        platform.getId(), adminEmail);
+                return new Context(platform.getUrl(), adminEmail, null);
             }
-            try {
-                String password = preparePassword(platform, account);
-                Sub2ProfileResponse profile = sub2ApiAdapter.fetchProfile(
-                        platform.getUrl(), account.getEmail(), password);
-                if (profile != null && profile.data() != null
-                        && "admin".equalsIgnoreCase(profile.data().role())) {
-                    log.info("建密钥使用 Sub2API 系统管理员账号: platformId={}, email={}",
-                            platform.getId(), account.getEmail());
-                    return new Context(platform.getUrl(), account.getEmail(), password);
-                }
-            } catch (Exception ex) {
-                log.warn("检查 Sub2API 账号角色失败: platformId={}, email={}, reason={}",
-                        platform.getId(), account.getEmail(), ex.getMessage());
-            }
+
+            log.warn("Sub2API 管理员既没有号池源账号凭证，也没有 JWT 缓存: platformId={}, email={}",
+                    platform.getId(), adminEmail);
         }
 
         throw new IllegalStateException(
-                "号池监控源平台下没有找到 Sub2API 系统管理员账号（role=admin），请先配置管理员账号");
+                "已从 Redis 找到 Sub2API 管理员，但没有可用的号池源账号凭证或 JWT 缓存，无法创建密钥");
     }
 
     /** 与采集链路保持一致：手动 Token 账号先导入缓存；否则读取账号密码。 */

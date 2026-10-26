@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.OffsetDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -125,6 +126,14 @@ public class Sub2ApiUserCache {
     public long size() {
         Long size = redis.opsForHash().size(USERS_KEY);
         return size == null ? 0L : size;
+    }
+
+    /** 缓存中 role=admin 的邮箱列表。 */
+    public List<String> adminEmails() {
+        return redis.opsForHash().entries(USERS_KEY).entrySet().stream()
+                .filter(entry -> "admin".equalsIgnoreCase(String.valueOf(entry.getValue())))
+                .map(entry -> String.valueOf(entry.getKey()))
+                .toList();
     }
 
     /** 缓存中角色为管理员的用户数（Sub2API 侧）。 */
