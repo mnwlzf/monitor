@@ -110,6 +110,16 @@ monitor:
       # 允许按 <QQ号>@xx.com 的邮箱自动匹配 QQ，无需手动绑定
       qq-local-part-match: ${MONITOR_BOT_IDENTITY_QQ_MATCH:true}
 
+  # NapCat WebUI：读取容器日志与离线扫码登录；配置目录由 compose 只读挂载。
+  napcat:
+    enabled: ${MONITOR_NAPCAT_ENABLED:true}
+    webui-base-url: ${MONITOR_NAPCAT_WEBUI_BASE_URL:http://napcat:6099}
+    webui-config: ${MONITOR_NAPCAT_WEBUI_CONFIG:/app/napcat-config/webui.json}
+    log-buffer-size: ${MONITOR_NAPCAT_LOG_BUFFER_SIZE:2000}
+    max-log-line-length: ${MONITOR_NAPCAT_MAX_LOG_LINE_LENGTH:8192}
+    reconnect-max-delay: ${MONITOR_NAPCAT_RECONNECT_MAX_DELAY:30s}
+    credential-ttl: ${MONITOR_NAPCAT_CREDENTIAL_TTL:30m}
+
   # 天气查询（uapis.cn 免费接口，无需注册与 Key）。
   # 与平台无关，因此管理员 / 平台用户 / 陌生人都能用。
   weather:

@@ -50,6 +50,9 @@ services:
       # 默认直连同 compose 内的 napcat 容器（容器内端口固定 3000）
       MONITOR_BOT_API_BASE_URL: ${MONITOR_BOT_API_BASE_URL:-http://napcat:3000}
       MONITOR_BOT_API_TOKEN: ${MONITOR_BOT_API_TOKEN:-}
+      MONITOR_NAPCAT_ENABLED: ${MONITOR_NAPCAT_ENABLED:-true}
+      MONITOR_NAPCAT_WEBUI_BASE_URL: ${MONITOR_NAPCAT_WEBUI_BASE_URL:-http://napcat:6099}
+      MONITOR_NAPCAT_WEBUI_CONFIG: ${MONITOR_NAPCAT_WEBUI_CONFIG:-/app/napcat-config/webui.json}
       MONITOR_BOT_ALLOWED_GROUPS: ${MONITOR_BOT_ALLOWED_GROUPS:-}
       MONITOR_BOT_ALLOWED_USERS: ${MONITOR_BOT_ALLOWED_USERS:-}
       MONITOR_BOT_REQUIRE_MENTION: ${MONITOR_BOT_REQUIRE_MENTION:-true}
@@ -72,6 +75,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs:/app/logs
+      - /app/napcat/config:/app/napcat-config:ro
     # 数据库/Redis 若部署在宿主机，可用 host.docker.internal 访问
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -88,8 +92,10 @@ services:
   #   napcat → monitor:8080   反向 HTTP 上报（/api/v1/bot/onebot）
   #
   # 首次使用：
-  #   1) docker compose logs napcat          拿 WebUI 的 token
-  #   2) 本机执行 ssh -L 6099:127.0.0.1:6099 root@<服务器IP>，
+  #   1) 启动后打开 Monitor 的「机器人状态」页，可直接查看实时日志并扫码登录
+  #      （app 只读挂载 napcat 的 webui.json 获取 token，不需要再开 SSH 隧道）
+  #   2) 如仍需原生 WebUI：docker compose logs napcat 拿 token，
+  #      ssh -L 6099:127.0.0.1:6099 root@<服务器IP>，
   #      浏览器打开 http://127.0.0.1:6099/webui?token=<token> 扫码登录 QQ（建议小号）
   #   3) 在 WebUI 的「网络配置」里开：
   #        - HTTP 服务端 0.0.0.0:3000

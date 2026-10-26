@@ -566,3 +566,32 @@ export interface BotStatus {
     maxPerMinute: number
   }
 }
+
+/** NapCat WebUI 的 QQ 登录状态。二维码 URL 仅在未登录时有意义。 */
+export interface NapCatStatus {
+  configured: boolean
+  reachable: boolean
+  login: boolean
+  offline: boolean
+  loginPhase: string
+  qrCodeUrl: string | null
+  loginError: string | null
+  error: string | null
+  checkedAt: string
+}
+
+/** 一行 NapCat 实时日志。 */
+export interface NapCatLogLine {
+  time: string
+  level: string
+  message: string
+}
+
+/** NapCat 实时日志快照。 */
+export interface NapCatLogs {
+  configured: boolean
+  connected: boolean
+  lines: NapCatLogLine[]
+  updatedAt: string | null
+  error: string | null
+}

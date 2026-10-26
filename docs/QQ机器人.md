@@ -31,15 +31,18 @@ docker compose up -d
 # 2) 从日志里拿 WebUI 的登录 token
 docker compose logs napcat
 
-# 3) 本机执行 SSH 隧道（WebUI 只绑在服务器的 127.0.0.1）
-ssh -L 6099:127.0.0.1:6099 root@<服务器IP>
-
-# 4) 浏览器打开 WebUI，扫码登录 QQ（建议用**小号**：自建机器人有风控/封号风险）
-#    http://127.0.0.1:6099/webui?token=<上一步日志里的 token>
+# 3) 启动 Monitor，打开管理端的「机器人状态」页
+#    页面会直接显示 NapCat 实时日志；未登录时会显示二维码，手机 QQ 扫码即可。
 ```
 
+> 也可以继续使用 NapCat 原生 WebUI：`ssh -L 6099:127.0.0.1:6099 root@<服务器IP>`，
+> 再打开 `http://127.0.0.1:6099/webui?token=<上一步日志里的 token>`。
+>
 > 登录态与配置直接挂在宿主机 `/app/napcat/` 下（`qq` / `config` / `plugins` 三个子目录），
 > 重启容器不用重新扫码。**NapCat 侧不需要 `.env`**：端口与目录都写在 `compose.yaml` 的 napcat 服务里，部署目录不同就改那三行 volume。
+>
+> Monitor 会把 `/app/napcat/config` 以只读方式挂载到容器内，用于读取 WebUI token；
+> 不会修改 NapCat 配置，也不会把 token 写进数据库或日志。
 
 登录成功后，在 WebUI 的「网络配置」里开两样：
 
@@ -79,6 +82,11 @@ MONITOR_BOT_ENABLED=true
 MONITOR_BOT_WEBHOOK_TOKEN=<与 OneBot 侧一致>
 MONITOR_BOT_API_BASE_URL=http://napcat:3000
 MONITOR_BOT_API_TOKEN=<OneBot 的 access token，没设置就留空>
+
+# NapCat 日志与扫码登录（与上面的 compose 内置 NapCat 配套）
+MONITOR_NAPCAT_ENABLED=true
+MONITOR_NAPCAT_WEBUI_BASE_URL=http://napcat:6099
+MONITOR_NAPCAT_WEBUI_CONFIG=/app/napcat-config/webui.json
 
 # 白名单：逗号分隔的群号 / QQ，留空表示不限制（建议显式配置）
 MONITOR_BOT_ALLOWED_GROUPS=123456789

@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotAdmin, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NotificationSettings, QqRecipient, QqTargetType } from '../types'
+import type { BotAdmin, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -200,4 +200,19 @@ export async function getBotArchiveStats(): Promise<BotMessageArchiveStats> {
 /** 读取机器人运行状态（含一次 OneBot 实时探活）。 */
 export async function getBotStatus(): Promise<BotStatus> {
   return apiRequest<BotStatus>('/api/v1/settings/bot/status')
+}
+
+/** 读取 NapCat 当前 QQ 登录状态；离线时包含扫码 URL。 */
+export async function getNapCatStatus(): Promise<NapCatStatus> {
+  return apiRequest<NapCatStatus>('/api/v1/settings/napcat/status')
+}
+
+/** 请求 NapCat 刷新二维码，并返回最新登录状态。 */
+export async function refreshNapCatQrCode(): Promise<NapCatStatus> {
+  return apiRequest<NapCatStatus>('/api/v1/settings/napcat/qrcode/refresh', { method: 'POST' })
+}
+
+/** 读取 NapCat 实时日志缓冲。 */
+export async function getNapCatLogs(limit = 500): Promise<NapCatLogs> {
+  return apiRequest<NapCatLogs>(`/api/v1/settings/napcat/logs?limit=${limit}`)
 }

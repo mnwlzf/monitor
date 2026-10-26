@@ -12,7 +12,7 @@
           </div>
           <div class="status-actions">
             <el-switch v-model="autoRefresh" active-text="自动刷新" />
-            <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
+            <el-button :icon="Refresh" :loading="loading" @click="refreshAll">刷新</el-button>
           </div>
         </div>
       </template>
@@ -55,6 +55,110 @@
             </el-tag>
             <div class="status-card-sub">{{ status.imageGen.model || '未配置' }}</div>
             <div class="status-card-sub">限频 {{ status.imageGen.maxPerMinute }} 张 / 分钟</div>
+          </div>
+        </div>
+
+        <div class="status-section napcat-section">
+          <div class="napcat-heading">
+            <div>
+              <h4>NapCat 登录与实时日志</h4>
+              <p>直接查看 NapCat 的实时运行日志；掉线后无需 SSH 隧道，在这里扫码即可重新登录。</p>
+            </div>
+            <div class="napcat-heading-actions">
+              <el-tag :type="napcatStatusTagType" effect="plain">{{ napcatStatusText }}</el-tag>
+              <el-button
+                size="small"
+                :loading="napcatRefreshing"
+                :disabled="!napcatStatus?.configured || napcatStatus?.login"
+                @click="refreshNapCatQrCode"
+              >刷新二维码</el-button>
+            </div>
+          </div>
+
+          <el-alert v-if="napcatError" type="error" :closable="false" show-icon :title="napcatError" />
+
+          <div v-if="napcatStatus" class="napcat-login-panel">
+            <div class="napcat-login-meta">
+              <el-alert
+                v-if="napcatStatus.error"
+                type="error"
+                :closable="false"
+                show-icon
+                :title="napcatStatus.error"
+              />
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="QQ 登录">
+                  <el-tag :type="napcatStatus.login ? 'success' : 'warning'" effect="plain" size="small">
+                    {{ napcatStatus.login ? '已登录' : '未登录' }}
+                  </el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="登录阶段">{{ napcatPhaseLabel }}</el-descriptions-item>
+                <el-descriptions-item label="WebUI">
+                  {{ napcatStatus.configured ? (napcatStatus.reachable ? '可达' : '不可达') : '未配置' }}
+                </el-descriptions-item>
+                <el-descriptions-item label="最近检查">{{ formatTime(napcatStatus.checkedAt) }}</el-descriptions-item>
+              </el-descriptions>
+              <el-alert
+                v-if="napcatStatus.loginError"
+                type="warning"
+                :closable="false"
+                show-icon
+                :title="napcatStatus.loginError"
+              />
+            </div>
+
+            <div v-if="!napcatStatus.login" class="napcat-qr-wrap">
+              <div v-if="qrDataUrl" class="napcat-qr-box">
+                <img :src="qrDataUrl" alt="QQ 登录二维码" class="napcat-qr-image" />
+              </div>
+              <el-empty v-else description="等待 NapCat 生成二维码" :image-size="72" />
+              <div class="napcat-qr-tip">
+                <p>使用手机 QQ 扫码，并在手机上确认登录。二维码过期时点右上角「刷新二维码」。</p>
+                <el-input
+                  v-if="napcatStatus.qrCodeUrl"
+                  :model-value="napcatStatus.qrCodeUrl"
+                  readonly
+                  size="small"
+                  class="napcat-qr-url"
+                >
+                  <template #append>
+                    <el-button @click="copyQrUrl">复制链接</el-button>
+                  </template>
+                </el-input>
+              </div>
+            </div>
+            <div v-else class="napcat-online">
+              <el-tag type="success" effect="dark" size="large">QQ 在线，无需扫码</el-tag>
+              <span>如果 QQ 掉线，页面会自动显示新的登录二维码。</span>
+            </div>
+          </div>
+
+          <div class="napcat-log-toolbar">
+            <el-select v-model="logLevel" size="small" class="napcat-level-select">
+              <el-option label="全部级别" value="all" />
+              <el-option label="ERROR" value="error" />
+              <el-option label="WARN" value="warn" />
+              <el-option label="INFO" value="info" />
+              <el-option label="DEBUG" value="debug" />
+            </el-select>
+            <el-input v-model="logKeyword" size="small" clearable placeholder="搜索日志..." class="napcat-log-search" />
+            <el-switch v-model="autoScroll" active-text="自动滚动" />
+            <span class="napcat-log-meta">
+              {{ filteredLogs.length }} / {{ napcatLogs?.lines.length ?? 0 }} 行
+              <template v-if="napcatLogs?.updatedAt"> · {{ formatTime(napcatLogs.updatedAt) }}</template>
+            </span>
+          </div>
+          <div ref="logViewport" class="napcat-log-console">
+            <el-empty v-if="filteredLogs.length === 0" description="暂无日志" :image-size="60" />
+            <div v-for="(line, index) in filteredLogs" :key="`${line.time}-${index}`" class="napcat-log-line">
+              <span class="napcat-log-time">{{ line.time }}</span>
+              <span class="napcat-log-level" :class="`napcat-level-${line.level.toLowerCase()}`">{{ line.level.toUpperCase() }}</span>
+              <span class="napcat-log-message">{{ line.message }}</span>
+            </div>
+          </div>
+          <div v-if="napcatLogError" class="napcat-log-error">{{ napcatLogError }}</div>
+          <div v-else-if="napcatLogs && !napcatLogs.connected" class="napcat-log-error">
+            {{ napcatLogs.error || '正在连接 NapCat 日志流…' }}
           </div>
         </div>
 
@@ -164,10 +268,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import { getBotStatus } from '../api/settings'
-import type { BotStatus } from '../types'
+import QRCode from 'qrcode'
+import { getBotStatus, getNapCatLogs, getNapCatStatus, refreshNapCatQrCode as requestNapCatQrRefresh } from '../api/settings'
+import type { BotStatus, NapCatLogs, NapCatStatus } from '../types'
 
 /** 自动刷新间隔（毫秒）。状态页每次刷新会顺带探活一次 OneBot，5 秒足够且不打扰。 */
 const REFRESH_INTERVAL = 5000
@@ -180,6 +286,19 @@ const loading = ref(false)
 const error = ref('')
 const autoRefresh = ref(true)
 let timer: number | undefined
+let napcatLogTimer: number | undefined
+
+const napcatStatus = ref<NapCatStatus | null>(null)
+const napcatLogs = ref<NapCatLogs | null>(null)
+const napcatError = ref('')
+const napcatLogError = ref('')
+const napcatRefreshing = ref(false)
+const qrDataUrl = ref('')
+const logLevel = ref('all')
+const logKeyword = ref('')
+const autoScroll = ref(true)
+const logViewport = ref<HTMLElement | null>(null)
+let logRequestPending = false
 
 const onebotText = computed(() => {
   const onebot = status.value?.onebot
@@ -197,21 +316,155 @@ const onebotTagType = computed(() => {
 
 const reasonEntries = computed(() => Object.entries(status.value?.dropReasons ?? {}))
 
+const napcatStatusText = computed(() => {
+  const current = napcatStatus.value
+  if (!current) return '未加载'
+  if (!current.configured) return '未配置'
+  if (!current.reachable) return '不可达'
+  if (current.login) return '已登录'
+  if (current.offline) return '离线'
+  return '等待登录'
+})
+
+const napcatStatusTagType = computed(() => {
+  const current = napcatStatus.value
+  if (!current || !current.configured || !current.reachable) return 'danger'
+  if (current.login) return 'success'
+  return 'warning'
+})
+
+const napcatPhaseLabel = computed(() => {
+  const phase = napcatStatus.value?.loginPhase ?? ''
+  const labels: Record<string, string> = {
+    ready: '已登录',
+    waiting_qrcode: '等待扫码',
+    qrcode_scanned: '已扫码，等待确认',
+    initializing: '正在启动',
+    reconnecting: '正在重连',
+    offline: '离线',
+  }
+  return labels[phase] || phase || '—'
+})
+
+const filteredLogs = computed(() => {
+  const lines = napcatLogs.value?.lines ?? []
+  const level = logLevel.value
+  const keyword = logKeyword.value.trim().toLowerCase()
+  return lines.filter((line) => {
+    if (level !== 'all' && line.level.toLowerCase() !== level) return false
+    if (keyword && !`${line.time} ${line.level} ${line.message}`.toLowerCase().includes(keyword)) return false
+    return true
+  })
+})
+
 async function load() {
-  loading.value = true
+  const showLoading = !status.value
+  if (showLoading) loading.value = true
   try {
     status.value = await getBotStatus()
     error.value = ''
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
+    if (showLoading) loading.value = false
+  }
+  await loadNapCatStatus()
+}
+
+async function loadNapCatStatus() {
+  try {
+    napcatStatus.value = await getNapCatStatus()
+    napcatError.value = ''
+  } catch (e) {
+    napcatError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function loadNapCatLogs() {
+  if (logRequestPending || document.visibilityState === 'hidden') return
+  logRequestPending = true
+  try {
+    const previousUpdatedAt = napcatLogs.value?.updatedAt
+    const next = await getNapCatLogs(500)
+    const changed = next.updatedAt !== previousUpdatedAt
+    napcatLogs.value = next
+    napcatLogError.value = ''
+    if (changed && autoScroll.value) await scrollLogsToBottom()
+  } catch (e) {
+    napcatLogError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    logRequestPending = false
+  }
+}
+
+async function refreshAll() {
+  loading.value = true
+  try {
+    await Promise.all([load(), loadNapCatLogs()])
+  } finally {
     loading.value = false
   }
 }
 
+async function refreshNapCatQrCode() {
+  napcatRefreshing.value = true
+  try {
+    napcatStatus.value = await requestNapCatQrRefresh()
+    napcatError.value = ''
+    ElMessage.success('已请求 NapCat 刷新二维码')
+  } catch (e) {
+    napcatError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    napcatRefreshing.value = false
+  }
+}
+
+async function scrollLogsToBottom() {
+  await nextTick()
+  const viewport = logViewport.value
+  if (viewport) viewport.scrollTop = viewport.scrollHeight
+}
+
+async function copyQrUrl() {
+  const url = napcatStatus.value?.qrCodeUrl
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+    ElMessage.success('二维码链接已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择链接')
+  }
+}
+
+async function renderQrCode(url: string | null | undefined) {
+  if (!url || napcatStatus.value?.login) {
+    qrDataUrl.value = ''
+    return
+  }
+  try {
+    qrDataUrl.value = await QRCode.toDataURL(url, {
+      width: 280,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#111827', light: '#ffffff' },
+    })
+  } catch (e) {
+    qrDataUrl.value = ''
+    napcatError.value = e instanceof Error ? `二维码生成失败：${e.message}` : '二维码生成失败'
+  }
+}
+
+watch(() => napcatStatus.value?.qrCodeUrl, renderQrCode)
+watch([logLevel, logKeyword], () => {
+  if (autoScroll.value) void scrollLogsToBottom()
+})
+
 function startTimer() {
   stopTimer()
-  if (autoRefresh.value) timer = window.setInterval(load, REFRESH_INTERVAL)
+  if (autoRefresh.value) {
+    timer = window.setInterval(load, REFRESH_INTERVAL)
+    napcatLogTimer = window.setInterval(loadNapCatLogs, 2000)
+  }
 }
 
 function stopTimer() {
@@ -219,12 +472,17 @@ function stopTimer() {
     window.clearInterval(timer)
     timer = undefined
   }
+  if (napcatLogTimer !== undefined) {
+    window.clearInterval(napcatLogTimer)
+    napcatLogTimer = undefined
+  }
 }
 
 watch(autoRefresh, startTimer)
 
 onMounted(() => {
   load()
+  loadNapCatLogs()
   startTimer()
   clock = window.setInterval(() => {
     now.value = Date.now()
@@ -390,5 +648,205 @@ function formatUptime(seconds: number) {
 .status-danger {
   color: var(--el-color-danger);
   font-weight: 600;
+}
+
+.napcat-section {
+  padding: 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-fill-color-blank);
+}
+
+.napcat-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.napcat-heading h4 {
+  margin-bottom: 4px;
+}
+
+.napcat-heading p {
+  margin: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.napcat-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.napcat-login-panel {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.napcat-login-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.napcat-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.napcat-qr-box {
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 8%);
+}
+
+.napcat-qr-image {
+  display: block;
+  width: 220px;
+  height: 220px;
+  object-fit: contain;
+}
+
+.napcat-qr-tip {
+  width: 100%;
+}
+
+.napcat-qr-tip p {
+  margin: 0 0 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.napcat-qr-url :deep(.el-input__inner) {
+  font-size: 11px;
+}
+
+.napcat-online {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 180px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  border: 1px dashed var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+
+.napcat-log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 8px;
+}
+
+.napcat-level-select {
+  width: 120px;
+}
+
+.napcat-log-search {
+  width: 230px;
+}
+
+.napcat-log-meta {
+  margin-left: auto;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.napcat-log-console {
+  height: 420px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #111827;
+  color: #d1d5db;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.napcat-log-line {
+  display: grid;
+  grid-template-columns: 142px 58px minmax(0, 1fr);
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 4%);
+}
+
+.napcat-log-time {
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.napcat-log-level {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.napcat-level-error {
+  color: #f87171;
+}
+
+.napcat-level-warn {
+  color: #fbbf24;
+}
+
+.napcat-level-info {
+  color: #60a5fa;
+}
+
+.napcat-level-debug {
+  color: #9ca3af;
+}
+
+.napcat-log-message {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.napcat-log-error {
+  margin-top: 8px;
+  color: var(--el-color-warning);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .napcat-heading,
+  .napcat-login-panel {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .napcat-heading-actions {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+
+  .napcat-log-line {
+    grid-template-columns: 1fr auto;
+  }
+
+  .napcat-log-message {
+    grid-column: 1 / -1;
+  }
 }
 </style>
