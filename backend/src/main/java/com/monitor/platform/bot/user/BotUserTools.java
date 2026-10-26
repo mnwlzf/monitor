@@ -12,9 +12,11 @@ import org.springframework.ai.tool.annotation.Tool;
 public class BotUserTools {
 
     private final BotUserService service;
+    private final BotKeyUsageService keyUsageService;
     private final String email;
 
-    public BotUserTools(BotUserService service, String email) {
+    public BotUserTools(BotUserService service, BotKeyUsageService keyUsageService, String email) {
+        this.keyUsageService = keyUsageService;
         this.service = service;
         this.email = email;
     }
@@ -29,6 +31,13 @@ public class BotUserTools {
             + "range 取值 today / week / month，默认 today。只能查发送者本人。")
     public String myUsage(String range) {
         return service.usageReport(email, range).toPlainText();
+    }
+
+    @Tool(description = "查询当前用户自己的 API Key 用量明细，按 Key 和模型分组，并给出每个 Key 的总计。"
+            + "fromDate/toDate 可选，格式 yyyy-MM-dd；不传默认今天 00:00 到当前，自选范围最多 90 天。"
+            + "keyIndexes 为空时先列出自己的 Key（只显示序号）；选择时传序号，支持逗号分隔，最多 3 个。")
+    public String myKeyUsage(String fromDate, String toDate, String keyIndexes) {
+        return keyUsageService.selfReport(email, fromDate, toDate, keyIndexes).toPlainText();
     }
 
     @Tool(description = "查询当前用户自己的 API Key 列表：名称、打码密钥、状态、额度与最近使用时间。"

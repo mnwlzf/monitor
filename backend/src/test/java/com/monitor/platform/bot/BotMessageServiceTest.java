@@ -7,6 +7,7 @@ import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.identity.Sub2ApiUserCache;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.user.BotBalanceService;
+import com.monitor.platform.bot.user.BotKeyUsageService;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.report.BotGroupRedactor;
@@ -134,7 +135,7 @@ class BotMessageServiceTest {
         BotCommandRouter commandRouter = new BotCommandRouter(
                 tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService, openAiStatusService);
         service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor);
     }
 
     private OneBotEvent event(String json) throws Exception {

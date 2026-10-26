@@ -4,6 +4,7 @@ import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
 import com.monitor.platform.bot.user.BotBalanceService;
 import com.monitor.platform.bot.user.BotBalanceTools;
+import com.monitor.platform.bot.user.BotKeyUsageService;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.user.BotUserTools;
 import com.monitor.platform.bot.channel.BotChannelStatusTools;
@@ -102,6 +103,7 @@ public class BotMessageService {
     private final BotRuntimeStatus runtimeStatus;
     private final BotUserService botUserService;
     private final BotBalanceService botBalanceService;
+    private final BotKeyUsageService botKeyUsageService;
     private final BotMessageArchiveService archive;
     private final BotImageFetcher imageFetcher;
     private final BotVisionProperties visionProperties;
@@ -130,6 +132,7 @@ public class BotMessageService {
                              BotRuntimeStatus runtimeStatus,
                              BotUserService botUserService,
                              BotBalanceService botBalanceService,
+                             BotKeyUsageService botKeyUsageService,
                              BotMessageArchiveService archive,
                              BotImageFetcher imageFetcher,
                              BotVisionProperties visionProperties,
@@ -151,6 +154,7 @@ public class BotMessageService {
         this.runtimeStatus = runtimeStatus;
         this.botUserService = botUserService;
         this.botBalanceService = botBalanceService;
+        this.botKeyUsageService = botKeyUsageService;
         this.archive = archive;
         this.imageFetcher = imageFetcher;
         this.visionProperties = visionProperties;
@@ -356,7 +360,7 @@ public class BotMessageService {
                 });
         // 用户端工具按请求绑定发送者邮箱：大模型只能查到发送者本人的数据
         if (platformFeature && identity.hasEmail()) {
-            request = request.tools(new BotUserTools(botUserService, identity.email()));
+            request = request.tools(new BotUserTools(botUserService, botKeyUsageService, identity.email()));
             // 普通用户只能查自己的错误；工具在构造时绑定邮箱，不接受用户标识参数。
             request = request.tools(new BotMyErrorTools(errorService, identity.email(), errorQueryGuard, errorQueryAuditService));
         }

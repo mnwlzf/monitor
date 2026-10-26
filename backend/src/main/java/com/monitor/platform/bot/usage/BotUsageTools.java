@@ -1,6 +1,7 @@
 package com.monitor.platform.bot.usage;
 
 import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.bot.user.BotKeyUsageService;
 import com.monitor.platform.bot.usage.Sub2UserUsageReader.UserConsumption;
 import com.monitor.platform.bot.usage.Sub2UserUsageReader.UsageSummary;
 import com.monitor.platform.common.time.BusinessTime;
@@ -49,14 +50,24 @@ public class BotUsageTools {
             + "日期可省略（默认今天），也支持「昨天」「前天」。";
 
     private final Sub2UserUsageReader reader;
+    private final BotKeyUsageService keyUsageService;
 
-    public BotUsageTools(Sub2UserUsageReader reader) {
+    public BotUsageTools(Sub2UserUsageReader reader, BotKeyUsageService keyUsageService) {
+        this.keyUsageService = keyUsageService;
         this.reader = reader;
     }
 
     // ============================================================
     // 大模型工具：返回纯文本
     // ============================================================
+
+    @Tool(description = "管理员可用：查询指定用户的 API Key 用量明细，按 Key 和模型分组，并给出每个 Key 的总计。"
+            + "account 必填，可为用户邮箱、用户名或用户 ID；fromDate/toDate 可选，格式 yyyy-MM-dd，"
+            + "不传默认今天 00:00 到当前，自选范围最多 90 天；keyIndexes 为空时先列出该用户的 Key"
+            + "（只显示序号），选择时传序号，最多 3 个。")
+    public String adminKeyUsage(String account, String fromDate, String toDate, String keyIndexes) {
+        return keyUsageService.adminReport(account, fromDate, toDate, keyIndexes).toPlainText();
+    }
 
     @Tool(description = "查询指定日期所有平台用户的余额消耗排行：每个用户的请求数、Token、"
             + "标准费用与实际消耗（扣钱包余额的部分），以及当日合计。"
