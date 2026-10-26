@@ -29,3 +29,6 @@ logs/*.log
 
 # 部署脚本状态（模式、上次镜像 ID 等）
 /.deploy/
+
+# 部署备份（.env / compose / 脚本等）
+/bak/

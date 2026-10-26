@@ -186,6 +186,7 @@ cd backend && mvn test -Pcontract-tests
 ./scripts/deploy.sh logs         # 跟踪 app 日志
 ./scripts/deploy.sh env-check    # 检查 .env key 是否缺项
 ./scripts/deploy.sh env-fix      # 只补缺失 key，不改已有 value
+./scripts/deploy.sh organize     # 把旧版根目录备份迁到 bak/
 ./scripts/deploy.sh doctor       # 部署环境体检
 ```
 
@@ -193,7 +194,8 @@ cd backend && mvn test -Pcontract-tests
 - `full` 模式自带 PostgreSQL + Redis，适合新服务器
 - `external` 模式连接已有 PostgreSQL + Redis
 - `--with-napcat` 才会启动 NapCat
-- 部署状态保存在 `.deploy/`，不会进入 Git
+- 部署状态保存在 `.deploy/`，备份统一放在 `bak/`，都不会进入 Git
+- `update` 会自动备份 `.env` 与 compose 到 `bak/env`、`bak/compose`，默认保留最近 30 份
 
 ## 文档
 

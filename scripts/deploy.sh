@@ -10,6 +10,13 @@ EXAMPLE_FILE="$ROOT_DIR/.env.example"
 DEPLOY_DIR="$ROOT_DIR/.deploy"
 MODE_FILE="$DEPLOY_DIR/mode"
 NAPCAT_FLAG_FILE="$DEPLOY_DIR/with-napcat"
+BAK_DIR="$ROOT_DIR/bak"
+BAK_ENV_DIR="$BAK_DIR/env"
+BAK_COMPOSE_DIR="$BAK_DIR/compose"
+BAK_SCRIPT_DIR="$BAK_DIR/scripts"
+BAK_STATE_DIR="$BAK_DIR/state"
+BAK_ARTIFACT_DIR="$BAK_DIR/artifacts"
+BACKUP_KEEP="${MONITOR_BACKUP_KEEP:-30}"
 IMAGE_REPO="${MONITOR_IMAGE_REPO:-ghcr.io/mnwlzf/monitor}"
 CONTAINER_NAME="monitor"
 LEGACY_KEYS="MONITOR_COLLECTION_ENABLED MONITOR_WEB_ALLOWED_ORIGINS MONITOR_WEB_SEARCH_ALLOW_NON_ADMIN"
@@ -31,6 +38,7 @@ Monitor 统一部署脚本
   ./scripts/deploy.sh logs
   ./scripts/deploy.sh env-check
   ./scripts/deploy.sh env-fix
+  ./scripts/deploy.sh organize
   ./scripts/deploy.sh doctor
 
 模式：
@@ -168,6 +176,44 @@ ensure_dirs() {
     mkdir -p "$data_dir/qq" "$data_dir/config" "$data_dir/plugins"
     chmod 755 "$data_dir" "$data_dir/qq" "$data_dir/config" "$data_dir/plugins" 2>/dev/null || true
   fi
+}
+
+ensure_backup_dirs() {
+  mkdir -p "$BAK_ENV_DIR" "$BAK_COMPOSE_DIR" "$BAK_SCRIPT_DIR" "$BAK_STATE_DIR" "$BAK_ARTIFACT_DIR"
+  chmod 700 "$BAK_DIR" "$BAK_ENV_DIR" "$BAK_COMPOSE_DIR" "$BAK_SCRIPT_DIR" "$BAK_STATE_DIR" "$BAK_ARTIFACT_DIR" 2>/dev/null || true
+}
+
+backup_file() {
+  local src="$1" dir="$2" base stamp dest
+  [[ -f "$src" ]] || return 0
+  ensure_backup_dirs
+  base="$(basename "$src")"
+  stamp="$(date +%Y%m%d%H%M%S)"
+  dest="$dir/${base}.${stamp}"
+  cp -p "$src" "$dest"
+  if [[ "$src" == "$ENV_FILE" ]]; then
+    chmod 600 "$dest" 2>/dev/null || true
+  fi
+  log "已备份 ${base} -> ${dest#"$ROOT_DIR"/}"
+}
+
+backup_env() {
+  backup_file "$ENV_FILE" "$BAK_ENV_DIR"
+}
+
+backup_compose() {
+  backup_file "$ROOT_DIR/compose.yaml" "$BAK_COMPOSE_DIR"
+  backup_file "$ROOT_DIR/compose.external.yaml" "$BAK_COMPOSE_DIR"
+}
+
+prune_backups() {
+  local dir="$1" keep="${2:-$BACKUP_KEEP}" count
+  [[ -d "$dir" ]] || return 0
+  count="$(find "$dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  (( count > keep )) || return 0
+  ls -1t "$dir" | tail -n +$((keep + 1)) | while IFS= read -r name; do
+    [[ -n "$name" ]] && rm -f -- "$dir/$name"
+  done
 }
 
 check_required_env() {
@@ -339,6 +385,11 @@ cmd_update() {
   mode="$(read_mode)"
   ensure_dirs "$mode"
   check_required_env "$mode"
+  ensure_backup_dirs
+  backup_env
+  backup_compose
+  prune_backups "$BAK_ENV_DIR"
+  prune_backups "$BAK_COMPOSE_DIR"
   mkdir -p "$DEPLOY_DIR"
   if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     docker inspect -f '{{.Image}}' "$CONTAINER_NAME" > "$DEPLOY_DIR/last-image-id"
@@ -427,7 +478,7 @@ cmd_env_check() {
 cmd_env_fix() {
   require_env_file
   [[ -f "$EXAMPLE_FILE" ]] || die "缺少 .env.example"
-  local mode backup added key line tmp_example tmp_env missing
+  local mode added key line tmp_example tmp_env missing
   mode="$(read_mode)"
   tmp_example="$(mktemp)"
   tmp_env="$(mktemp)"
@@ -443,9 +494,9 @@ cmd_env_fix() {
     log "没有需要补齐的 key"
     return 0
   fi
-  backup="${ENV_FILE}.bak.$(date +%Y%m%d%H%M%S)"
-  cp "$ENV_FILE" "$backup"
-  chmod 600 "$backup" 2>/dev/null || true
+  ensure_backup_dirs
+  backup_env
+  prune_backups "$BAK_ENV_DIR"
   added=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" == \#* ]] && continue
@@ -462,7 +513,7 @@ cmd_env_fix() {
     fi
   done < "$EXAMPLE_FILE"
   chmod 600 "$ENV_FILE"
-  log "已补齐 $added 个 key；备份：$backup"
+  log "已补齐 $added 个 key"
 }
 
 cmd_doctor() {
@@ -487,8 +538,49 @@ cmd_doctor() {
     case "$data_dir" in /*) ;; *) data_dir="$ROOT_DIR/$data_dir" ;; esac
     [[ -d "$data_dir/config" ]] && log "NapCat 配置目录：$data_dir/config" || warn "NapCat 配置目录不存在：$data_dir/config"
   fi
+  if [[ -d "$BAK_DIR" ]]; then
+    log "备份目录：$BAK_DIR（$(find "$BAK_DIR" -maxdepth 2 -type f | wc -l | tr -d ' ') 个文件）"
+  fi
   df -h "$ROOT_DIR" | tail -1
   if command -v free >/dev/null 2>&1; then free -m | sed -n '1,2p'; fi
+}
+
+cmd_organize() {
+  ensure_backup_dirs
+  local moved=0 stamp f dest
+  stamp="$(date +%Y%m%d%H%M%S)"
+  for f in "$ROOT_DIR"/.env.bak.*; do
+    [[ -e "$f" ]] || continue
+    mv -f "$f" "$BAK_ENV_DIR/"
+    moved=$((moved + 1))
+  done
+  find "$BAK_ENV_DIR" -maxdepth 1 -type f -exec chmod 600 {} + 2>/dev/null || true
+  for f in "$ROOT_DIR"/compose.yaml.bak.* "$ROOT_DIR"/compose.external.yaml.bak.*; do
+    [[ -e "$f" ]] || continue
+    mv -f "$f" "$BAK_COMPOSE_DIR/"
+    moved=$((moved + 1))
+  done
+  for f in "$ROOT_DIR"/update-monitor.sh.bak.* "$ROOT_DIR"/scripts/deploy.sh.bak.*; do
+    [[ -e "$f" ]] || continue
+    mv -f "$f" "$BAK_SCRIPT_DIR/"
+    moved=$((moved + 1))
+  done
+  if [[ -f "$ROOT_DIR/.last_image_id" ]]; then
+    dest="$BAK_STATE_DIR/last-image-id.legacy.$stamp"
+    mv -f "$ROOT_DIR/.last_image_id" "$dest"
+    moved=$((moved + 1))
+  fi
+  for f in "$ROOT_DIR"/monitor-*.jar; do
+    [[ -e "$f" ]] || continue
+    mv -f "$f" "$BAK_ARTIFACT_DIR/"
+    moved=$((moved + 1))
+  done
+  prune_backups "$BAK_ENV_DIR"
+  prune_backups "$BAK_COMPOSE_DIR"
+  prune_backups "$BAK_SCRIPT_DIR"
+  prune_backups "$BAK_STATE_DIR"
+  prune_backups "$BAK_ARTIFACT_DIR"
+  log "整理完成：移动 $moved 个历史文件到 bak/"
 }
 
 parse_opts() {
@@ -532,6 +624,7 @@ main() {
     logs) parse_opts "$@"; cmd_logs ;;
     env-check) parse_opts "$@"; cmd_env_check ;;
     env-fix) parse_opts "$@"; cmd_env_fix ;;
+    organize) parse_opts "$@"; cmd_organize ;;
     doctor) parse_opts "$@"; cmd_doctor ;;
     *) usage; die "未知命令：$cmd" ;;
   esac
