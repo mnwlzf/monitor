@@ -142,6 +142,15 @@ class BotMessageServiceTest {
                 settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor);
     }
 
+    @Test
+    void shouldRecognizeSseConversionError() {
+        RuntimeException sse = new RuntimeException("outer",
+                new RuntimeException("Could not extract response: no suitable HttpMessageConverter found "
+                        + "for response type [OpenAiApi$ChatCompletion] and content type [text/event-stream]"));
+        assertTrue(BotMessageService.isSseConversionError(sse));
+        assertFalse(BotMessageService.isSseConversionError(new RuntimeException("other")));
+    }
+
     private OneBotEvent event(String json) throws Exception {
         return mapper.readValue(json, OneBotEvent.class);
     }

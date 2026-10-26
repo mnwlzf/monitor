@@ -437,10 +437,21 @@ public class BotMessageService {
         // ToolContext 必须非空；即使事件缺少 userId 也放入空字符串，工具侧会按未知用户处理。
         request = request.toolContext(Map.of("qqUserId",
                 event.userId() == null ? "" : event.userId()));
-        String answer = request
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)))
-                .call()
-                .content();
+        ChatClient.ChatClientRequestSpec finalRequest = request
+                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)));
+        String answer;
+        try {
+            answer = finalRequest.call().content();
+        } catch (RuntimeException ex) {
+            if (!isSseConversionError(ex)) {
+                throw ex;
+            }
+            log.warn("大模型接口返回 SSE 而当前请求为非流式，自动降级为流式聚合并继续处理: user={}", event.userId());
+            java.util.List<String> chunks = finalRequest.stream().content()
+                    .collectList()
+                    .block(java.time.Duration.ofMinutes(2));
+            answer = chunks == null ? "" : String.join("", chunks);
+        }
 
         // 大模型写 Markdown 表格，这里解析成结构化报表，长回答就能渲染成表格图片
         BotReport report = BotReport.fromMarkdown(answer);
@@ -454,6 +465,21 @@ public class BotMessageService {
             report = mergeHeatmap(BotReport.fromMarkdown(cleaned), tools.poolReport(range));
         }
         return report;
+    }
+
+    /** 上游偶发把非流式请求按 SSE 返回；识别后改用 Spring AI 的流式接口兜底。 */
+    static boolean isSseConversionError(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null
+                    && message.contains("text/event-stream")
+                    && message.contains("HttpMessageConverter")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     /** 把大模型的评论与确定性渲染的热力图拼成一张报表。 */
