@@ -26,3 +26,6 @@ logs/*.log
 
 # QQ 机器人（NapCat）的登录态与配置，不进仓库
 /napcat/
+
+# 部署脚本状态（模式、上次镜像 ID 等）
+/.deploy/

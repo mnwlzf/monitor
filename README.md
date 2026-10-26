@@ -49,11 +49,11 @@ monitor/
 ├── frontend/                # Vue 3 前端
 │   └── src/{api,components,views}
 ├── config/                  # 外挂配置（application.yml 挂载到容器 /app/config）
-├── deploy/                  # 部署脚本（update-monitor.sh）
 ├── docs/                    # 设计文档
-├── scripts/                 # 本地开发辅助脚本（PowerShell）
+├── scripts/                 # 本地开发 + Linux 部署脚本
 ├── compose.yaml             # 一体化部署：app + postgres + redis + 可选 napcat
 ├── compose.external.yaml    # 仅 app，数据库/Redis 使用外部已有服务
+├── update-monitor.sh        # 正常更新快捷方式（GHCR latest）
 └── Dockerfile               # 多阶段构建：前端 → 后端 → 运行镜像
 ```
 
@@ -64,27 +64,36 @@ monitor/
 - **Docker 部署**：Docker 24+ 与 `docker compose` 插件
 - **本地开发**：JDK 21、Maven 3.6+（建议 3.9+）、Node.js 22+（`./scripts/check-environment.ps1` 可自动检查）
 
-### 方式一：Docker 一键启动（推荐）
+### 方式一：Linux 一键部署（推荐）
 
 ```bash
-cp .env.example .env      # 按需修改数据库/Redis 密码、管理员账号等
-docker compose up -d --build
+# 最小部署：app + 内置 PostgreSQL + Redis
+./scripts/deploy.sh install
+
+# 再加 NapCat / QQ 机器人
+./scripts/deploy.sh install --with-napcat
+
+# 已有 PostgreSQL / Redis
+./scripts/deploy.sh install --mode external
 ```
 
-启动后访问 <http://localhost:8080>，管理员账号见 `.env` 中的 `MONITOR_ADMIN_USERNAME` / `MONITOR_ADMIN_PASSWORD`。
+首次运行会自动生成 `.env`、随机密码、凭证加密密钥，并拉取 GHCR `latest`。
+启动后访问 <http://<服务器IP>:8080>，管理员账号与初始密码见安装输出和 `.env`。
+
+日常更新：
+
+```bash
+./update-monitor.sh
+```
+
+完整说明见 [docs/部署与更新.md](docs/部署与更新.md)。
 
 两份 compose 文件的区别：
 
 | 文件 | 适用场景 | 启动的服务 |
 | --- | --- | --- |
 | `compose.yaml` | 单机一体化，自带数据库与缓存 | `app` + `postgres` + `redis`（+ 可选 `napcat`） |
-| `compose.external.yaml` | 已有 PostgreSQL / Redis，只想跑应用 | 仅 `app` |
-
-只用内置基础设施、不启动 QQ 机器人：
-
-```bash
-docker compose up -d app postgres redis
-```
+| `compose.external.yaml` | 已有 PostgreSQL / Redis，只想跑应用 | 仅 `app`（+ 可选 `napcat`） |
 
 ### 方式二：本地开发
 
@@ -122,6 +131,7 @@ docker compose up -d postgres redis
 | 登录鉴权 | `MONITOR_ADMIN_USERNAME` `MONITOR_ADMIN_PASSWORD` `MONITOR_SECURITY_ENABLED` `MONITOR_SESSION_*` | 管理员账号与会话配置 |
 | 号池增量采集 | `SUB2API_DB_*` | 可选，直连自建 Sub2API 只读库，建议用仅 `SELECT` 权限的账号 |
 | QQ 机器人 | `MONITOR_BOT_*` | 可选，默认关闭；长回复（渠道状态、账户余额等）会自动渲染成图片 |
+| NapCat | `MONITOR_NAPCAT_*` `NAPCAT_DATA_DIR` `NAPCAT_ACCOUNT` | 日志与扫码登录；数据目录可迁移，账号可留空扫码 |
 | 身份识别 | `MONITOR_BOT_IDENTITY_*` | 可选；把 Sub2API 平台用户邮箱同步到 Redis，用于区分平台用户与陌生人 |
 | 大模型 | `SPRING_AI_*` | 可选，默认 `none`，不配 Key 也能正常启动 |
 
@@ -166,20 +176,30 @@ cd backend && mvn test -Pcontract-tests
 
 ## 部署与更新
 
-服务端部署目录通常包含 `.env`、`compose.external.yaml` 与更新脚本，脚本源码在
-[deploy/update-monitor.sh](deploy/update-monitor.sh)，需要与 `.env` 放在同一目录（脚本会切到自身所在目录执行）：
+统一入口是 [scripts/deploy.sh](scripts/deploy.sh)，根目录 [update-monitor.sh](update-monitor.sh) 是更新快捷方式：
 
 ```bash
-./update-monitor.sh                   # 拉取最新镜像并重建容器
-./update-monitor.sh --tag v1.0.0      # 使用指定标签
-./update-monitor.sh --build           # 本地重新构建镜像
-./update-monitor.sh --rollback        # 回滚到上一次更新前的镜像
+./scripts/deploy.sh install [--mode full|external] [--with-napcat]
+./update-monitor.sh              # 正常更新到 GHCR latest
+./scripts/deploy.sh rollback     # 回滚到上一次更新前
+./scripts/deploy.sh status       # 查看容器状态
+./scripts/deploy.sh logs         # 跟踪 app 日志
+./scripts/deploy.sh env-check    # 检查 .env key 是否缺项
+./scripts/deploy.sh env-fix      # 只补缺失 key，不改已有 value
+./scripts/deploy.sh doctor       # 部署环境体检
 ```
+
+- 默认只使用 `ghcr.io/mnwlzf/monitor:latest`，不构建本地镜像
+- `full` 模式自带 PostgreSQL + Redis，适合新服务器
+- `external` 模式连接已有 PostgreSQL + Redis
+- `--with-napcat` 才会启动 NapCat
+- 部署状态保存在 `.deploy/`，不会进入 Git
 
 ## 文档
 
 | 文档 | 内容 |
 | --- | --- |
+| [docs/部署与更新.md](docs/部署与更新.md) | 首次部署、更新、回滚、迁移与排障 |
 | [docs/数据库设计.md](docs/数据库设计.md) | 表结构与字段说明 |
 | [docs/QQ机器人.md](docs/QQ机器人.md) | 机器人部署与命令说明 |
 | [docs/项目结构设计建议.md](docs/项目结构设计建议.md) | 单体项目的模块划分思路 |
@@ -190,7 +210,7 @@ cd backend && mvn test -Pcontract-tests
 查看应用健康检查与日志：`docker compose logs -f app`。常见原因是 `.env` 里的 `DB_*` / `REDIS_*` 与实际服务地址不一致。
 
 **Q：日志文件在哪？**
-容器内 `/app/logs/monitor.log`，通过 `app-logs` 卷持久化。`deploy/update-monitor.sh` 会把宿主机 `logs/` 属主改为容器内 UID `10001`。
+容器内 `/app/logs/monitor.log`，通过 `app-logs` 卷持久化。`scripts/deploy.sh` 会把宿主机 `logs/` 属主改为容器内 UID `10001`。
 
 **Q：忘了 `UPSTREAM_CREDENTIAL_KEY`？**
 该密钥用于解密已保存的上游账号密码，**丢失后已保存的凭证无法恢复**，需要重新录入账号。

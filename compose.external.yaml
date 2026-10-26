@@ -2,7 +2,7 @@
 # 环境变量命名与项目原始 compose.yaml 保持一致（POSTGRES_* 仅内置基础设施场景使用）。
 # 使用方式：
 #   1) cp .env.example .env 并按外部数据库/Redis 地址填写
-#   2) docker compose -f compose.external.yaml up -d
+#   2) ./scripts/deploy.sh install --mode external
 name: monitor
 
 services:
@@ -75,7 +75,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs:/app/logs
-      - /app/napcat/config:/app/napcat-config:ro
+      - ${NAPCAT_DATA_DIR:-./napcat}/config:/app/napcat-config:ro
     # 数据库/Redis 若部署在宿主机，可用 host.docker.internal 访问
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -114,8 +114,8 @@ services:
       # Linux 下可改成 `id -u` / `id -g`；Docker Desktop（Win/mac）保持 0
       NAPCAT_UID: 0
       NAPCAT_GID: 0
-      # 用已保存的登录态快速登录，避免每次重启都要重新扫码
-      ACCOUNT: "3097553108"
+      # 留空时首次登录会在 Monitor「机器人状态」页显示二维码
+      ACCOUNT: ${NAPCAT_ACCOUNT:-}
     ports:
       # WebUI：扫码登录 + 配置 OneBot 网络（只绑 127.0.0.1，远程用 SSH 隧道）
       - "127.0.0.1:6099:6099"
@@ -123,7 +123,7 @@ services:
       # app 走 compose 网络直连 napcat:3000，不依赖这个映射。
       - "127.0.0.1:5000:3000"
     volumes:
-      # 登录态与配置，重启免扫码；部署目录不同就改这三行
-      - /app/napcat/qq:/app/.config/QQ
-      - /app/napcat/config:/app/napcat/config
-      - /app/napcat/plugins:/app/napcat/plugins
+      # 登录态与配置，重启免扫码。默认放部署目录下，可用 NAPCAT_DATA_DIR 覆盖
+      - ${NAPCAT_DATA_DIR:-./napcat}/qq:/app/.config/QQ
+      - ${NAPCAT_DATA_DIR:-./napcat}/config:/app/napcat/config
+      - ${NAPCAT_DATA_DIR:-./napcat}/plugins:/app/napcat/plugins

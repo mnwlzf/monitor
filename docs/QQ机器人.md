@@ -25,23 +25,21 @@ OneBot 只是**协议**，本身不是服务 —— 需要有个程序真的登�
 个人开发者推荐 [NapCat](https://github.com/NapNeko/NapCatQQ)（官方 Docker 镜像 `mlikiowa/napcat-docker`）：
 
 ```bash
-# 1) 起 NapCat（已包含在主 compose.yaml 里）
-docker compose up -d
+# 1) 一键启动 Monitor + NapCat
+./scripts/deploy.sh install --with-napcat
 
-# 2) 从日志里拿 WebUI 的登录 token
-docker compose logs napcat
-
-# 3) 启动 Monitor，打开管理端的「机器人状态」页
+# 2) 打开管理端的「机器人状态」页
 #    页面会直接显示 NapCat 实时日志；未登录时会显示二维码，手机 QQ 扫码即可。
 ```
 
 > 也可以继续使用 NapCat 原生 WebUI：`ssh -L 6099:127.0.0.1:6099 root@<服务器IP>`，
 > 再打开 `http://127.0.0.1:6099/webui?token=<上一步日志里的 token>`。
 >
-> 登录态与配置直接挂在宿主机 `/app/napcat/` 下（`qq` / `config` / `plugins` 三个子目录），
-> 重启容器不用重新扫码。**NapCat 侧不需要 `.env`**：端口与目录都写在 `compose.yaml` 的 napcat 服务里，部署目录不同就改那三行 volume。
+> 登录态与配置默认挂在部署目录的 `./napcat/` 下（`qq` / `config` / `plugins` 三个子目录），
+> 重启容器不用重新扫码。需要沿用旧目录时设置 `NAPCAT_DATA_DIR=/app/napcat`。
+> 已有 QQ 号可设置 `NAPCAT_ACCOUNT`，留空则首次登录扫码。
 >
-> Monitor 会把 `/app/napcat/config` 以只读方式挂载到容器内，用于读取 WebUI token；
+> Monitor 会把 `NAPCAT_DATA_DIR/config` 以只读方式挂载到容器内，用于读取 WebUI token；
 > 不会修改 NapCat 配置，也不会把 token 写进数据库或日志。
 
 登录成功后，在 WebUI 的「网络配置」里开两样：

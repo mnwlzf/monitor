@@ -1,9 +1,9 @@
 # ============================================================
 # Monitor 一体化部署（app + postgres + redis + 可选 napcat）
 #
-#   - 一体化启动：    docker compose up -d --build
-#   - 只起基础设施：  docker compose up -d postgres redis
-#   - 不用 QQ 机器人：docker compose up -d app postgres redis
+#   - 推荐一键部署：  ./scripts/deploy.sh install
+#   - 需要 QQ 机器人：./scripts/deploy.sh install --with-napcat
+#   - 日常更新：      ./update-monitor.sh
 #
 # 应用配置全部来自 .env（唯一事实来源，模板见 .env.example），
 # 新增环境变量只需改 .env，不用再动这个文件。
@@ -53,7 +53,7 @@ services:
       # 外挂配置：宿主机 ./config 下的 application.yml 会覆盖镜像内默认配置
       - ./config:/app/config:ro
       - app-logs:/app/logs
-      - /app/napcat/config:/app/napcat-config:ro
+      - ${NAPCAT_DATA_DIR:-./napcat}/config:/app/napcat-config:ro
     # 数据库/Redis 若部署在宿主机，可用 host.docker.internal 访问
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -127,6 +127,8 @@ services:
       # Linux 下可改成 `id -u` / `id -g`；Docker Desktop（Win/mac）保持 0
       NAPCAT_UID: 0
       NAPCAT_GID: 0
+      # 留空时首次登录会在 Monitor「机器人状态」页显示二维码
+      ACCOUNT: ${NAPCAT_ACCOUNT:-}
     ports:
       # WebUI：扫码登录 + 配置 OneBot 网络（只绑 127.0.0.1，远程用 SSH 隧道）
       - "127.0.0.1:6099:6099"
@@ -134,10 +136,10 @@ services:
       # app 走 compose 网络直连 napcat:3000，不依赖这个映射。
       - "127.0.0.1:5000:3000"
     volumes:
-      # 登录态与配置，重启免扫码；部署目录不同就改这三行
-      - /app/napcat/qq:/app/.config/QQ
-      - /app/napcat/config:/app/napcat/config
-      - /app/napcat/plugins:/app/napcat/plugins
+      # 登录态与配置，重启免扫码。默认放部署目录下，可用 NAPCAT_DATA_DIR 覆盖
+      - ${NAPCAT_DATA_DIR:-./napcat}/qq:/app/.config/QQ
+      - ${NAPCAT_DATA_DIR:-./napcat}/config:/app/napcat/config
+      - ${NAPCAT_DATA_DIR:-./napcat}/plugins:/app/napcat/plugins
 
 volumes:
   postgres-data:
