@@ -311,10 +311,17 @@
         <el-divider content-position="left">语音消息与语音回复</el-divider>
 
         <el-form-item label="MOSS 默认音色">
-          <el-select v-model="botForm.defaultVoice" filterable allow-create default-first-option style="width: 360px" placeholder="例如 fnlp/MOSS-TTSD-v0.5:alex">
-            <el-option label="alex（MOSS 默认）" value="fnlp/MOSS-TTSD-v0.5:alex" />
+          <el-select v-model="botForm.defaultVoice" filterable style="width: 360px" placeholder="请选择默认音色">
+            <el-option label="alex（沉稳男声）" value="fnlp/MOSS-TTSD-v0.5:alex" />
+            <el-option label="benjamin（低沉男声）" value="fnlp/MOSS-TTSD-v0.5:benjamin" />
+            <el-option label="charles（磁性男声）" value="fnlp/MOSS-TTSD-v0.5:charles" />
+            <el-option label="david（欢快男声）" value="fnlp/MOSS-TTSD-v0.5:david" />
+            <el-option label="anna（沉稳女声）" value="fnlp/MOSS-TTSD-v0.5:anna" />
+            <el-option label="bella（激情女声）" value="fnlp/MOSS-TTSD-v0.5:bella" />
+            <el-option label="claire（温柔女声）" value="fnlp/MOSS-TTSD-v0.5:claire" />
+            <el-option label="diana（欢快女声）" value="fnlp/MOSS-TTSD-v0.5:diana" />
           </el-select>
-          <small class="admin-form-hint">用户说「用 alex 音色语音回复」时会临时覆盖；保存后立即生效</small>
+          <small class="admin-form-hint">仅支持以上 8 个系统音色；用户说「用 claire 音色语音回复」时会临时覆盖，未知音色自动回退到 alex</small>
         </el-form-item>
 
         <el-form-item label="默认语音风格">

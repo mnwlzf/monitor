@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,6 +44,8 @@ public class BotSpeechService {
 
     private static final Logger log = LoggerFactory.getLogger(BotSpeechService.class);
     private static final int CONNECT_TIMEOUT_MS = 10_000;
+    private static final Set<String> SYSTEM_VOICES = Set.of(
+            "alex", "benjamin", "charles", "david", "anna", "bella", "claire", "diana");
 
     private final BotSpeechProperties properties;
     private final OneBotClient oneBotClient;
@@ -191,18 +194,28 @@ public class BotSpeechService {
         }
     }
 
-    /** 把 MOSS 的短音色名补成完整 voice ID。 */
+    /** 把 MOSS 的短音色名补成完整 voice ID；未知音色回退到配置的兜底音色。 */
     public String resolveVoice(String requestedVoice) {
         String value = blank(requestedVoice) ? properties.getFallbackVoice() : requestedVoice.trim();
-        if (blank(value)) {
-            value = "alex";
+        String name = voiceName(value);
+        if (!SYSTEM_VOICES.contains(name)) {
+            String fallback = voiceName(properties.getFallbackVoice());
+            name = SYSTEM_VOICES.contains(fallback) ? fallback : "alex";
         }
-        if (value.contains(":")) {
-            return value;
-        }
-        return properties.getTtsModel() + ":" + value;
+        return properties.getTtsModel() + ":" + name;
     }
 
+    private static String voiceName(String value) {
+        if (blank(value)) {
+            return "";
+        }
+        String trimmed = value.trim();
+        int colon = trimmed.lastIndexOf(':');
+        if (colon >= 0) {
+            trimmed = trimmed.substring(colon + 1);
+        }
+        return trimmed.toLowerCase(Locale.ROOT);
+    }
     /** 清理 Markdown 表格等不适合朗读的标记，并限制朗读长度。 */
     public static String sanitizeForSpeech(String text, int maxChars) {
         if (text == null || text.isBlank()) {

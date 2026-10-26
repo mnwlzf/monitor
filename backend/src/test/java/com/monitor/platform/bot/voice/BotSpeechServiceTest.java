@@ -53,6 +53,7 @@ class BotSpeechServiceTest {
         assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.resolveVoice("alex"));
         assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.resolveVoice("fnlp/MOSS-TTSD-v0.5:alex"));
         assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.resolveVoice(""));
+        assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.resolveVoice("not-a-voice"));
     }
 
     @Test
