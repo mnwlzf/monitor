@@ -16,9 +16,11 @@ import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.weather.WeatherTools;
+import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.status.OpenAiStatusService;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -75,6 +77,10 @@ public class BotCommandRouter {
             - /解绑            解除绑定
             - /天气 <城市>     实时天气与预报（所有人都能用）
             - /画图 <提示词>   生成一张图片（所有人都能用，全局一分钟最多 3 张）
+            - /违禁词          查看机器人违禁词
+            - /添加违禁词 <内容>  添加违禁词（命中后机器人拒绝回答）
+            - /删除违禁词 <内容>  删除违禁词
+            也可以直接说「查看违禁词」「添加违禁词 测试词」「把测试词从违禁词中删除」
             也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」
             错误排障也可以直接问：「最近一小时错误最多的账号是谁？」「今天 401 多不多？」「现在系统有什么问题？」
             需要新建 Sub2API 密钥时，直接说清五项：厂商 / 名称 / 分组 / 额度限制 / 有效期（天数或 yyyy-MM-dd HH:mm:ss）。
@@ -123,6 +129,7 @@ public class BotCommandRouter {
     private final Sub2ApiUserCache userCache;
     private final ImageGenService imageGenService;
     private final OpenAiStatusService openAiStatusService;
+    private final BotForbiddenWordService forbiddenWordService;
 
     public BotCommandRouter(MonitorChatTools tools,
                             BotOrderTools orderTools,
@@ -137,7 +144,8 @@ public class BotCommandRouter {
                             QqUserBindingService bindings,
                             Sub2ApiUserCache userCache,
                             ImageGenService imageGenService,
-                            OpenAiStatusService openAiStatusService) {
+                            OpenAiStatusService openAiStatusService,
+                            BotForbiddenWordService forbiddenWordService) {
         this.tools = tools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
@@ -152,6 +160,7 @@ public class BotCommandRouter {
         this.userCache = userCache;
         this.imageGenService = imageGenService;
         this.openAiStatusService = openAiStatusService;
+        this.forbiddenWordService = forbiddenWordService;
     }
 
     /**
@@ -254,6 +263,12 @@ public class BotCommandRouter {
                     platformOnly(identity, platformFeature, () -> orderTools.userBalanceReport(arg.trim()));
             case "用户消耗", "userconsumption" ->
                     platformOnly(identity, platformFeature, () -> usageTools.userConsumptionReport(arg.trim()));
+            case "违禁词", "违禁词列表", "forbiddenwords" ->
+                    forbiddenWordCommand(identity, platformFeature, this::forbiddenWordList);
+            case "添加违禁词", "addforbiddenword" ->
+                    forbiddenWordCommand(identity, platformFeature, () -> addForbiddenWord(arg));
+            case "删除违禁词", "removeforbiddenword", "deleteforbiddenword" ->
+                    forbiddenWordCommand(identity, platformFeature, () -> removeForbiddenWord(arg));
 
             default -> text(platformFeature
                     ? "未知命令：" + name + "\n" + help(identity, platformFeature, openAiStatusAllowed,
@@ -301,6 +316,59 @@ public class BotCommandRouter {
             return text("平台级数据仅管理员可查。");
         }
         return action.get();
+    }
+
+    /**
+     * 违禁词管理命令的统一闸门。
+     *
+     * <p>管理命令需要先于违禁词过滤执行，否则管理员无法添加/删除当前命中的词。
+     * 权限仍与其它平台级管理能力一致：仅管理员可用。</p>
+     */
+    private BotReport forbiddenWordCommand(BotIdentity identity, boolean platformFeature, Supplier<String> action) {
+        return platformOnly(identity, platformFeature, () -> {
+            try {
+                return text(action.get());
+            } catch (BusinessException ex) {
+                return text(ex.getMessage());
+            }
+        });
+    }
+
+    private String forbiddenWordList() {
+        List<BotForbiddenWordEntity> words = forbiddenWordService.list();
+        if (words.isEmpty()) {
+            return "当前没有违禁词。\n添加：/添加违禁词 <内容>";
+        }
+        StringBuilder sb = new StringBuilder("违禁词（").append(words.size()).append("）：");
+        for (BotForbiddenWordEntity word : words) {
+            sb.append('\n').append("- ").append(word.getWord());
+        }
+        sb.append("\n\n添加：/添加违禁词 <内容>\n删除：/删除违禁词 <内容>");
+        return sb.toString();
+    }
+
+    private String addForbiddenWord(String word) {
+        BotForbiddenWordEntity added = forbiddenWordService.add(word);
+        return "已添加违禁词：" + added.getWord() + "\n之后包含该词的普通消息将无法回答。";
+    }
+
+    private String removeForbiddenWord(String word) {
+        forbiddenWordService.remove(word);
+        return "已删除违禁词：" + word.strip();
+    }
+
+    /** 判断命令是否属于违禁词管理；这类命令必须绕过普通输入过滤。 */
+    public static boolean isForbiddenWordManagementCommand(String commandLine) {
+        if (commandLine == null || commandLine.isBlank()) {
+            return false;
+        }
+        String name = commandLine.strip().split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
+        return switch (name) {
+            case "违禁词", "违禁词列表", "forbiddenwords",
+                 "添加违禁词", "addforbiddenword",
+                 "删除违禁词", "removeforbiddenword", "deleteforbiddenword" -> true;
+            default -> false;
+        };
     }
 
     /**

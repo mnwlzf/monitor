@@ -454,6 +454,13 @@ export interface BotSettings {
   defaultVoiceStyle: string
   updatedAt: string | null
 }
+
+/** 页面维护的一条机器人违禁词。 */
+export interface BotForbiddenWord {
+  id: number
+  word: string
+  createdAt: string
+}
 /** 监控项目侧登记的自定义管理员。 */
 export interface BotAdmin {
   id: number

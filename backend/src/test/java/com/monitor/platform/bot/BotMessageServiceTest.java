@@ -91,6 +91,7 @@ class BotMessageServiceTest {
     private BotSpeechService speechService;
     private OpenAiStatusService openAiStatusService;
     private BotGroupRedactor groupRedactor;
+    private BotForbiddenWordService forbiddenWordService;
     private BotMessageService service;
 
     @BeforeEach
@@ -128,6 +129,7 @@ class BotMessageServiceTest {
         speechService = mock(BotSpeechService.class);
         openAiStatusService = mock(OpenAiStatusService.class);
         groupRedactor = mock(BotGroupRedactor.class);
+        forbiddenWordService = mock(BotForbiddenWordService.class);
         when(groupRedactor.redact(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(openAiStatusService.statusReport()).thenReturn("【OpenAI 服务状态】\n总体状态：全部系统正常");
 
@@ -137,9 +139,9 @@ class BotMessageServiceTest {
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService, openAiStatusService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService, openAiStatusService, forbiddenWordService);
         service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService);
     }
 
     @Test
@@ -149,6 +151,70 @@ class BotMessageServiceTest {
                         + "for response type [OpenAiApi$ChatCompletion] and content type [text/event-stream]"));
         assertTrue(BotMessageService.isSseConversionError(sse));
         assertFalse(BotMessageService.isSseConversionError(new RuntimeException("other")));
+    }
+
+    @Test
+    void shouldBlockMessageContainingForbiddenWord() throws Exception {
+        identityIs(admin());
+        when(forbiddenWordService.containsForbiddenWord(anyString()))
+                .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
+
+        service.onEvent(event(privateCommand("这是一句包含敏感词的消息")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+    }
+
+    @Test
+    void shouldAllowAdminManagementCommandToContainForbiddenWord() throws Exception {
+        identityIs(admin());
+        BotForbiddenWordEntity added = new BotForbiddenWordEntity();
+        added.setId(1L);
+        added.setWord("测试词");
+        when(forbiddenWordService.add("测试词")).thenReturn(added);
+
+        service.onEvent(event(privateCommand("/添加违禁词 测试词")));
+
+        verify(forbiddenWordService, timeout(3000)).add("测试词");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已添加违禁词"));
+    }
+
+    @Test
+    void shouldListForbiddenWordsForAdmin() throws Exception {
+        identityIs(admin());
+        BotForbiddenWordEntity first = new BotForbiddenWordEntity();
+        first.setWord("敏感词");
+        BotForbiddenWordEntity second = new BotForbiddenWordEntity();
+        second.setWord("另一个词");
+        when(forbiddenWordService.list()).thenReturn(List.of(first, second));
+
+        service.onEvent(event(privateCommand("/违禁词")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("敏感词"));
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("另一个词"));
+    }
+
+    @Test
+    void shouldDeleteForbiddenWordForAdmin() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event(privateCommand("/删除违禁词 测试词")));
+
+        verify(forbiddenWordService, timeout(3000)).remove("测试词");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已删除违禁词"));
+    }
+
+    @Test
+    void shouldManageForbiddenWordsWithNaturalLanguage() throws Exception {
+        identityIs(admin());
+        when(forbiddenWordService.containsForbiddenWord(anyString())).thenReturn(true);
+        BotForbiddenWordEntity added = new BotForbiddenWordEntity();
+        added.setWord("测试词");
+        when(forbiddenWordService.add("测试词")).thenReturn(added);
+
+        service.onEvent(event(privateCommand("把测试词加入违禁词")));
+
+        verify(forbiddenWordService, timeout(3000)).add("测试词");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已添加违禁词"));
     }
 
     private OneBotEvent event(String json) throws Exception {

@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotAdmin, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
+import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -149,6 +149,25 @@ export async function saveBotSettings(input: BotSettingsInput): Promise<BotSetti
     body: JSON.stringify(input),
   })
 }
+
+/** 读取机器人违禁词。 */
+export async function listBotForbiddenWords(): Promise<BotForbiddenWord[]> {
+  return apiRequest<BotForbiddenWord[]>('/api/v1/settings/bot/forbidden-words')
+}
+
+/** 新增机器人违禁词；保存后立即生效。 */
+export async function addBotForbiddenWord(word: string): Promise<BotForbiddenWord> {
+  return apiRequest<BotForbiddenWord>('/api/v1/settings/bot/forbidden-words', {
+    method: 'POST',
+    body: JSON.stringify({ word }),
+  })
+}
+
+/** 删除机器人违禁词；删除后立即生效。 */
+export async function deleteBotForbiddenWord(id: number): Promise<void> {
+  await apiRequest<void>(`/api/v1/settings/bot/forbidden-words/${id}`, { method: 'DELETE' })
+}
+
 /** 读取身份识别总览（Sub2API 用户缓存情况 + 自定义管理员名单）。 */
 export async function getBotIdentity(): Promise<BotIdentityOverview> {
   return apiRequest<BotIdentityOverview>('/api/v1/settings/bot/identity')

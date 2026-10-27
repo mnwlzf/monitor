@@ -387,6 +387,54 @@
       </el-form>
     </el-card>
 
+    <el-card shadow="never" class="admin-card" v-loading="forbiddenLoading">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>违禁词管理</h3>
+            <p>消息原文、引用内容或语音转写包含任一违禁词时，机器人会直接拒绝回答，不调用大模型</p>
+          </div>
+        </div>
+      </template>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="forbidden-alert"
+        title="管理员也可以私聊机器人维护：说「查看违禁词」「添加违禁词 测试词」「把测试词从违禁词中删除」，或使用对应的 / 命令"
+      />
+
+      <div class="forbidden-add-row">
+        <el-input
+          v-model="newForbiddenWord"
+          maxlength="100"
+          show-word-limit
+          placeholder="输入违禁词或短语"
+          :disabled="!canWrite"
+          @keyup.enter="addForbiddenWord"
+        />
+        <el-button type="primary" :loading="forbiddenAdding" :disabled="!canWrite" @click="addForbiddenWord">
+          添加
+        </el-button>
+      </div>
+
+      <el-table :data="forbiddenWords" size="small" class="forbidden-table">
+        <template #empty>还没有违禁词，机器人不会拦截任何内容</template>
+        <el-table-column prop="word" label="违禁词" min-width="260" />
+        <el-table-column label="添加时间" width="190">
+          <template #default="{ row }">{{ formatIdentityTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90">
+          <template #default="{ row }">
+            <el-button link type="danger" :disabled="!canWrite" @click="removeForbiddenWord(row as BotForbiddenWord)">
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card shadow="never" class="admin-card" v-loading="identityLoading">
       <template #header>
         <div class="admin-card-header">
@@ -481,11 +529,14 @@ import RecipientEditor from '../components/RecipientEditor.vue'
 import QqRecipientEditor from '../components/QqRecipientEditor.vue'
 import {
   addBotAdmin,
+  addBotForbiddenWord,
   deleteBotAdmin,
+  deleteBotForbiddenWord,
   getBotIdentity,
   getBotSettings,
   getMailSettings,
   getNotificationSettings,
+  listBotForbiddenWords,
   saveBotSettings,
   saveMailSettings,
   saveNotificationSettings,
@@ -496,7 +547,7 @@ import {
   type MailSettingsInput,
   type NotificationSettingsInput,
 } from '../api/settings'
-import type { BotAdmin, BotIdentityOverview, BotSettings } from '../types'
+import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotSettings } from '../types'
 
 const props = defineProps<{ canWrite?: boolean }>()
 
@@ -631,6 +682,10 @@ async function saveNotification() {
 const botLoading = ref(false)
 const botSaving = ref(false)
 const botUpdatedAt = ref('')
+const forbiddenLoading = ref(false)
+const forbiddenAdding = ref(false)
+const forbiddenWords = ref<BotForbiddenWord[]>([])
+const newForbiddenWord = ref('')
 const botForm = reactive<BotSettingsInput>({
   enabled: true,
   allowedGroups: [],
@@ -707,6 +762,52 @@ async function saveBotSettingsForm() {
     botSaving.value = false
   }
 }
+
+async function loadForbiddenWords() {
+  forbiddenLoading.value = true
+  try {
+    forbiddenWords.value = await listBotForbiddenWords()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载违禁词失败')
+  } finally {
+    forbiddenLoading.value = false
+  }
+}
+
+async function addForbiddenWord() {
+  const word = newForbiddenWord.value.trim()
+  if (!word) {
+    ElMessage.warning('请填写违禁词')
+    return
+  }
+  forbiddenAdding.value = true
+  try {
+    await addBotForbiddenWord(word)
+    newForbiddenWord.value = ''
+    await loadForbiddenWords()
+    ElMessage.success(`已添加违禁词：${word}`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '添加失败')
+  } finally {
+    forbiddenAdding.value = false
+  }
+}
+
+async function removeForbiddenWord(row: BotForbiddenWord) {
+  try {
+    await ElMessageBox.confirm(`确定删除违禁词「${row.word}」？`, '删除确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await deleteBotForbiddenWord(row.id)
+    await loadForbiddenWords()
+    ElMessage.success('已删除')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除失败')
+  }
+}
+
 const identityLoading = ref(false)
 const identitySyncing = ref(false)
 const adminAdding = ref(false)
@@ -798,6 +899,7 @@ onMounted(() => {
   load()
   loadNotification()
   loadBot()
+  loadForbiddenWords()
   loadIdentity()
 })
 </script>
@@ -853,6 +955,20 @@ onMounted(() => {
 }
 
 .identity-table {
+  width: 100%;
+}
+
+.forbidden-alert {
+  margin-bottom: 14px;
+}
+
+.forbidden-add-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.forbidden-table {
   width: 100%;
 }
 

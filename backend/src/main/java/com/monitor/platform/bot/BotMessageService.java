@@ -116,6 +116,9 @@ public class BotMessageService {
     private final BotCommandRouter commandRouter;
     private final OpenAiStatusService openAiStatusService;
     private final BotGroupRedactor groupRedactor;
+    private final BotForbiddenWordService forbiddenWordService;
+
+    static final String FORBIDDEN_WORD_REPLY = "你的消息触发了违禁词，当前无法回答。请修改后重试。";
 
     private final ExecutorService executor = Executors.newFixedThreadPool(4, runnable -> {
         Thread thread = new Thread(runnable, "qq-bot");
@@ -145,7 +148,8 @@ public class BotMessageService {
                              BotChatClientFactory chatClients,
                              BotCommandRouter commandRouter,
                              OpenAiStatusService openAiStatusService,
-                             BotGroupRedactor groupRedactor) {
+                             BotGroupRedactor groupRedactor,
+                             BotForbiddenWordService forbiddenWordService) {
         this.settingsService = settingsService;
         this.client = client;
         this.parser = parser;
@@ -169,6 +173,7 @@ public class BotMessageService {
         this.commandRouter = commandRouter;
         this.openAiStatusService = openAiStatusService;
         this.groupRedactor = groupRedactor;
+        this.forbiddenWordService = forbiddenWordService;
     }
 
     /** 入口：OneBot 反向 HTTP 推过来的一条事件。 */
@@ -358,9 +363,32 @@ public class BotMessageService {
                              List<BotImageFetcher.FetchedImage> images, GeneratedImages generated,
                              VoiceReplyIntent voiceReply) {
         String prefix = settings.commandPrefix();
+        String commandLine = !text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)
+                ? text.substring(prefix.length()).trim() : null;
+
+        boolean canManageForbiddenWords = platformFeature && identity.admin();
+        // 管理命令本身必然会包含待添加/删除的词，因此对有权执行的管理员先于过滤处理。
+        if (canManageForbiddenWords && BotCommandRouter.isForbiddenWordManagementCommand(commandLine)) {
+            return commandRouter.route(commandLine, identity, platformFeature,
+                    openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
+        }
+        // 管理员也可以直接用自然语言维护；只执行意图明确的短句，避免误操作。
+        if (canManageForbiddenWords && commandLine == null) {
+            var naturalLanguageCommand = BotForbiddenWordIntent.toCommandLine(text);
+            if (naturalLanguageCommand.isPresent()) {
+                return commandRouter.route(naturalLanguageCommand.get(), identity, platformFeature,
+                        openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
+            }
+        }
+        // 用户原文、引用内容、语音转写已在 text 中合并；任一命中都不进入大模型。
+        if (forbiddenWordService.containsForbiddenWord(text)
+                || forbiddenWordService.containsForbiddenWord(quoted.text())) {
+            return text(FORBIDDEN_WORD_REPLY);
+        }
+
         // 只发图片时 text 为空，不能当命令处理，直接交给模型
-        if (!text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
-            return commandRouter.route(text.substring(prefix.length()).trim(), identity, platformFeature,
+        if (commandLine != null) {
+            return commandRouter.route(commandLine, identity, platformFeature,
                     openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
         }
         return askModel(event, text, quoted, quotedHasImages, settings, identity, platformFeature,

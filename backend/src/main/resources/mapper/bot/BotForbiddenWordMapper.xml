@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.bot.BotForbiddenWordMapper">
+
+    <resultMap id="BotForbiddenWordResultMap" type="com.monitor.platform.bot.BotForbiddenWordEntity">
+        <id column="id" property="id"/>
+        <result column="word" property="word"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <select id="selectAll" resultMap="BotForbiddenWordResultMap">
+        SELECT id, word, created_at
+        FROM bot_forbidden_words
+        ORDER BY created_at, id
+    </select>
+
+    <select id="selectByWord" resultMap="BotForbiddenWordResultMap">
+        SELECT id, word, created_at
+        FROM bot_forbidden_words
+        WHERE lower(word) = lower(#{word})
+        LIMIT 1
+    </select>
+
+    <insert id="insertWord" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bot_forbidden_words (word, created_at)
+        VALUES (#{word}, now())
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM bot_forbidden_words WHERE id = #{id}
+    </delete>
+</mapper>
