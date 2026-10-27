@@ -323,6 +323,32 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendGroupMessage(eq(333L), contains("这个命令我用不了"));
     }
 
+    @Test
+    void shouldListForbiddenWordsForAdminInNonWhitelistedGroupWithoutMention() throws Exception {
+        identityIs(admin());
+        BotForbiddenWordEntity word = new BotForbiddenWordEntity();
+        word.setWord("敏感词");
+        when(forbiddenWordService.list()).thenReturn(List.of(word));
+
+        service.onEvent(event(groupCommand(111L, "/违禁词")));
+
+        verify(forbiddenWordService, timeout(3000)).list();
+        verify(client, timeout(3000)).sendGroupMessage(eq(111L), contains("敏感词"));
+    }
+
+    @Test
+    void shouldManageForbiddenWordsWithNaturalLanguageInNonWhitelistedGroupWithoutMention() throws Exception {
+        identityIs(admin());
+        BotForbiddenWordEntity added = new BotForbiddenWordEntity();
+        added.setWord("测试词");
+        when(forbiddenWordService.add("测试词")).thenReturn(added);
+
+        service.onEvent(event(groupCommand(111L, "把测试词加入违禁词")));
+
+        verify(forbiddenWordService, timeout(3000)).add("测试词");
+        verify(client, timeout(3000)).sendGroupMessage(eq(111L), contains("已添加违禁词"));
+    }
+
     private OneBotEvent event(String json) throws Exception {
         return mapper.readValue(json, OneBotEvent.class);
     }
@@ -352,6 +378,15 @@ class BotMessageServiceTest {
                 {"post_type":"message","message_type":"group","group_id":%d,"user_id":999,
                  "self_id":1,"raw_message":"[CQ:at,qq=1] %s",
                  "message":[{"type":"at","data":{"qq":"1"}},{"type":"text","data":{"text":" %s"}}]}
+                """.formatted(groupId, text, text);
+    }
+
+    /** 群里不 @机器人 直接发一条消息。 */
+    private static String groupCommand(Long groupId, String text) {
+        return """
+                {"post_type":"message","message_type":"group","group_id":%d,"user_id":999,
+                 "self_id":1,"raw_message":"%s",
+                 "message":[{"type":"text","data":{"text":"%s"}}]}
                 """.formatted(groupId, text, text);
     }
 

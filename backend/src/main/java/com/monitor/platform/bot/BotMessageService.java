@@ -201,30 +201,34 @@ public class BotMessageService {
         // 违禁词对普通用户全渠道拦截，不受白名单或群聊 @ 影响；管理员完全豁免。
         boolean rawForbiddenWord = forbiddenWordService.containsForbiddenWord(text)
                 || forbiddenWordService.containsForbiddenWord(quoted.text());
+        boolean managementMessage = isForbiddenWordManagementMessage(text, settings);
         BotIdentity earlyIdentity = null;
         boolean containsForbiddenWord = false;
-        if (rawForbiddenWord) {
+        if (rawForbiddenWord || managementMessage) {
             try {
                 earlyIdentity = identityResolver.resolve(event.userId());
             } catch (Exception ex) {
-                log.warn("违禁词校验时解析身份失败，按普通用户拦截: user={}, reason={}",
+                log.warn("违禁词校验时解析身份失败，按普通用户处理: user={}, reason={}",
                         event.userId(), ex.getMessage());
             }
-            containsForbiddenWord = earlyIdentity == null || !earlyIdentity.admin();
         }
+        boolean earlyAdmin = earlyIdentity != null && earlyIdentity.admin();
+        containsForbiddenWord = rawForbiddenWord && !earlyAdmin;
         if (containsForbiddenWord) {
             // 独立提前返回：普通用户不进入白名单/@ 判断，也不请求大模型。
             replyForbiddenWord(event, channel, group, text, quoted, earlyIdentity);
             return;
         }
-        if (!allowed(event, channel, settings)) {
+        // 管理员维护违禁词时不受白名单群和 @ 限制，任意群都可以直接呼出。
+        boolean adminForbiddenWordCommand = managementMessage && earlyAdmin;
+        if (!allowed(event, channel, settings) && !adminForbiddenWordCommand) {
             // 刻意用 info：这条以前是 debug，导致「机器人为什么不回我」在默认日志级别下完全无痕
             log.info("忽略非白名单会话: channel={}, 来源群={}, user={}",
                     channel, event.groupId(), event.userId());
             runtimeStatus.dropped(channel, event.groupId(), event.userId(), "不在白名单（群号 / QQ）");
             return;
         }
-        if (group && settings.requireMention() && !parser.mentioned(event)) {
+        if (group && settings.requireMention() && !parser.mentioned(event) && !adminForbiddenWordCommand) {
             // 刻意不计入「未回复」：这条消息本来就不需要机器人回，
             // 计进去会让统计被正常群聊刷满，反而看不出真正被拦下的消息
             return;
@@ -375,6 +379,18 @@ public class BotMessageService {
             case GROUP, TEMP_SESSION -> settings.isGroupAllowed(event.groupId());
             case PRIVATE -> settings.isUserAllowed(event.userId());
         };
+    }
+
+    /** 是否为违禁词管理命令或明确自然语言；用于管理员跨白名单群、免 @ 呼出。 */
+    private static boolean isForbiddenWordManagementMessage(String text, BotSettings settings) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String prefix = settings.commandPrefix();
+        if (prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
+            return BotCommandRouter.isForbiddenWordManagementCommand(text.substring(prefix.length()).trim());
+        }
+        return BotForbiddenWordIntent.toCommandLine(text).isPresent();
     }
 
     /** 全渠道违禁词命中回复；身份解析失败也不影响发送拦截提示。 */

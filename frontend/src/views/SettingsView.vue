@@ -402,7 +402,7 @@
         :closable="false"
         show-icon
         class="forbidden-alert"
-        title="管理员可在私聊或任意已启用群维护：说「查看违禁词」「添加违禁词 测试词」「把测试词从违禁词中删除」，或使用对应的 / 命令"
+        title="管理员可在私聊或任意群维护：说「查看违禁词」「添加违禁词 测试词」「把测试词从违禁词中删除」，或使用对应的 / 命令"
       />
 
       <div class="forbidden-add-row">
