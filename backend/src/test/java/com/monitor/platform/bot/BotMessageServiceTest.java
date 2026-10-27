@@ -165,6 +165,65 @@ class BotMessageServiceTest {
     }
 
     @Test
+    void shouldBlockForbiddenWordInNonWhitelistedGroupWithoutMention() throws Exception {
+        identityIs(normalUser());
+        when(forbiddenWordService.containsForbiddenWord(anyString()))
+                .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
+        String body = """
+                {"post_type":"message","message_type":"group","group_id":111,"user_id":999,
+                 "self_id":1,"raw_message":"这里包含敏感词",
+                 "message":[{"type":"text","data":{"text":"这里包含敏感词"}}]}
+                """;
+
+        service.onEvent(event(body));
+
+        verify(client, timeout(3000)).sendGroupMessage(eq(111L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+    }
+
+    @Test
+    void shouldBlockForbiddenWordInPrivateChatFromNonWhitelistedUser() throws Exception {
+        identityIs(normalUser());
+        when(forbiddenWordService.containsForbiddenWord(anyString()))
+                .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
+        String body = """
+                {"post_type":"message","message_type":"private","user_id":1000,
+                 "self_id":1,"raw_message":"这里包含敏感词",
+                 "message":[{"type":"text","data":{"text":"这里包含敏感词"}}]}
+                """;
+
+        service.onEvent(event(body));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(1000L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+    }
+
+    @Test
+    void shouldBlockForbiddenWordInNonWhitelistedTempSession() throws Exception {
+        identityIs(normalUser());
+        when(forbiddenWordService.containsForbiddenWord(anyString()))
+                .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
+        String body = """
+                {"post_type":"message","message_type":"private","sub_type":"group","group_id":777,
+                 "user_id":999,"self_id":1,"raw_message":"这里包含敏感词",
+                 "message":[{"type":"text","data":{"text":"这里包含敏感词"}}]}
+                """;
+
+        service.onEvent(event(body));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+    }
+
+    @Test
+    void shouldBlockForbiddenWordEvenWhenIdentityResolutionFails() throws Exception {
+        when(identityResolver.resolve(anyLong())).thenThrow(new IllegalStateException("redis down"));
+        when(forbiddenWordService.containsForbiddenWord(anyString()))
+                .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
+
+        service.onEvent(event(privateCommand("这里包含敏感词")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+    }
+
+    @Test
     void shouldAllowAdminManagementCommandToContainForbiddenWord() throws Exception {
         identityIs(admin());
         BotForbiddenWordEntity added = new BotForbiddenWordEntity();

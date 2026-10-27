@@ -191,6 +191,24 @@ public class BotMessageService {
             return;
         }
         boolean group = channel == BotChannel.GROUP;
+        String text = parser.extractText(event);
+        BotSpeechService.VoiceInput voiceInput = BotSpeechService.extract(event.message(), event.rawMessage());
+        boolean hasVoice = voiceInput.present();
+        // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见；
+        // 被引用的消息本身可能就是图片（「引用这张图，总结一下」），所以连图片一起取回来
+        BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event);
+
+        // 违禁词是全渠道拦截，不受白名单、群聊 @、身份或平台权限影响。
+        // 管理员维护命令属于例外，否则「添加/删除违禁词」本身会先被当前词条拦住。
+        boolean managementMessage = isForbiddenWordManagementMessage(text, settings);
+        boolean containsForbiddenWord = !managementMessage
+                && (forbiddenWordService.containsForbiddenWord(text)
+                || forbiddenWordService.containsForbiddenWord(quoted.text()));
+        if (containsForbiddenWord) {
+            // 独立提前返回：不解析身份、不做白名单/@ 判断，也不请求大模型。
+            replyForbiddenWord(event, channel, group, text, quoted);
+            return;
+        }
         if (!allowed(event, channel, settings)) {
             // 刻意用 info：这条以前是 debug，导致「机器人为什么不回我」在默认日志级别下完全无痕
             log.info("忽略非白名单会话: channel={}, 来源群={}, user={}",
@@ -203,12 +221,6 @@ public class BotMessageService {
             // 计进去会让统计被正常群聊刷满，反而看不出真正被拦下的消息
             return;
         }
-        String text = parser.extractText(event);
-        BotSpeechService.VoiceInput voiceInput = BotSpeechService.extract(event.message(), event.rawMessage());
-        boolean hasVoice = voiceInput.present();
-        // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见；
-        // 被引用的消息本身可能就是图片（「引用这张图，总结一下」），所以连图片一起取回来
-        BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event);
         // 图片段单独抽出来：之前只认文本段，导致「只发图片」的消息被当成空消息直接丢掉
         List<BotImageFetcher.ImageRef> ownImageRefs = visionProperties.isEnabled()
                 ? BotImageFetcher.extract(event.message())
@@ -355,6 +367,52 @@ public class BotMessageService {
             case GROUP, TEMP_SESSION -> settings.isGroupAllowed(event.groupId());
             case PRIVATE -> settings.isUserAllowed(event.userId());
         };
+    }
+
+    /** 全渠道违禁词命中回复；身份解析失败也不影响发送拦截提示。 */
+    private void replyForbiddenWord(OneBotEvent event, BotChannel channel, boolean group,
+                                    String text, BotMessageParser.QuotedMessage quoted) {
+        String content = !text.isBlank()
+                ? text
+                : (quoted.text().isBlank() ? "[违禁词消息]" : "（引用了：" + quoted.text() + "）");
+        runtimeStatus.inbound();
+        String turnId = runtimeStatus.beginTurn(channel, event.groupId(), event.userId(), content);
+        executor.submit(() -> {
+            BotIdentity identity = null;
+            try {
+                identity = identityResolver.resolve(event.userId());
+            } catch (Exception ex) {
+                log.warn("违禁词拦截时解析身份失败，仍继续发送拦截提示: user={}, reason={}",
+                        event.userId(), ex.getMessage());
+            }
+            try {
+                String correlationId = archive.recordInbound(event, content,
+                        BotMessageArchiveService.KIND_TEXT, identity);
+                sendText(event, group, FORBIDDEN_WORD_REPLY);
+                runtimeStatus.replied();
+                runtimeStatus.finishTurn(turnId, FORBIDDEN_WORD_REPLY);
+                archive.recordOutbound(event, FORBIDDEN_WORD_REPLY, BotMessageArchiveService.KIND_TEXT,
+                        identity, null, correlationId);
+                log.info("违禁词命中，已拒绝回答: channel={}, group={}, user={}",
+                        channel, event.groupId(), event.userId());
+            } catch (RuntimeException ex) {
+                runtimeStatus.failed(event.userId(), ex.getMessage());
+                runtimeStatus.finishTurn(turnId, "发送违禁词提示失败：" + ex.getMessage());
+                log.warn("发送违禁词拦截提示失败: user={}, reason={}", event.userId(), ex.getMessage());
+            }
+        });
+    }
+
+    /** 是否为管理员维护违禁词的命令或明确自然语言；这类消息需绕过输入词过滤。 */
+    private static boolean isForbiddenWordManagementMessage(String text, BotSettings settings) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String prefix = settings.commandPrefix();
+        if (prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
+            return BotCommandRouter.isForbiddenWordManagementCommand(text.substring(prefix.length()).trim());
+        }
+        return BotForbiddenWordIntent.toCommandLine(text).isPresent();
     }
 
     private BotReport answer(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
