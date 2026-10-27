@@ -264,11 +264,11 @@ public class BotCommandRouter {
             case "用户消耗", "userconsumption" ->
                     platformOnly(identity, platformFeature, () -> usageTools.userConsumptionReport(arg.trim()));
             case "违禁词", "违禁词列表", "forbiddenwords" ->
-                    forbiddenWordCommand(identity, platformFeature, this::forbiddenWordList);
+                    forbiddenWordCommand(identity, this::forbiddenWordList);
             case "添加违禁词", "addforbiddenword" ->
-                    forbiddenWordCommand(identity, platformFeature, () -> addForbiddenWord(arg));
+                    forbiddenWordCommand(identity, () -> addForbiddenWord(arg));
             case "删除违禁词", "removeforbiddenword", "deleteforbiddenword" ->
-                    forbiddenWordCommand(identity, platformFeature, () -> removeForbiddenWord(arg));
+                    forbiddenWordCommand(identity, () -> removeForbiddenWord(arg));
 
             default -> text(platformFeature
                     ? "未知命令：" + name + "\n" + help(identity, platformFeature, openAiStatusAllowed,
@@ -290,7 +290,15 @@ public class BotCommandRouter {
                 boolean groupContext) {
         String base;
         if (!platformFeature) {
-            base = openAiStatusAllowed
+            base = identity != null && identity.admin()
+                    ? GUEST_HELP + """
+
+                    管理员违禁词命令（所有启用群可用）：
+                    - /违禁词          查看机器人违禁词
+                    - /添加违禁词 <内容>  添加违禁词
+                    - /删除违禁词 <内容>  删除违禁词
+                    """
+                    : openAiStatusAllowed
                     ? GUEST_HELP.replace("也可以直接和我聊天。",
                     "- /openai          OpenAI 官方服务状态（中文）\n也可以直接和我聊天。")
                     : GUEST_HELP;
@@ -322,16 +330,17 @@ public class BotCommandRouter {
      * 违禁词管理命令的统一闸门。
      *
      * <p>管理命令需要先于违禁词过滤执行，否则管理员无法添加/删除当前命中的词。
-     * 权限仍与其它平台级管理能力一致：仅管理员可用。</p>
+     * 不受「指定群」限制，但仍要求发送者具有管理员身份。</p>
      */
-    private BotReport forbiddenWordCommand(BotIdentity identity, boolean platformFeature, Supplier<String> action) {
-        return platformOnly(identity, platformFeature, () -> {
-            try {
-                return text(action.get());
-            } catch (BusinessException ex) {
-                return text(ex.getMessage());
-            }
-        });
+    private BotReport forbiddenWordCommand(BotIdentity identity, Supplier<String> action) {
+        if (identity == null || !identity.admin()) {
+            return text(UNKNOWN_COMMAND);
+        }
+        try {
+            return text(action.get());
+        } catch (BusinessException ex) {
+            return text(ex.getMessage());
+        }
     }
 
     private String forbiddenWordList() {

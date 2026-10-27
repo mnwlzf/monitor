@@ -287,6 +287,42 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已添加违禁词"));
     }
 
+    @Test
+    void shouldListForbiddenWordsForAdminInNonDesignatedGroup() throws Exception {
+        identityIs(admin());
+        BotForbiddenWordEntity word = new BotForbiddenWordEntity();
+        word.setWord("敏感词");
+        when(forbiddenWordService.list()).thenReturn(List.of(word));
+
+        service.onEvent(event(mentionedGroupCommand(333L, "/违禁词")));
+
+        verify(forbiddenWordService, timeout(3000)).list();
+        verify(client, timeout(3000)).sendGroupMessage(eq(333L), contains("敏感词"));
+    }
+
+    @Test
+    void shouldManageForbiddenWordsWithNaturalLanguageInNonDesignatedGroup() throws Exception {
+        identityIs(admin());
+        BotForbiddenWordEntity added = new BotForbiddenWordEntity();
+        added.setWord("测试词");
+        when(forbiddenWordService.add("测试词")).thenReturn(added);
+
+        service.onEvent(event(mentionedGroupCommand(333L, "把测试词加入违禁词")));
+
+        verify(forbiddenWordService, timeout(3000)).add("测试词");
+        verify(client, timeout(3000)).sendGroupMessage(eq(333L), contains("已添加违禁词"));
+    }
+
+    @Test
+    void shouldHideForbiddenWordManagementFromNonAdminInNonDesignatedGroup() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(mentionedGroupCommand(333L, "/违禁词")));
+
+        verify(forbiddenWordService, never()).list();
+        verify(client, timeout(3000)).sendGroupMessage(eq(333L), contains("这个命令我用不了"));
+    }
+
     private OneBotEvent event(String json) throws Exception {
         return mapper.readValue(json, OneBotEvent.class);
     }

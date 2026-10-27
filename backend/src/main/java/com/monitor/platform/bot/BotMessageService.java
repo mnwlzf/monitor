@@ -413,7 +413,8 @@ public class BotMessageService {
         String commandLine = !text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)
                 ? text.substring(prefix.length()).trim() : null;
 
-        boolean canManageForbiddenWords = platformFeature && identity.admin();
+        // 违禁词管理不要求「指定群」，任意已启用群或管理员私聊都可以维护。
+        boolean canManageForbiddenWords = identity.admin();
         // 管理命令本身必然会包含待添加/删除的词，因此对有权执行的管理员先于过滤处理。
         if (canManageForbiddenWords && BotCommandRouter.isForbiddenWordManagementCommand(commandLine)) {
             return commandRouter.route(commandLine, identity, platformFeature,
