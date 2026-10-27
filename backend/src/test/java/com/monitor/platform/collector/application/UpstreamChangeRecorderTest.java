@@ -60,9 +60,11 @@ class UpstreamChangeRecorderTest {
         Set<String> inUseChannels = Set.of("官Key-不降智-无6.1sol");
 
         assertTrue(UpstreamChangeRecorder.groupInUse("官Key-不降智-无6.1sol", "ratio", inUseChannels));
-        // 上游改过渠道名、Key 上还写着旧名字：前缀兜底仍然算同一个渠道
-        assertTrue(UpstreamChangeRecorder.groupInUse("官Key-不降智", "ratio",
+        // 实时告警必须严格同名：前缀相似的其它渠道不能被误判为使用中
+        assertFalse(UpstreamChangeRecorder.groupInUse("官Key-不降智", "ratio",
                 Set.of("官Key-不降智-无6.1sol")));
+        assertTrue(UpstreamChangeRecorder.groupInUse(" 官Key-不降智 ", "ratio",
+                Set.of("官key-不降智")));
         // 渠道里没有我绑定的 Key（哪怕上游是 active）不算使用中
         assertFalse(UpstreamChangeRecorder.groupInUse("没人用的渠道", "ratio", inUseChannels));
         assertFalse(UpstreamChangeRecorder.groupInUse("官Key-不降智-无6.1sol", "ratio", Set.of()));

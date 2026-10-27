@@ -164,6 +164,10 @@
     <!--
         正在使用渠道的倍率变化：实时告警只关心这一类（直接关系成本）。
 
+        除了事件写入时的 in_use 标记，这里再按「当前绑定关系」核对一次：
+        只有该渠道里确实存在本平台号池账号绑定的上游 Key 才会发实时邮件。
+        这样即使历史标记过宽，非在用渠道也不会造成邮件轰炸；页面记录不受影响。
+
         排除「号池监控源」平台（那是我自己的平台，它自己的渠道/倍率变化不影响成本，
         不用发邮件）—— 页面的变更记录不受影响，只是不发信。
     -->
@@ -174,6 +178,17 @@
           AND e.entity_type = 'GROUP'
           AND e.change_type IN ('RATE_CHANGED', 'BASE_RATE_CHANGED')
           AND e.detected_at &gt;= #{since}
+          AND EXISTS (
+              SELECT 1
+                FROM upstream_groups g
+                JOIN account_api_keys k
+                  ON k.account_id = e.account_id
+                 AND lower(btrim(k.group_name)) = lower(btrim(g.group_name))
+                JOIN pool_accounts pa
+                  ON pa.bound_key_id = k.id
+               WHERE g.account_id = e.account_id
+                 AND g.external_group_id = e.entity_key
+          )
           AND NOT EXISTS (SELECT 1 FROM platforms p
                            WHERE p.id = a.platform_id
                              AND p.pool_monitoring_enabled = TRUE)

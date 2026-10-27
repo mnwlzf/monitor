@@ -168,7 +168,7 @@ public class UpstreamChangeRecorder {
      *
      * <p>口径：<strong>这个渠道里有本平台号池账号绑定的上游 Key</strong>，也就是
      * 「我自己的平台在用它」。上游把渠道标成启用只是在售（页面上标「活跃」），不代表我在用；
-     * 上游改过分组名（Key 上还是旧名字）由 {@link ChannelNameMatcher} 兜住。</p>
+     * 渠道名按严格同名判断，前缀相似的非在用渠道不会被误发实时提醒。</p>
      *
      * <p>为什么必须补上：渠道事件以前根本没设过 {@code in_use}，仓库默认填 false ——
      * 结果「我正在用的渠道涨价」和「一个早就下架的渠道改名」在数据里完全一样，
@@ -179,6 +179,8 @@ public class UpstreamChangeRecorder {
             // 渠道被移除：上游已经没有它了，不算「我正在使用」
             return false;
         }
-        return ChannelNameMatcher.matchesAny(inUseChannelNames, groupName);
+        return inUseChannelNames != null
+                && inUseChannelNames.stream()
+                .anyMatch(name -> ChannelNameMatcher.exactSameChannel(name, groupName));
     }
 }

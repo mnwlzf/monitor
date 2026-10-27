@@ -7,6 +7,8 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 import java.io.InputStream;
+import java.time.OffsetDateTime;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,6 +53,12 @@ class MapperXmlContractTest {
                 "com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper.deactivateMissingGroups"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper.selectRecentEvents"));
+        String realtimeSql = configuration.getMappedStatement(
+                        "com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper.selectInUseGroupRateEventsSince")
+                .getBoundSql(Map.of("since", OffsetDateTime.now(), "limit", 200))
+                .getSql();
+        assertTrue(realtimeSql.contains("JOIN pool_accounts"),
+                "实时渠道告警必须在发送前重新核对当前号池绑定关系");
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectLatestSnapshotsByAccounts"));
         assertTrue(configuration.hasStatement(
