@@ -155,7 +155,7 @@ class BotMessageServiceTest {
 
     @Test
     void shouldBlockMessageContainingForbiddenWord() throws Exception {
-        identityIs(admin());
+        identityIs(normalUser());
         when(forbiddenWordService.containsForbiddenWord(anyString()))
                 .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
 
@@ -226,6 +226,7 @@ class BotMessageServiceTest {
     @Test
     void shouldAllowAdminManagementCommandToContainForbiddenWord() throws Exception {
         identityIs(admin());
+        when(forbiddenWordService.containsForbiddenWord(anyString())).thenReturn(true);
         BotForbiddenWordEntity added = new BotForbiddenWordEntity();
         added.setId(1L);
         added.setWord("测试词");
@@ -235,6 +236,16 @@ class BotMessageServiceTest {
 
         verify(forbiddenWordService, timeout(3000)).add("测试词");
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已添加违禁词"));
+    }
+
+    @Test
+    void shouldAllowAdminNormalMessageContainingForbiddenWord() throws Exception {
+        identityIs(admin());
+        when(forbiddenWordService.containsForbiddenWord(anyString())).thenReturn(true);
+
+        service.onEvent(event(privateCommand("这里包含敏感词")));
+
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("自然语言问答未启用"));
     }
 
     @Test

@@ -198,15 +198,23 @@ public class BotMessageService {
         // 被引用的消息本身可能就是图片（「引用这张图，总结一下」），所以连图片一起取回来
         BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event);
 
-        // 违禁词是全渠道拦截，不受白名单、群聊 @、身份或平台权限影响。
-        // 管理员维护命令属于例外，否则「添加/删除违禁词」本身会先被当前词条拦住。
-        boolean managementMessage = isForbiddenWordManagementMessage(text, settings);
-        boolean containsForbiddenWord = !managementMessage
-                && (forbiddenWordService.containsForbiddenWord(text)
-                || forbiddenWordService.containsForbiddenWord(quoted.text()));
+        // 违禁词对普通用户全渠道拦截，不受白名单或群聊 @ 影响；管理员完全豁免。
+        boolean rawForbiddenWord = forbiddenWordService.containsForbiddenWord(text)
+                || forbiddenWordService.containsForbiddenWord(quoted.text());
+        BotIdentity earlyIdentity = null;
+        boolean containsForbiddenWord = false;
+        if (rawForbiddenWord) {
+            try {
+                earlyIdentity = identityResolver.resolve(event.userId());
+            } catch (Exception ex) {
+                log.warn("违禁词校验时解析身份失败，按普通用户拦截: user={}, reason={}",
+                        event.userId(), ex.getMessage());
+            }
+            containsForbiddenWord = earlyIdentity == null || !earlyIdentity.admin();
+        }
         if (containsForbiddenWord) {
-            // 独立提前返回：不解析身份、不做白名单/@ 判断，也不请求大模型。
-            replyForbiddenWord(event, channel, group, text, quoted);
+            // 独立提前返回：普通用户不进入白名单/@ 判断，也不请求大模型。
+            replyForbiddenWord(event, channel, group, text, quoted, earlyIdentity);
             return;
         }
         if (!allowed(event, channel, settings)) {
@@ -371,20 +379,13 @@ public class BotMessageService {
 
     /** 全渠道违禁词命中回复；身份解析失败也不影响发送拦截提示。 */
     private void replyForbiddenWord(OneBotEvent event, BotChannel channel, boolean group,
-                                    String text, BotMessageParser.QuotedMessage quoted) {
+                                    String text, BotMessageParser.QuotedMessage quoted, BotIdentity identity) {
         String content = !text.isBlank()
                 ? text
                 : (quoted.text().isBlank() ? "[违禁词消息]" : "（引用了：" + quoted.text() + "）");
         runtimeStatus.inbound();
         String turnId = runtimeStatus.beginTurn(channel, event.groupId(), event.userId(), content);
         executor.submit(() -> {
-            BotIdentity identity = null;
-            try {
-                identity = identityResolver.resolve(event.userId());
-            } catch (Exception ex) {
-                log.warn("违禁词拦截时解析身份失败，仍继续发送拦截提示: user={}, reason={}",
-                        event.userId(), ex.getMessage());
-            }
             try {
                 String correlationId = archive.recordInbound(event, content,
                         BotMessageArchiveService.KIND_TEXT, identity);
@@ -401,18 +402,6 @@ public class BotMessageService {
                 log.warn("发送违禁词拦截提示失败: user={}, reason={}", event.userId(), ex.getMessage());
             }
         });
-    }
-
-    /** 是否为管理员维护违禁词的命令或明确自然语言；这类消息需绕过输入词过滤。 */
-    private static boolean isForbiddenWordManagementMessage(String text, BotSettings settings) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        String prefix = settings.commandPrefix();
-        if (prefix != null && !prefix.isBlank() && text.startsWith(prefix)) {
-            return BotCommandRouter.isForbiddenWordManagementCommand(text.substring(prefix.length()).trim());
-        }
-        return BotForbiddenWordIntent.toCommandLine(text).isPresent();
     }
 
     private BotReport answer(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
@@ -438,9 +427,9 @@ public class BotMessageService {
                         openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
             }
         }
-        // 用户原文、引用内容、语音转写已在 text 中合并；任一命中都不进入大模型。
-        if (forbiddenWordService.containsForbiddenWord(text)
-                || forbiddenWordService.containsForbiddenWord(quoted.text())) {
+        // 用户原文、引用内容、语音转写已在 text 中合并；普通用户任一命中都不进入大模型。
+        if (!identity.admin() && (forbiddenWordService.containsForbiddenWord(text)
+                || forbiddenWordService.containsForbiddenWord(quoted.text()))) {
             return text(FORBIDDEN_WORD_REPLY);
         }
 
