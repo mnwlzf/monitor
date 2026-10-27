@@ -311,7 +311,7 @@
         <el-divider content-position="left">语音消息与语音回复</el-divider>
 
         <el-form-item label="MOSS 默认音色">
-          <el-select v-model="botForm.defaultVoice" filterable style="width: 360px" placeholder="请选择默认音色">
+          <el-select v-model="botForm.defaultVoice" style="width: 360px" placeholder="请选择默认音色">
             <el-option label="alex（沉稳男声）" value="fnlp/MOSS-TTSD-v0.5:alex" />
             <el-option label="benjamin（低沉男声）" value="fnlp/MOSS-TTSD-v0.5:benjamin" />
             <el-option label="charles（磁性男声）" value="fnlp/MOSS-TTSD-v0.5:charles" />
