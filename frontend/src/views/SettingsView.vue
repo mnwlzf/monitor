@@ -232,11 +232,14 @@
         <div class="admin-card-header">
           <div>
             <h3>每日消费抽奖</h3>
-            <p>按前一个完整自然日的实际余额消费核算资格，每人每天最多成功抽奖一次</p>
+            <p>按前一个完整自然日的实际余额消费核算资格；参数修改后约 0.5 秒自动保存并立即生效</p>
           </div>
-          <el-button v-if="canWrite !== false" type="primary" :loading="lotterySaving" @click="saveLotterySettingsForm">
-            保存设置
-          </el-button>
+          <div class="settings-header-actions">
+            <span class="admin-form-hint">{{ lotterySaving ? '正在自动保存…' : '修改后自动生效' }}</span>
+            <el-button v-if="canWrite !== false" type="primary" :loading="lotterySaving" @click="saveLotterySettingsForm">
+              立即保存
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -738,7 +741,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RecipientEditor from '../components/RecipientEditor.vue'
 import QqRecipientEditor from '../components/QqRecipientEditor.vue'
@@ -910,6 +913,9 @@ const lotteryLoading = ref(false)
 const lotterySaving = ref(false)
 const lotteryUpdatedAt = ref('')
 const lotteryDraws = ref<BotLotteryDraw[]>([])
+let lotteryAutoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let lotteryFormReady = false
+let lotterySavePending = false
 const lotteryForm = reactive<BotLotterySettingsInput>({
   enabled: false,
   minUsageDaily: 10,
@@ -1077,7 +1083,23 @@ function recalculateLotteryPreviewSoon() {
   void nextTick(recalculateLotteryPreview)
 }
 
-watch(lotteryForm, recalculateLotteryPreview, { deep: true, immediate: true })
+watch(lotteryForm, () => {
+  recalculateLotteryPreview()
+  scheduleLotteryAutoSave()
+}, { deep: true, immediate: true })
+
+function scheduleLotteryAutoSave() {
+  if (!lotteryFormReady || props.canWrite === false) {
+    return
+  }
+  if (lotteryAutoSaveTimer) {
+    clearTimeout(lotteryAutoSaveTimer)
+  }
+  lotteryAutoSaveTimer = setTimeout(() => {
+    lotteryAutoSaveTimer = null
+    void persistLotterySettings(true)
+  }, 500)
+}
 
 function floorMoney(value: number): number {
   return Math.floor((value + 1e-9) * 100) / 100
@@ -1098,6 +1120,7 @@ function applyLotterySettings(settings: BotLotterySettings) {
 
 async function loadLottery() {
   lotteryLoading.value = true
+  lotteryFormReady = false
   try {
     const [settings, draws] = await Promise.all([
       getBotLotterySettings(),
@@ -1105,6 +1128,8 @@ async function loadLottery() {
     ])
     applyLotterySettings(settings)
     lotteryDraws.value = draws
+    await nextTick()
+    lotteryFormReady = true
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '加载抽奖设置失败')
   } finally {
@@ -1113,19 +1138,48 @@ async function loadLottery() {
 }
 
 async function saveLotterySettingsForm() {
-  if (lotteryForm.multiplierMax < lotteryForm.multiplierMin) {
-    ElMessage.error('随机系数上限不能小于下限')
-    return
+  if (lotteryAutoSaveTimer) {
+    clearTimeout(lotteryAutoSaveTimer)
+    lotteryAutoSaveTimer = null
   }
+  await persistLotterySettings(false)
+}
+
+async function persistLotterySettings(silent: boolean) {
+  if (!lotteryFormReady) {
+    return false
+  }
+  if (lotteryForm.multiplierMax < lotteryForm.multiplierMin) {
+    if (!silent) {
+      ElMessage.error('随机系数上限不能小于下限')
+    }
+    return false
+  }
+  if (lotterySaving.value) {
+    lotterySavePending = true
+    return false
+  }
+  lotterySavePending = false
   lotterySaving.value = true
   try {
-    applyLotterySettings(await saveBotLotterySettings({ ...lotteryForm }))
-    lotteryDraws.value = await listBotLotteryDraws(30)
-    ElMessage.success('抽奖设置已保存，立即生效')
+    const settings = await saveBotLotterySettings({ ...lotteryForm })
+    lotteryUpdatedAt.value = settings.updatedAt ? new Date(settings.updatedAt).toLocaleString('zh-CN') : ''
+    if (!silent) {
+      lotteryDraws.value = await listBotLotteryDraws(30)
+      ElMessage.success('抽奖设置已保存，立即生效')
+    }
+    return true
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '保存失败')
+    if (!silent) {
+      ElMessage.error(error instanceof Error ? error.message : '保存失败')
+    }
+    return false
   } finally {
     lotterySaving.value = false
+    if (lotterySavePending) {
+      lotterySavePending = false
+      scheduleLotteryAutoSave()
+    }
   }
 }
 
@@ -1245,6 +1299,12 @@ onMounted(() => {
   loadForbiddenWords()
   loadLottery()
   loadIdentity()
+})
+
+onBeforeUnmount(() => {
+  if (lotteryAutoSaveTimer) {
+    clearTimeout(lotteryAutoSaveTimer)
+  }
 })
 </script>
 
