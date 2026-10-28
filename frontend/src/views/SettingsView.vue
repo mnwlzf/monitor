@@ -276,25 +276,65 @@
           </span>
         </el-form-item>
         <el-form-item label="中奖比例">
-          <el-input-number v-model="lotteryForm.payoutRatioPercent" :min="0.01" :max="100" :step="0.1" :precision="2" />
+          <el-input-number
+            v-model="lotteryForm.payoutRatioPercent"
+            :min="0.01"
+            :max="100"
+            :step="0.1"
+            :precision="2"
+            @input="recalculateLotteryPreviewSoon"
+            @change="recalculateLotteryPreview"
+          />
           <span class="admin-form-hint" style="margin-left: 10px">
             基础奖励 = 前一日消费 × 中奖比例；该比例不等同于最终实际成本率
           </span>
         </el-form-item>
         <el-form-item label="随机系数下限">
-          <el-input-number v-model="lotteryForm.multiplierMin" :min="0.01" :max="100" :step="0.1" :precision="2" />
+          <el-input-number
+            v-model="lotteryForm.multiplierMin"
+            :min="0.01"
+            :max="100"
+            :step="0.1"
+            :precision="2"
+            @input="recalculateLotteryPreviewSoon"
+            @change="recalculateLotteryPreview"
+          />
           <span class="admin-form-hint" style="margin-left: 10px">与上限共同决定奖励波动和长期平均成本</span>
         </el-form-item>
         <el-form-item label="随机系数上限">
-          <el-input-number v-model="lotteryForm.multiplierMax" :min="0.01" :max="100" :step="0.1" :precision="2" />
+          <el-input-number
+            v-model="lotteryForm.multiplierMax"
+            :min="0.01"
+            :max="100"
+            :step="0.1"
+            :precision="2"
+            @input="recalculateLotteryPreviewSoon"
+            @change="recalculateLotteryPreview"
+          />
           <span class="admin-form-hint" style="margin-left: 10px">上限不能小于下限</span>
         </el-form-item>
         <el-form-item label="单人单次最高奖励">
-          <el-input-number v-model="lotteryForm.maxReward" :min="0.01" :max="1000000" :step="0.5" :precision="2" />
+          <el-input-number
+            v-model="lotteryForm.maxReward"
+            :min="0.01"
+            :max="1000000"
+            :step="0.5"
+            :precision="2"
+            @input="recalculateLotteryPreviewSoon"
+            @change="recalculateLotteryPreview"
+          />
           <span class="admin-form-hint" style="margin-left: 10px">只限制单个用户一次奖励，不是每日总支出上限</span>
         </el-form-item>
         <el-form-item label="每日总奖励预算">
-          <el-input-number v-model="lotteryForm.dailyBudget" :min="0.01" :max="10000000" :step="10" :precision="2" />
+          <el-input-number
+            v-model="lotteryForm.dailyBudget"
+            :min="0.01"
+            :max="10000000"
+            :step="10"
+            :precision="2"
+            @input="recalculateLotteryPreviewSoon"
+            @change="recalculateLotteryPreview"
+          />
           <span class="admin-form-hint" style="margin-left: 10px">所有用户当天累计发放的硬上限，达到后停止发奖</span>
         </el-form-item>
         <el-form-item label="每人每天抽奖次数">
@@ -698,7 +738,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RecipientEditor from '../components/RecipientEditor.vue'
 import QqRecipientEditor from '../components/QqRecipientEditor.vue'
@@ -1001,27 +1041,43 @@ async function removeForbiddenWord(row: BotForbiddenWord) {
   }
 }
 
-const lotteryAverageMultiplier = computed(() =>
-  ((lotteryForm.multiplierMin || 0) + (lotteryForm.multiplierMax || 0)) / 2,
-)
-const lotteryEffectiveRatio = computed(() =>
-  (lotteryForm.payoutRatioPercent || 0) * lotteryAverageMultiplier.value,
-)
-const lotteryPreviewRows = computed(() => {
-  return Array.from({ length: 91 }, (_, index) => index + 10).map((usage) => {
-    const base = usage * (lotteryForm.payoutRatioPercent || 0) / 100
-    const rawMin = floorMoney(base * (lotteryForm.multiplierMin || 0))
-    const rawMax = floorMoney(base * (lotteryForm.multiplierMax || 0))
-    const finalMin = floorMoney(Math.min(rawMin, lotteryForm.maxReward || 0))
-    const finalMax = floorMoney(Math.min(rawMax, lotteryForm.maxReward || 0))
+const lotteryAverageMultiplier = ref(1)
+const lotteryEffectiveRatio = ref(3)
+const lotteryPreviewRows = ref<Array<{
+  label: string
+  minReward: number
+  maxReward: number
+  capped: boolean
+}>>([])
+
+function recalculateLotteryPreview() {
+  const ratio = Number(lotteryForm.payoutRatioPercent || 0)
+  const multiplierMin = Number(lotteryForm.multiplierMin || 0)
+  const multiplierMax = Number(lotteryForm.multiplierMax || 0)
+  const maxReward = Number(lotteryForm.maxReward || 0)
+  const averageMultiplier = (multiplierMin + multiplierMax) / 2
+  lotteryAverageMultiplier.value = averageMultiplier
+  lotteryEffectiveRatio.value = ratio * averageMultiplier
+  lotteryPreviewRows.value = Array.from({ length: 91 }, (_, index) => index + 10).map((usage) => {
+    const base = usage * ratio / 100
+    const rawMin = floorMoney(base * multiplierMin)
+    const rawMax = floorMoney(base * multiplierMax)
+    const finalMin = floorMoney(Math.min(rawMin, maxReward))
+    const finalMax = floorMoney(Math.min(rawMax, maxReward))
     return {
       label: `$${usage.toFixed(2)}`,
       minReward: finalMin,
       maxReward: finalMax,
-      capped: rawMax > (lotteryForm.maxReward || 0),
+      capped: rawMax > maxReward,
     }
   })
-})
+}
+
+function recalculateLotteryPreviewSoon() {
+  void nextTick(recalculateLotteryPreview)
+}
+
+watch(lotteryForm, recalculateLotteryPreview, { deep: true, immediate: true })
 
 function floorMoney(value: number): number {
   return Math.floor((value + 1e-9) * 100) / 100
