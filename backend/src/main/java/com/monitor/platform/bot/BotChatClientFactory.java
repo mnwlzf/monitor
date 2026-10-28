@@ -7,6 +7,7 @@ import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.weather.WeatherTools;
+import com.monitor.platform.common.util.SecretMasker;
 import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -301,7 +302,7 @@ public class BotChatClientFactory {
                 return fallbackBuilder;
             } catch (RuntimeException ex) {
                 fallbackUnavailable = true;
-                log.warn("备用大模型初始化失败: {}", ex.getMessage());
+                log.warn("备用大模型初始化失败: {}", SecretMasker.safeMessage(ex));
                 return null;
             }
         }

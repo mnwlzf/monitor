@@ -1348,6 +1348,21 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("出错了"));
     }
 
+    @Test
+    void shouldNeverLeakSecretsInErrorReply() throws Exception {
+        identityIs(admin());
+        when(tools.platformReport()).thenThrow(new IllegalStateException(
+                "invalid header value: \"Bearer echo\nsk-example1234567890abcdef\""));
+
+        service.onEvent(event(privateCommand("/平台")));
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertTrue(reply.getValue().contains("出错了"));
+        assertFalse(reply.getValue().contains("sk-example"));
+        assertFalse(reply.getValue().contains("Bearer"));
+    }
+
     // ============================================================ 生图：所有人都能用
 
     /** 路人也应该能 /画图：生成成功后把图片发出去，再跟一句文字。 */

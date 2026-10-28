@@ -20,6 +20,32 @@ public final class SecretMasker {
     }
 
     /**
+     * 从异常消息、日志文本中移除常见密钥格式。
+     *
+     * <p>模型/HTTP 客户端可能把 Authorization 头原样塞进异常消息，必须在返回用户、
+     * 写入运行状态或记录日志前统一清洗。</p>
+     */
+    public static String redactSecrets(String text) {
+        if (text == null || text.isBlank()) {
+            return text;
+        }
+        String redacted = text;
+        redacted = redacted.replaceAll("(?i)(Bearer\\s+)[^\\s,;]+", "$1****");
+        redacted = redacted.replaceAll("sk-[A-Za-z0-9_-]{8,}", "sk-****");
+        redacted = redacted.replaceAll("(?i)(api[-_ ]?key\\s*[:=]\\s*)[^\\s,;]+", "$1****");
+        return redacted;
+    }
+
+    /** 异常消息脱敏，空消息回退到异常类型。 */
+    public static String safeMessage(Throwable error) {
+        if (error == null) {
+            return "unknown";
+        }
+        String message = redactSecrets(error.getMessage());
+        return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
+    }
+
+    /**
      * 脱敏单个密钥值：保留前 6 位与后 4 位。
      *
      * <p>已脱敏（含 {@code *}）或长度不超过 12 的值原样返回。</p>

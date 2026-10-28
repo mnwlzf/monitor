@@ -27,6 +27,7 @@ import com.monitor.platform.bot.vision.BotVisionProperties;
 import com.monitor.platform.bot.voice.BotSpeechService;
 import com.monitor.platform.bot.voice.VoiceReplyIntent;
 import com.monitor.platform.bot.report.BotReportRenderer;
+import com.monitor.platform.common.util.SecretMasker;
 import com.monitor.platform.status.OpenAiStatusService;
 import com.monitor.platform.status.OpenAiStatusTools;
 import jakarta.annotation.PreDestroy;
@@ -217,7 +218,7 @@ public class BotMessageService {
                 earlyIdentity = identityResolver.resolve(event.userId());
             } catch (Exception ex) {
                 log.warn("违禁词校验时解析身份失败，按普通用户处理: user={}, reason={}",
-                        event.userId(), ex.getMessage());
+                        event.userId(), SecretMasker.safeMessage(ex));
             }
         }
         boolean earlyAdmin = earlyIdentity != null && earlyIdentity.admin();
@@ -328,12 +329,10 @@ public class BotMessageService {
                             platformFeature, openAiStatusAllowed, channel, images, generated, voiceReply);
                 } catch (Exception ex) {
                     log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
-                            event.userId(), identity.platformUser(), ex.getMessage());
-                    runtimeStatus.failed(event.userId(), ex.getMessage());
-                    // 异常细节只回给有平台功能的会话，避免向陌生人泄露内部实现
-                    report = BotReport.fromMarkdown(platformFeature
-                            ? "处理这条消息时出错了：" + ex.getMessage()
-                            : "处理这条消息时出错了，请稍后再试。");
+                            event.userId(), identity.platformUser(), SecretMasker.safeMessage(ex));
+                    runtimeStatus.failed(event.userId(), SecretMasker.safeMessage(ex));
+                    // 上游异常可能包含 Authorization/API Key，绝不能原样返回给用户。
+                    report = BotReport.fromMarkdown("处理这条消息时出错了，请稍后再试。");
                 }
 
                 // 所有输出先做邮箱部分脱敏；群聊再额外隐藏平台和账号名称。
@@ -347,7 +346,7 @@ public class BotMessageService {
                     outcome = send(event, group, report, settings, generated, voiceReply);
                 } catch (RuntimeException sendError) {
                     // 发送失败也要把这一轮从「正在处理」里摘掉，否则会永远挂在那儿
-                    runtimeStatus.finishTurn(turnId, "发送失败：" + sendError.getMessage());
+                    runtimeStatus.finishTurn(turnId, "发送失败：" + SecretMasker.safeMessage(sendError));
                     throw sendError;
                 }
                 runtimeStatus.replied();
@@ -358,9 +357,10 @@ public class BotMessageService {
             } catch (Exception uncaught) {
                 // submit() 返回的 Future 没人接收，任务里未捕获的异常会被静默吞掉：
                 // 没有日志、没有回复、连存档都没有 —— 线上表现就是「调用失败但用户什么都没收到」。
-                log.error("处理消息时出现未捕获异常: user={}, channel={}", event.userId(), channel, uncaught);
-                runtimeStatus.failed(event.userId(), uncaught.getMessage());
-                runtimeStatus.finishTurn(turnId, "处理失败：" + uncaught.getMessage());
+                log.error("处理消息时出现未捕获异常: user={}, channel={}, error={}",
+                        event.userId(), channel, SecretMasker.safeMessage(uncaught));
+                runtimeStatus.failed(event.userId(), SecretMasker.safeMessage(uncaught));
+                runtimeStatus.finishTurn(turnId, "处理失败，请稍后再试。");
                 sendText(event, group, "处理这条消息时出错了，请稍后再试。");
             }
         });
@@ -424,9 +424,10 @@ public class BotMessageService {
                 log.info("违禁词命中，已拒绝回答: channel={}, group={}, user={}",
                         channel, event.groupId(), event.userId());
             } catch (RuntimeException ex) {
-                runtimeStatus.failed(event.userId(), ex.getMessage());
-                runtimeStatus.finishTurn(turnId, "发送违禁词提示失败：" + ex.getMessage());
-                log.warn("发送违禁词拦截提示失败: user={}, reason={}", event.userId(), ex.getMessage());
+                runtimeStatus.failed(event.userId(), SecretMasker.safeMessage(ex));
+                runtimeStatus.finishTurn(turnId, "发送违禁词提示失败，请稍后再试。");
+                log.warn("发送违禁词拦截提示失败: user={}, reason={}",
+                        event.userId(), SecretMasker.safeMessage(ex));
             }
         });
     }
@@ -563,7 +564,8 @@ public class BotMessageService {
             if (fallbackClient == null) {
                 throw primaryError;
             }
-            log.warn("主模型调用失败，切换备用模型: user={}, reason={}", event.userId(), primaryError.getMessage());
+            log.warn("主模型调用失败，切换备用模型: user={}, reason={}",
+                    event.userId(), SecretMasker.safeMessage(primaryError));
             try {
                 answer = callChat(fallbackClient, event, text, finalPromptText, images, generated,
                         identity, platformFeature, openAiStatusAllowed, channel, persona);

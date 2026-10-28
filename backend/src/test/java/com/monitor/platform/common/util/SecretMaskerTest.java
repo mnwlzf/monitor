@@ -10,6 +10,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class SecretMaskerTest {
 
+    @Test
+    void redactsBearerAndSkKeysFromExceptionText() {
+        String text = "invalid header value: \"Bearer echo\nsk-example1234567890abcdef\"";
+
+        String redacted = SecretMasker.redactSecrets(text);
+
+        assertThat(redacted)
+                .doesNotContain("sk-example1234567890abcdef")
+                .contains("Bearer ****")
+                .contains("sk-****");
+    }
+
     private static final String RAW_KEY =
             "sk-698199a2cb9089b1795491c358f0997bfa517d8be63fcbbbaf6455f782f3fa4b";
 
