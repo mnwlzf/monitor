@@ -321,10 +321,24 @@
         </div>
       </div>
 
-      <el-table :data="lotteryPreviewRows" size="small" class="lottery-preview-table">
+      <div class="lottery-ladder-title">
+        <strong>奖励阶梯实时预览</strong>
+        <span>前一日消费 $10–$100，每 $1 一档，实时跟随上方参数</span>
+      </div>
+      <el-table :data="lotteryPreviewRows" size="small" class="lottery-preview-table" max-height="380">
         <el-table-column prop="label" label="前一日实际消费" min-width="180" />
-        <el-table-column prop="rawRange" label="未触发封顶的奖励范围" min-width="240" />
-        <el-table-column prop="finalRange" label="最终奖励范围" min-width="220" />
+        <el-table-column label="最少可获得" width="160" align="right">
+          <template #default="{ row }">${{ Number(row.minReward).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="最多可获得" width="160" align="right">
+          <template #default="{ row }">${{ Number(row.maxReward).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="封顶情况" min-width="180">
+          <template #default="{ row }">
+            <el-tag v-if="row.capped" type="warning" size="small" effect="plain">已触发单次奖励封顶</el-tag>
+            <span v-else class="muted">未触发封顶</span>
+          </template>
+        </el-table-column>
       </el-table>
       <small class="admin-form-hint">
         随机系数围绕 1.0 对称时，长期平均成本基本等于前一日消费 × 中奖比例；最低奖励已取消，金额不足 $0.01 时按 $0.00 处理。
@@ -978,12 +992,7 @@ const lotteryEffectiveRatio = computed(() =>
   (lotteryForm.payoutRatioPercent || 0) * lotteryAverageMultiplier.value,
 )
 const lotteryPreviewRows = computed(() => {
-  const amounts = Array.from(new Set([
-    Math.max(0, lotteryForm.minUsageDaily || 0),
-    50,
-    100,
-  ])).sort((left, right) => left - right)
-  return amounts.map((usage) => {
+  return Array.from({ length: 91 }, (_, index) => index + 10).map((usage) => {
     const base = usage * (lotteryForm.payoutRatioPercent || 0) / 100
     const rawMin = floorMoney(base * (lotteryForm.multiplierMin || 0))
     const rawMax = floorMoney(base * (lotteryForm.multiplierMax || 0))
@@ -991,8 +1000,9 @@ const lotteryPreviewRows = computed(() => {
     const finalMax = floorMoney(Math.min(rawMax, lotteryForm.maxReward || 0))
     return {
       label: `$${usage.toFixed(2)}`,
-      rawRange: rawMin === rawMax ? `$${rawMin.toFixed(2)}` : `$${rawMin.toFixed(2)} ~ $${rawMax.toFixed(2)}`,
-      finalRange: finalMin === finalMax ? `$${finalMin.toFixed(2)}` : `$${finalMin.toFixed(2)} ~ $${finalMax.toFixed(2)}`,
+      minReward: finalMin,
+      maxReward: finalMax,
+      capped: rawMax > (lotteryForm.maxReward || 0),
     }
   })
 })
@@ -1288,6 +1298,24 @@ onMounted(() => {
 .lottery-draw-table {
   width: 100%;
   margin-bottom: 12px;
+}
+
+.lottery-ladder-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.lottery-ladder-title strong {
+  color: #303133;
+  font-size: 14px;
+}
+
+.lottery-ladder-title span {
+  color: #7b8b87;
+  font-size: 11px;
 }
 
 @media (max-width: 1100px) {
