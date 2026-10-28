@@ -3,7 +3,6 @@ package com.monitor.platform.bot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
-import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.identity.Sub2ApiUserCache;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.user.BotBalanceService;
@@ -31,6 +30,7 @@ import com.monitor.platform.bot.error.BotInstanceErrorService;
 import com.monitor.platform.bot.error.BotErrorTools;
 import com.monitor.platform.bot.image.ImageGenService;
 import com.monitor.platform.status.OpenAiStatusService;
+import com.monitor.platform.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -82,7 +82,6 @@ class BotMessageServiceTest {
     private Sub2ApiUserCache userCache;
     private BotUserService botUserService;
     private BotIdentityResolver identityResolver;
-    private QqUserBindingService bindings;
     private BotReportRenderer reportRenderer;
     private WeatherTools weatherTools;
     private BotMessageArchiveService archive;
@@ -92,6 +91,8 @@ class BotMessageServiceTest {
     private OpenAiStatusService openAiStatusService;
     private BotGroupRedactor groupRedactor;
     private BotForbiddenWordService forbiddenWordService;
+    private BotEmailBindingService emailBindingService;
+    private BotLotteryService lotteryService;
     private BotMessageService service;
 
     @BeforeEach
@@ -120,7 +121,6 @@ class BotMessageServiceTest {
         when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台概览内容"));
 
         identityResolver = mock(BotIdentityResolver.class);
-        bindings = mock(QqUserBindingService.class);
         reportRenderer = mock(BotReportRenderer.class);
         weatherTools = mock(WeatherTools.class);
         archive = mock(BotMessageArchiveService.class);
@@ -130,6 +130,8 @@ class BotMessageServiceTest {
         openAiStatusService = mock(OpenAiStatusService.class);
         groupRedactor = mock(BotGroupRedactor.class);
         forbiddenWordService = mock(BotForbiddenWordService.class);
+        emailBindingService = mock(BotEmailBindingService.class);
+        lotteryService = mock(BotLotteryService.class);
         when(groupRedactor.redact(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(openAiStatusService.statusReport()).thenReturn("【OpenAI 服务状态】\n总体状态：全部系统正常");
 
@@ -139,9 +141,9 @@ class BotMessageServiceTest {
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService, openAiStatusService, forbiddenWordService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService);
         service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService);
     }
 
     @Test
@@ -861,30 +863,77 @@ class BotMessageServiceTest {
         verify(weatherTools, timeout(3000)).weatherReport(eq("北京"), anyInt());
     }
 
-    /** 绑定回复必须与邮箱是否命中平台用户无关，否则可被用来枚举平台用户。 */
     @Test
     void shouldReplyNeutrallyToBind() throws Exception {
         identityIs(BotIdentity.guest());
-        when(bindings.bind(anyLong(), anyString())).thenReturn(true);
+        when(emailBindingService.requestBinding(999L, "someone@example.com"))
+                .thenReturn("验证码已发送至 someone@example.com，5 分钟内有效。");
 
         service.onEvent(event(privateCommand("/绑定 someone@example.com")));
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
-        assertEquals("已记录你的邮箱。", reply.getValue());
-        verify(bindings).bind(999L, "someone@example.com");
+        assertTrue(reply.getValue().contains("验证码已发送"));
+        verify(emailBindingService).requestBinding(999L, "someone@example.com");
     }
 
     @Test
     void shouldRejectMalformedEmailOnBind() throws Exception {
         identityIs(BotIdentity.guest());
+        when(emailBindingService.requestBinding(999L, "not-an-email"))
+                .thenThrow(BusinessException.of("邮箱格式不正确：not-an-email"));
 
         service.onEvent(event(privateCommand("/绑定 not-an-email")));
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
-        assertEquals("邮箱格式不正确。用法：/绑定 <邮箱>", reply.getValue());
-        verify(bindings, never()).bind(anyLong(), anyString());
+        assertEquals("邮箱格式不正确：not-an-email", reply.getValue());
+        verify(emailBindingService).requestBinding(999L, "not-an-email");
+    }
+
+    @Test
+    void shouldVerifyEmailWithCommand() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(emailBindingService.verify(999L, "123456")).thenReturn("绑定成功，当前邮箱：user@example.com。");
+
+        service.onEvent(event(privateCommand("/验证 123456")));
+
+        verify(emailBindingService, timeout(3000)).verify(999L, "123456");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("绑定成功"));
+    }
+
+    @Test
+    void shouldVerifyBareCodeWhenChallengeIsPending() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(emailBindingService.hasPending(999L)).thenReturn(true);
+        when(emailBindingService.verify(999L, "123456")).thenReturn("绑定成功，当前邮箱：user@example.com。");
+
+        service.onEvent(event(privateCommand("123456")));
+
+        verify(emailBindingService, timeout(3000)).verify(999L, "123456");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("绑定成功"));
+    }
+
+    @Test
+    void shouldDrawLotteryWithCommand() throws Exception {
+        identityIs(normalUser());
+        when(lotteryService.draw(999L)).thenReturn("抽奖结果：$0.60");
+
+        service.onEvent(event(privateCommand("/抽奖")));
+
+        verify(lotteryService, timeout(3000)).draw(999L);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("抽奖结果"));
+    }
+
+    @Test
+    void shouldDrawLotteryWithNaturalLanguage() throws Exception {
+        identityIs(normalUser());
+        when(lotteryService.draw(999L)).thenReturn("抽奖结果：$0.60");
+
+        service.onEvent(event(privateCommand("我要抽奖")));
+
+        verify(lotteryService, timeout(3000)).draw(999L);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("抽奖结果"));
     }
 
     /** 超过 maxReplyLength 的回复应渲染成图片发送，而不是被截断。 */

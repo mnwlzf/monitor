@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.bot.BotUserBindingMapper">
+
+    <resultMap id="BotUserBindingResultMap" type="com.monitor.platform.bot.BotUserBindingEntity">
+        <id column="id" property="id"/>
+        <result column="channel" property="channel"/>
+        <result column="external_user_id" property="externalUserId"/>
+        <result column="email" property="email"/>
+        <result column="verification_method" property="verificationMethod"/>
+        <result column="verified_at" property="verifiedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectByExternalUser" resultMap="BotUserBindingResultMap">
+        SELECT id, channel, external_user_id, email, verification_method,
+               verified_at, created_at, updated_at
+        FROM bot_user_bindings
+        WHERE channel = #{channel}
+          AND external_user_id = #{externalUserId}
+    </select>
+
+    <select id="selectByEmail" resultMap="BotUserBindingResultMap">
+        SELECT id, channel, external_user_id, email, verification_method,
+               verified_at, created_at, updated_at
+        FROM bot_user_bindings
+        WHERE channel = #{channel}
+          AND lower(email) = lower(#{email})
+    </select>
+
+    <insert id="upsertBinding" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bot_user_bindings (
+            channel, external_user_id, email, verification_method, verified_at, created_at, updated_at
+        ) VALUES (
+            #{channel}, #{externalUserId}, #{email}, #{verificationMethod}, #{verifiedAt}, now(), now()
+        )
+        ON CONFLICT (channel, external_user_id) DO UPDATE SET
+            email = EXCLUDED.email,
+            verification_method = EXCLUDED.verification_method,
+            verified_at = EXCLUDED.verified_at,
+            updated_at = now()
+    </insert>
+
+    <delete id="deleteByExternalUser">
+        DELETE FROM bot_user_bindings
+        WHERE channel = #{channel}
+          AND external_user_id = #{externalUserId}
+    </delete>
+</mapper>

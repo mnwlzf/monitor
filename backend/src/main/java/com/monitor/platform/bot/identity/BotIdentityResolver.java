@@ -1,6 +1,7 @@
 package com.monitor.platform.bot.identity;
 
 import com.monitor.platform.bot.BotAdminService;
+import com.monitor.platform.bot.BotEmailBindingService;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,15 +23,18 @@ public class BotIdentityResolver {
 
     private final BotIdentityProperties properties;
     private final QqUserBindingService bindings;
+    private final BotEmailBindingService verifiedBindings;
     private final Sub2ApiUserCache cache;
     private final BotAdminService botAdmins;
 
     public BotIdentityResolver(BotIdentityProperties properties,
                                QqUserBindingService bindings,
+                               BotEmailBindingService verifiedBindings,
                                Sub2ApiUserCache cache,
                                BotAdminService botAdmins) {
         this.properties = properties;
         this.bindings = bindings;
+        this.verifiedBindings = verifiedBindings;
         this.cache = cache;
         this.botAdmins = botAdmins;
     }
@@ -39,7 +43,10 @@ public class BotIdentityResolver {
         if (qq == null || !properties.isEnabled()) {
             return BotIdentity.guest();
         }
-        String email = bindings.emailOf(qq).orElse(null);
+        String email = verifiedBindings.verifiedEmail(qq).orElse(null);
+        if (email == null) {
+            email = bindings.emailOf(qq).orElse(null);
+        }
         if (email == null && properties.isQqLocalPartMatch()) {
             email = cache.emailByQq(qq).orElse(null);
         }

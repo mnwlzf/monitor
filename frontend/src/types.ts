@@ -461,6 +461,34 @@ export interface BotForbiddenWord {
   word: string
   createdAt: string
 }
+
+/** 每日消费抽奖设置。 */
+export interface BotLotterySettings {
+  enabled: boolean
+  minUsageDaily: number
+  payoutRatioPercent: number
+  multiplierMin: number
+  multiplierMax: number
+  maxReward: number
+  dailyBudget: number
+  updatedAt: string | null
+}
+
+/** 一条抽奖记录。 */
+export interface BotLotteryDraw {
+  id: number
+  email: string
+  drawDate: string
+  eligibleUsage: number
+  payoutRatioPercent: number
+  multiplier: number
+  rewardAmount: number
+  status: 'PENDING' | 'CREDITED' | 'FAILED' | 'NO_PRIZE'
+  failureReason: string | null
+  createdAt: string
+  creditedAt: string | null
+}
+
 /** 监控项目侧登记的自定义管理员。 */
 export interface BotAdmin {
   id: number

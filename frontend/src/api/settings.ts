@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
+import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -166,6 +166,35 @@ export async function addBotForbiddenWord(word: string): Promise<BotForbiddenWor
 /** 删除机器人违禁词；删除后立即生效。 */
 export async function deleteBotForbiddenWord(id: number): Promise<void> {
   await apiRequest<void>(`/api/v1/settings/bot/forbidden-words/${id}`, { method: 'DELETE' })
+}
+
+/** 抽奖设置表单载荷。 */
+export interface BotLotterySettingsInput {
+  enabled: boolean
+  minUsageDaily: number
+  payoutRatioPercent: number
+  multiplierMin: number
+  multiplierMax: number
+  maxReward: number
+  dailyBudget: number
+}
+
+/** 读取每日消费抽奖设置。 */
+export async function getBotLotterySettings(): Promise<BotLotterySettings> {
+  return apiRequest<BotLotterySettings>('/api/v1/settings/lottery')
+}
+
+/** 保存每日消费抽奖设置。 */
+export async function saveBotLotterySettings(input: BotLotterySettingsInput): Promise<BotLotterySettings> {
+  return apiRequest<BotLotterySettings>('/api/v1/settings/lottery', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+/** 读取最近抽奖记录。 */
+export async function listBotLotteryDraws(limit = 50): Promise<BotLotteryDraw[]> {
+  return apiRequest<BotLotteryDraw[]>(`/api/v1/settings/lottery/draws?limit=${limit}`)
 }
 
 /** 读取身份识别总览（Sub2API 用户缓存情况 + 自定义管理员名单）。 */

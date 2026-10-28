@@ -226,6 +226,138 @@
     </el-card>
       </el-tab-pane>
 
+      <el-tab-pane label="抽奖活动" name="lottery" lazy>
+    <el-card shadow="never" class="admin-card" v-loading="lotteryLoading">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>每日消费抽奖</h3>
+            <p>按前一个完整自然日的实际余额消费核算资格，每人每天最多成功抽奖一次</p>
+          </div>
+          <el-button v-if="canWrite !== false" type="primary" :loading="lotterySaving" @click="saveLotterySettingsForm">
+            保存设置
+          </el-button>
+        </div>
+      </template>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="lottery-alert"
+        title="资格消费 = 抽奖日的前一天 00:00–24:00（Asia/Shanghai）的 actual_cost；不是从当前时间往前倒推 24 小时。"
+      />
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        class="lottery-alert"
+        title="邮箱绑定固定规则：验证码 5 分钟有效；同一 QQ 60 秒内不可重复发送；同一 QQ、同一邮箱每小时各最多 5 次；验证码最多输错 5 次。"
+      />
+
+      <el-form label-width="180px" :disabled="!canWrite">
+        <el-form-item label="启用抽奖">
+          <el-switch v-model="lotteryForm.enabled" />
+          <span class="admin-form-hint" style="margin-left: 10px">关闭后 /抽奖 会提示活动未开启</span>
+        </el-form-item>
+        <el-form-item label="前一日最低消费">
+          <el-input-number v-model="lotteryForm.minUsageDaily" :min="0" :max="1000000" :step="1" :precision="2" />
+          <span class="admin-form-hint" style="margin-left: 10px">
+            前一天实际扣余额消费达到该值才有资格；提高门槛会减少参与人数和总成本
+          </span>
+        </el-form-item>
+        <el-form-item label="中奖比例">
+          <el-input-number v-model="lotteryForm.payoutRatioPercent" :min="0.01" :max="100" :step="0.1" :precision="2" />
+          <span class="admin-form-hint" style="margin-left: 10px">
+            基础奖励 = 前一日消费 × 中奖比例；该比例不等同于最终实际成本率
+          </span>
+        </el-form-item>
+        <el-form-item label="随机系数下限">
+          <el-input-number v-model="lotteryForm.multiplierMin" :min="0.01" :max="100" :step="0.1" :precision="2" />
+          <span class="admin-form-hint" style="margin-left: 10px">与上限共同决定奖励波动和长期平均成本</span>
+        </el-form-item>
+        <el-form-item label="随机系数上限">
+          <el-input-number v-model="lotteryForm.multiplierMax" :min="0.01" :max="100" :step="0.1" :precision="2" />
+          <span class="admin-form-hint" style="margin-left: 10px">上限不能小于下限</span>
+        </el-form-item>
+        <el-form-item label="单人单次最高奖励">
+          <el-input-number v-model="lotteryForm.maxReward" :min="0.01" :max="1000000" :step="0.5" :precision="2" />
+          <span class="admin-form-hint" style="margin-left: 10px">只限制单个用户一次奖励，不是每日总支出上限</span>
+        </el-form-item>
+        <el-form-item label="每日总奖励预算">
+          <el-input-number v-model="lotteryForm.dailyBudget" :min="0.01" :max="10000000" :step="10" :precision="2" />
+          <span class="admin-form-hint" style="margin-left: 10px">所有用户当天累计发放的硬上限，达到后停止发奖</span>
+        </el-form-item>
+        <el-form-item label="每人每天抽奖次数">
+          <el-tag type="info" effect="plain">固定 1 次</el-tag>
+          <span class="admin-form-hint" style="margin-left: 10px">当天已成功抽奖或未中奖都会消耗当天机会</span>
+        </el-form-item>
+        <el-form-item>
+          <span v-if="lotteryUpdatedAt" class="admin-form-hint">上次保存：{{ lotteryUpdatedAt }}</span>
+        </el-form-item>
+      </el-form>
+
+      <el-divider content-position="left">成本与奖励预览</el-divider>
+      <div class="lottery-preview">
+        <div class="lottery-preview-item">
+          <span>平均随机系数</span>
+          <strong>{{ lotteryAverageMultiplier.toFixed(2) }}</strong>
+          <small>=(下限 + 上限) / 2</small>
+        </div>
+        <div class="lottery-preview-item">
+          <span>综合平均奖励率</span>
+          <strong>{{ lotteryEffectiveRatio.toFixed(2) }}%</strong>
+          <small>中奖比例 × 平均随机系数</small>
+        </div>
+        <div class="lottery-preview-item">
+          <span>单人单次封顶</span>
+          <strong>${{ Number(lotteryForm.maxReward || 0).toFixed(2) }}</strong>
+          <small>超过部分不发放</small>
+        </div>
+        <div class="lottery-preview-item">
+          <span>每日总预算</span>
+          <strong>${{ Number(lotteryForm.dailyBudget || 0).toFixed(2) }}</strong>
+          <small>全平台当天累计上限</small>
+        </div>
+      </div>
+
+      <el-table :data="lotteryPreviewRows" size="small" class="lottery-preview-table">
+        <el-table-column prop="label" label="前一日实际消费" min-width="180" />
+        <el-table-column prop="rawRange" label="未触发封顶的奖励范围" min-width="240" />
+        <el-table-column prop="finalRange" label="最终奖励范围" min-width="220" />
+      </el-table>
+      <small class="admin-form-hint">
+        随机系数围绕 1.0 对称时，长期平均成本基本等于前一日消费 × 中奖比例；最低奖励已取消，金额不足 $0.01 时按 $0.00 处理。
+      </small>
+
+      <el-divider content-position="left">最近抽奖记录</el-divider>
+      <el-table :data="lotteryDraws" size="small" class="lottery-draw-table">
+        <template #empty>还没有抽奖记录</template>
+        <el-table-column prop="email" label="用户邮箱" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="drawDate" label="抽奖日期" width="120" />
+        <el-table-column label="前一日消费" width="130" align="right">
+          <template #default="{ row }">${{ Number(row.eligibleUsage).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="奖励" width="100" align="right">
+          <template #default="{ row }">${{ Number(row.rewardAmount).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="lotteryStatusType(row.status)" size="small" effect="plain">
+              {{ lotteryStatusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="时间" width="180">
+          <template #default="{ row }">{{ formatIdentityTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column prop="failureReason" label="失败原因" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.failureReason || '-' }}</template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+      </el-tab-pane>
+
       <el-tab-pane label="机器人配置" name="bot" lazy>
     <el-card shadow="never" class="admin-card" v-loading="botLoading">
       <template #header>
@@ -545,22 +677,26 @@ import {
   addBotForbiddenWord,
   deleteBotAdmin,
   deleteBotForbiddenWord,
+  getBotLotterySettings,
   getBotIdentity,
   getBotSettings,
   getMailSettings,
   getNotificationSettings,
   listBotForbiddenWords,
+  listBotLotteryDraws,
+  saveBotLotterySettings,
   saveBotSettings,
   saveMailSettings,
   saveNotificationSettings,
   sendTestMail,
   syncBotIdentity,
   testMailConnection,
+  type BotLotterySettingsInput,
   type BotSettingsInput,
   type MailSettingsInput,
   type NotificationSettingsInput,
 } from '../api/settings'
-import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotSettings } from '../types'
+import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotSettings } from '../types'
 
 const props = defineProps<{ canWrite?: boolean }>()
 
@@ -700,6 +836,19 @@ const forbiddenLoading = ref(false)
 const forbiddenAdding = ref(false)
 const forbiddenWords = ref<BotForbiddenWord[]>([])
 const newForbiddenWord = ref('')
+const lotteryLoading = ref(false)
+const lotterySaving = ref(false)
+const lotteryUpdatedAt = ref('')
+const lotteryDraws = ref<BotLotteryDraw[]>([])
+const lotteryForm = reactive<BotLotterySettingsInput>({
+  enabled: false,
+  minUsageDaily: 10,
+  payoutRatioPercent: 3,
+  multiplierMin: 0.8,
+  multiplierMax: 1.2,
+  maxReward: 5,
+  dailyBudget: 50,
+})
 const botForm = reactive<BotSettingsInput>({
   enabled: true,
   allowedGroups: [],
@@ -822,6 +971,104 @@ async function removeForbiddenWord(row: BotForbiddenWord) {
   }
 }
 
+const lotteryAverageMultiplier = computed(() =>
+  ((lotteryForm.multiplierMin || 0) + (lotteryForm.multiplierMax || 0)) / 2,
+)
+const lotteryEffectiveRatio = computed(() =>
+  (lotteryForm.payoutRatioPercent || 0) * lotteryAverageMultiplier.value,
+)
+const lotteryPreviewRows = computed(() => {
+  const amounts = Array.from(new Set([
+    Math.max(0, lotteryForm.minUsageDaily || 0),
+    50,
+    100,
+  ])).sort((left, right) => left - right)
+  return amounts.map((usage) => {
+    const base = usage * (lotteryForm.payoutRatioPercent || 0) / 100
+    const rawMin = floorMoney(base * (lotteryForm.multiplierMin || 0))
+    const rawMax = floorMoney(base * (lotteryForm.multiplierMax || 0))
+    const finalMin = floorMoney(Math.min(rawMin, lotteryForm.maxReward || 0))
+    const finalMax = floorMoney(Math.min(rawMax, lotteryForm.maxReward || 0))
+    return {
+      label: `$${usage.toFixed(2)}`,
+      rawRange: rawMin === rawMax ? `$${rawMin.toFixed(2)}` : `$${rawMin.toFixed(2)} ~ $${rawMax.toFixed(2)}`,
+      finalRange: finalMin === finalMax ? `$${finalMin.toFixed(2)}` : `$${finalMin.toFixed(2)} ~ $${finalMax.toFixed(2)}`,
+    }
+  })
+})
+
+function floorMoney(value: number): number {
+  return Math.floor((value + 1e-9) * 100) / 100
+}
+
+function applyLotterySettings(settings: BotLotterySettings) {
+  Object.assign(lotteryForm, {
+    enabled: settings.enabled === true,
+    minUsageDaily: Number(settings.minUsageDaily ?? 10),
+    payoutRatioPercent: Number(settings.payoutRatioPercent ?? 3),
+    multiplierMin: Number(settings.multiplierMin ?? 0.8),
+    multiplierMax: Number(settings.multiplierMax ?? 1.2),
+    maxReward: Number(settings.maxReward ?? 5),
+    dailyBudget: Number(settings.dailyBudget ?? 50),
+  })
+  lotteryUpdatedAt.value = settings.updatedAt ? new Date(settings.updatedAt).toLocaleString('zh-CN') : ''
+}
+
+async function loadLottery() {
+  lotteryLoading.value = true
+  try {
+    const [settings, draws] = await Promise.all([
+      getBotLotterySettings(),
+      listBotLotteryDraws(30),
+    ])
+    applyLotterySettings(settings)
+    lotteryDraws.value = draws
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载抽奖设置失败')
+  } finally {
+    lotteryLoading.value = false
+  }
+}
+
+async function saveLotterySettingsForm() {
+  if (lotteryForm.multiplierMax < lotteryForm.multiplierMin) {
+    ElMessage.error('随机系数上限不能小于下限')
+    return
+  }
+  lotterySaving.value = true
+  try {
+    applyLotterySettings(await saveBotLotterySettings({ ...lotteryForm }))
+    lotteryDraws.value = await listBotLotteryDraws(30)
+    ElMessage.success('抽奖设置已保存，立即生效')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '保存失败')
+  } finally {
+    lotterySaving.value = false
+  }
+}
+
+function lotteryStatusText(status: BotLotteryDraw['status']): string {
+  return {
+    PENDING: '处理中',
+    CREDITED: '已发放',
+    FAILED: '发放失败',
+    NO_PRIZE: '未中奖',
+  }[status] || status
+}
+
+function lotteryStatusType(status: BotLotteryDraw['status']): 'success' | 'warning' | 'danger' | 'info' {
+  switch (status) {
+    case 'PENDING':
+      return 'warning'
+    case 'CREDITED':
+      return 'success'
+    case 'FAILED':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
 const identityLoading = ref(false)
 const identitySyncing = ref(false)
 const adminAdding = ref(false)
@@ -914,6 +1161,7 @@ onMounted(() => {
   loadNotification()
   loadBot()
   loadForbiddenWords()
+  loadLottery()
   loadIdentity()
 })
 </script>
@@ -1002,6 +1250,56 @@ onMounted(() => {
 
 .forbidden-table {
   width: 100%;
+}
+
+.lottery-alert {
+  margin-bottom: 16px;
+}
+
+.lottery-preview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.lottery-preview-item {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid #e3ebe8;
+  border-radius: 10px;
+  background: #f8fbfa;
+}
+
+.lottery-preview-item span,
+.lottery-preview-item small {
+  color: #7b8b87;
+  font-size: 11px;
+}
+
+.lottery-preview-item strong {
+  color: #1f7a69;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lottery-preview-table,
+.lottery-draw-table {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1100px) {
+  .lottery-preview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .lottery-preview {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settings-test-email {

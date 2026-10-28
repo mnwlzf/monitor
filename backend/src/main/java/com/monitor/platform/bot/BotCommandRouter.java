@@ -6,7 +6,6 @@ import com.monitor.platform.bot.error.BotErrorQueryGuard;
 import com.monitor.platform.bot.error.BotErrorService;
 import com.monitor.platform.bot.error.BotInstanceErrorService;
 import com.monitor.platform.bot.identity.BotIdentity;
-import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.identity.Sub2ApiUserCache;
 import com.monitor.platform.bot.image.GeneratedImages;
 import com.monitor.platform.bot.image.ImageGenService;
@@ -23,7 +22,6 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
 /**
  * 确定性命令的路由与权限闸门：{@code /help}、{@code /绑定}、{@code /平台}、{@code /号池}……
@@ -36,9 +34,6 @@ import java.util.regex.Pattern;
  */
 @Component
 public class BotCommandRouter {
-
-    /** 邮箱格式校验：够用即可，不做 RFC 级校验。 */
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     private static final String ADMIN_HELP = """
             可用命令：
@@ -73,8 +68,12 @@ public class BotCommandRouter {
             - /我的用量 [窗]   我自己的用量（today / week / month）
             - /我的密钥        我自己的 API Key 列表
             - /我的信息        查看当前绑定的邮箱
-            - /绑定 <邮箱>     绑定邮箱
+            - /绑定 <邮箱>     发送验证码验证并绑定邮箱
+            - /验证 <验证码>   完成邮箱绑定
             - /解绑            解除绑定
+            - /抽奖            参与每日消费抽奖
+            - /抽奖规则        查看昨日消费门槛与奖励参数
+            - /抽奖记录        查看自己的最近抽奖记录
             - /天气 <城市>     实时天气与预报（所有人都能用）
             - /画图 <提示词>   生成一张图片（所有人都能用，全局一分钟最多 3 张）
             - /违禁词          查看机器人违禁词
@@ -94,8 +93,12 @@ public class BotCommandRouter {
             - /我的用量 [窗]   我的用量（today / week / month，默认 today）
             - /我的密钥        我的 API Key 列表
             - /我的信息        查看当前绑定的邮箱
-            - /绑定 <邮箱>     绑定邮箱
+            - /绑定 <邮箱>     发送验证码验证并绑定邮箱
+            - /验证 <验证码>   完成邮箱绑定
             - /解绑            解除绑定
+            - /抽奖            参与每日消费抽奖
+            - /抽奖规则        查看昨日消费门槛与奖励参数
+            - /抽奖记录        查看自己的最近抽奖记录
             - /天气 <城市>     实时天气与预报（所有人都能用）
             - /画图 <提示词>   生成一张图片（所有人都能用，全局一分钟最多 3 张）
             - /渠道状态 [时间窗]  我可用分组的渠道状态（默认近 1 小时）
@@ -105,7 +108,8 @@ public class BotCommandRouter {
 
     private static final String GUEST_HELP = """
             我能做的事：
-            - /绑定 <邮箱>     绑定你的邮箱
+            - /绑定 <邮箱>     发送验证码验证并绑定邮箱
+            - /验证 <验证码>   完成邮箱绑定
             - /解绑            解除绑定
             - /我的信息        查看当前绑定
             - /天气 <城市>     实时天气与预报
@@ -125,11 +129,12 @@ public class BotCommandRouter {
     private final BotErrorQueryAuditService errorQueryAuditService;
     private final BotUserService botUserService;
     private final WeatherTools weatherTools;
-    private final QqUserBindingService bindings;
     private final Sub2ApiUserCache userCache;
     private final ImageGenService imageGenService;
     private final OpenAiStatusService openAiStatusService;
     private final BotForbiddenWordService forbiddenWordService;
+    private final BotEmailBindingService emailBindingService;
+    private final BotLotteryService lotteryService;
 
     public BotCommandRouter(MonitorChatTools tools,
                             BotOrderTools orderTools,
@@ -141,11 +146,12 @@ public class BotCommandRouter {
                             BotErrorQueryAuditService errorQueryAuditService,
                             BotUserService botUserService,
                             WeatherTools weatherTools,
-                            QqUserBindingService bindings,
                             Sub2ApiUserCache userCache,
                             ImageGenService imageGenService,
                             OpenAiStatusService openAiStatusService,
-                            BotForbiddenWordService forbiddenWordService) {
+                            BotForbiddenWordService forbiddenWordService,
+                            BotEmailBindingService emailBindingService,
+                            BotLotteryService lotteryService) {
         this.tools = tools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
@@ -156,11 +162,12 @@ public class BotCommandRouter {
         this.errorQueryAuditService = errorQueryAuditService;
         this.botUserService = botUserService;
         this.weatherTools = weatherTools;
-        this.bindings = bindings;
         this.userCache = userCache;
         this.imageGenService = imageGenService;
         this.openAiStatusService = openAiStatusService;
         this.forbiddenWordService = forbiddenWordService;
+        this.emailBindingService = emailBindingService;
+        this.lotteryService = lotteryService;
     }
 
     /**
@@ -179,8 +186,14 @@ public class BotCommandRouter {
         return switch (name) {
             case "help", "帮助", "?" -> text(help(identity, platformFeature, openAiStatusAllowed,
                     inGroupContext(event)));
-            case "bind", "绑定" -> text(bind(arg, event));
-            case "unbind", "解绑" -> text(unbind(event));
+            case "bind", "绑定" -> bindingAction(() -> emailBindingService.requestBinding(event.userId(), arg));
+            case "verify", "验证", "验证码" ->
+                    bindingAction(() -> emailBindingService.verify(event.userId(), arg));
+            case "unbind", "解绑" -> text(emailBindingService.unbind(event.userId()));
+            case "抽奖", "lottery" -> lotteryCommand(identity, () -> lotteryService.draw(event.userId()));
+            case "抽奖规则", "lotteryrules" -> lotteryCommand(identity, lotteryService::rules);
+            case "抽奖记录", "lotteryrecords" ->
+                    lotteryCommand(identity, () -> lotteryService.recent(event.userId()));
             case "whoami", "我的信息", "me" -> inGroupContext(event)
                     ? text(UNKNOWN_COMMAND)
                     : text(whoami(identity));
@@ -442,25 +455,19 @@ public class BotCommandRouter {
         return BotReport.fromMarkdown(value);
     }
 
-    /**
-     * 绑定邮箱。
-     *
-     * <p>无论邮箱是否命中平台用户列表，回复都一样：否则任何人都能靠反复绑定邮箱，
-     * 从回复差异里枚举出哪些邮箱是平台用户。</p>
-     */
-    private String bind(String email, OneBotEvent event) {
-        if (email.isBlank()) {
-            return "用法：/绑定 <邮箱>";
+    private BotReport bindingAction(Supplier<String> action) {
+        try {
+            return text(action.get());
+        } catch (BusinessException ex) {
+            return text(ex.getMessage());
         }
-        if (!EMAIL_PATTERN.matcher(email).matches()) {
-            return "邮箱格式不正确。用法：/绑定 <邮箱>";
-        }
-        return bindings.bind(event.userId(), email) ? "已记录你的邮箱。" : "绑定失败，请稍后再试。";
     }
 
-    private String unbind(OneBotEvent event) {
-        bindings.unbind(event.userId());
-        return "已解除绑定。";
+    private BotReport lotteryCommand(BotIdentity identity, Supplier<String> action) {
+        if (identity == null || !identity.platformUser()) {
+            return text("请先发送 /绑定 <邮箱> 并完成验证，绑定成功后即可参与抽奖。");
+        }
+        return text(action.get());
     }
 
     /**

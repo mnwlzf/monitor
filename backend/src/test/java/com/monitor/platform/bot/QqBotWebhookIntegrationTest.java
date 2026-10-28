@@ -3,7 +3,6 @@ package com.monitor.platform.bot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.identity.BotIdentity;
 import com.monitor.platform.bot.identity.BotIdentityResolver;
-import com.monitor.platform.bot.identity.QqUserBindingService;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import com.monitor.platform.bot.user.BotBalanceService;
 import com.monitor.platform.bot.user.BotKeyUsageService;
@@ -84,7 +83,6 @@ class QqBotWebhookIntegrationTest {
         BotIdentityResolver identityResolver = mock(BotIdentityResolver.class);
         when(identityResolver.resolve(org.mockito.ArgumentMatchers.anyLong()))
                 .thenReturn(new BotIdentity(true, true, "admin@qq.com"));
-        QqUserBindingService bindings = mock(QqUserBindingService.class);
         // 这里的回复很短，不会走图片渲染；仅需满足构造依赖
         BotReportRenderer reportRenderer = mock(BotReportRenderer.class);
         WeatherTools weatherTools = mock(WeatherTools.class);
@@ -108,13 +106,15 @@ class QqBotWebhookIntegrationTest {
         OpenAiStatusService openAiStatusService = mock(OpenAiStatusService.class);
         BotGroupRedactor groupRedactor = mock(BotGroupRedactor.class);
         BotForbiddenWordService forbiddenWordService = mock(BotForbiddenWordService.class);
+        BotEmailBindingService emailBindingService = mock(BotEmailBindingService.class);
+        BotLotteryService lotteryService = mock(BotLotteryService.class);
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, bindings, userCache, imageGenService, openAiStatusService, forbiddenWordService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService);
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

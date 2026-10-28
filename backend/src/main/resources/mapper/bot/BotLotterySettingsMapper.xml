@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.bot.BotLotterySettingsMapper">
+
+    <resultMap id="BotLotterySettingsResultMap" type="com.monitor.platform.bot.BotLotterySettingsEntity">
+        <id column="id" property="id"/>
+        <result column="enabled" property="enabled"/>
+        <result column="min_usage_daily" property="minUsageDaily"/>
+        <result column="payout_ratio" property="payoutRatio"/>
+        <result column="multiplier_min" property="multiplierMin"/>
+        <result column="multiplier_max" property="multiplierMax"/>
+        <result column="max_reward" property="maxReward"/>
+        <result column="daily_budget" property="dailyBudget"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectSettings" resultMap="BotLotterySettingsResultMap">
+        SELECT id, enabled, min_usage_daily, payout_ratio, multiplier_min, multiplier_max,
+               max_reward, daily_budget, updated_at
+        FROM bot_lottery_settings
+        WHERE id = 1
+    </select>
+
+    <insert id="upsertSettings">
+        INSERT INTO bot_lottery_settings (
+            id, enabled, min_usage_daily, payout_ratio, multiplier_min, multiplier_max,
+            max_reward, daily_budget, updated_at
+        ) VALUES (
+            1, #{enabled}, #{minUsageDaily}, #{payoutRatio}, #{multiplierMin}, #{multiplierMax},
+            #{maxReward}, #{dailyBudget}, #{updatedAt}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            enabled = EXCLUDED.enabled,
+            min_usage_daily = EXCLUDED.min_usage_daily,
+            payout_ratio = EXCLUDED.payout_ratio,
+            multiplier_min = EXCLUDED.multiplier_min,
+            multiplier_max = EXCLUDED.multiplier_max,
+            max_reward = EXCLUDED.max_reward,
+            daily_budget = EXCLUDED.daily_budget,
+            updated_at = EXCLUDED.updated_at
+    </insert>
+</mapper>

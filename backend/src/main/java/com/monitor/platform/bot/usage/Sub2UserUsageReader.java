@@ -118,6 +118,26 @@ public class Sub2UserUsageReader {
                 : rows.get(0);
     }
 
+    /** 指定用户在时间窗内实际扣余额的消费合计。 */
+    public BigDecimal actualCostByUser(long userId, OffsetDateTime from, OffsetDateTime to) {
+        List<BigDecimal> rows = jdbc.template().query(connection -> {
+            var statement = connection.prepareStatement("""
+                    SELECT COALESCE(SUM(actual_cost), 0)
+                    FROM usage_logs
+                    WHERE user_id = ?
+                      AND created_at >= ?
+                      AND created_at < ?
+                      AND billing_type = 0
+                      AND actual_cost <> 0
+                    """);
+            statement.setLong(1, userId);
+            statement.setObject(2, from);
+            statement.setObject(3, to);
+            return statement;
+        }, (rs, rowNum) -> rs.getBigDecimal(1));
+        return rows.isEmpty() || rows.get(0) == null ? BigDecimal.ZERO : rows.get(0);
+    }
+
     /** 单个用户在时间窗内的余额消耗。 */
     public record UserConsumption(
             long userId,

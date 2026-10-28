@@ -1,6 +1,7 @@
 package com.monitor.platform.bot.identity;
 
 import com.monitor.platform.bot.BotAdminService;
+import com.monitor.platform.bot.BotEmailBindingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,7 @@ class BotIdentityResolverTest {
 
     private BotIdentityProperties properties;
     private QqUserBindingService bindings;
+    private BotEmailBindingService verifiedBindings;
     private Sub2ApiUserCache cache;
     private BotAdminService botAdmins;
     private BotIdentityResolver resolver;
@@ -30,9 +32,11 @@ class BotIdentityResolverTest {
     void setUp() {
         properties = new BotIdentityProperties();
         bindings = mock(QqUserBindingService.class);
+        verifiedBindings = mock(BotEmailBindingService.class);
         cache = mock(Sub2ApiUserCache.class);
         botAdmins = mock(BotAdminService.class);
-        resolver = new BotIdentityResolver(properties, bindings, cache, botAdmins);
+        when(verifiedBindings.verifiedEmail(QQ)).thenReturn(Optional.empty());
+        resolver = new BotIdentityResolver(properties, bindings, verifiedBindings, cache, botAdmins);
     }
 
     @Test
@@ -109,6 +113,15 @@ class BotIdentityResolverTest {
         when(cache.isAdmin("bound@example.com")).thenReturn(false);
 
         assertEquals("bound@example.com", resolver.resolve(QQ).email());
+    }
+
+    @Test
+    void shouldPreferVerifiedBindingOverLegacyBinding() {
+        when(verifiedBindings.verifiedEmail(QQ)).thenReturn(Optional.of("verified@example.com"));
+        when(cache.contains("verified@example.com")).thenReturn(true);
+        when(cache.isAdmin("verified@example.com")).thenReturn(false);
+
+        assertEquals("verified@example.com", resolver.resolve(QQ).email());
     }
 
     @Test

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.bot.BotLotteryDrawMapper">
+
+    <resultMap id="BotLotteryDrawResultMap" type="com.monitor.platform.bot.BotLotteryDrawEntity">
+        <id column="id" property="id"/>
+        <result column="channel" property="channel"/>
+        <result column="external_user_id" property="externalUserId"/>
+        <result column="email" property="email"/>
+        <result column="platform_user_id" property="platformUserId"/>
+        <result column="draw_date" property="drawDate"/>
+        <result column="usage_window_start" property="usageWindowStart"/>
+        <result column="usage_window_end" property="usageWindowEnd"/>
+        <result column="eligible_usage" property="eligibleUsage"/>
+        <result column="payout_ratio" property="payoutRatio"/>
+        <result column="multiplier" property="multiplier"/>
+        <result column="reward_amount" property="rewardAmount"/>
+        <result column="status" property="status"/>
+        <result column="idempotency_key" property="idempotencyKey"/>
+        <result column="failure_reason" property="failureReason"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="credited_at" property="creditedAt"/>
+    </resultMap>
+
+    <sql id="columns">
+        id, channel, external_user_id, email, platform_user_id, draw_date,
+        usage_window_start, usage_window_end, eligible_usage, payout_ratio,
+        multiplier, reward_amount, status, idempotency_key, failure_reason,
+        created_at, credited_at
+    </sql>
+
+    <select id="selectByUserAndDate" resultMap="BotLotteryDrawResultMap">
+        SELECT <include refid="columns"/>
+        FROM bot_lottery_draws
+        WHERE channel = #{channel}
+          AND external_user_id = #{externalUserId}
+          AND draw_date = #{drawDate}
+    </select>
+
+    <select id="selectRecentByUser" resultMap="BotLotteryDrawResultMap">
+        SELECT <include refid="columns"/>
+        FROM bot_lottery_draws
+        WHERE channel = #{channel}
+          AND external_user_id = #{externalUserId}
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectRecent" resultMap="BotLotteryDrawResultMap">
+        SELECT <include refid="columns"/>
+        FROM bot_lottery_draws
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+    <insert id="insertDraw" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bot_lottery_draws (
+            channel, external_user_id, email, platform_user_id, draw_date,
+            usage_window_start, usage_window_end, eligible_usage, payout_ratio,
+            multiplier, reward_amount, status, idempotency_key, failure_reason,
+            created_at, credited_at
+        ) VALUES (
+            #{channel}, #{externalUserId}, #{email}, #{platformUserId}, #{drawDate},
+            #{usageWindowStart}, #{usageWindowEnd}, #{eligibleUsage}, #{payoutRatio},
+            #{multiplier}, #{rewardAmount}, #{status}, #{idempotencyKey}, #{failureReason},
+            now(), #{creditedAt}
+        )
+    </insert>
+
+    <update id="markCredited">
+        UPDATE bot_lottery_draws
+        SET status = 'CREDITED',
+            credited_at = #{creditedAt},
+            failure_reason = NULL
+        WHERE id = #{id}
+    </update>
+
+    <update id="markFailed">
+        UPDATE bot_lottery_draws
+        SET status = 'FAILED',
+            failure_reason = #{failureReason},
+            credited_at = NULL
+        WHERE id = #{id}
+    </update>
+
+    <update id="markNoPrize">
+        UPDATE bot_lottery_draws
+        SET status = 'NO_PRIZE',
+            credited_at = NULL,
+            failure_reason = NULL
+        WHERE id = #{id}
+    </update>
+
+    <select id="sumReservedBudget" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(reward_amount), 0)
+        FROM bot_lottery_draws
+        WHERE draw_date = #{drawDate}
+          AND (
+              status = 'CREDITED'
+              OR (status = 'PENDING' AND created_at >= #{pendingSince})
+          )
+        <if test="excludeId != null">
+          AND id &lt;&gt; #{excludeId}
+        </if>
+    </select>
+</mapper>

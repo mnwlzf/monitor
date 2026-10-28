@@ -117,6 +117,8 @@ public class BotMessageService {
     private final OpenAiStatusService openAiStatusService;
     private final BotGroupRedactor groupRedactor;
     private final BotForbiddenWordService forbiddenWordService;
+    private final BotEmailBindingService emailBindingService;
+    private final BotLotteryService lotteryService;
 
     static final String FORBIDDEN_WORD_REPLY = "你的消息触发了违禁词，当前无法回答。请修改后重试。";
 
@@ -149,7 +151,9 @@ public class BotMessageService {
                              BotCommandRouter commandRouter,
                              OpenAiStatusService openAiStatusService,
                              BotGroupRedactor groupRedactor,
-                             BotForbiddenWordService forbiddenWordService) {
+                             BotForbiddenWordService forbiddenWordService,
+                             BotEmailBindingService emailBindingService,
+                             BotLotteryService lotteryService) {
         this.settingsService = settingsService;
         this.client = client;
         this.parser = parser;
@@ -174,6 +178,8 @@ public class BotMessageService {
         this.openAiStatusService = openAiStatusService;
         this.groupRedactor = groupRedactor;
         this.forbiddenWordService = forbiddenWordService;
+        this.emailBindingService = emailBindingService;
+        this.lotteryService = lotteryService;
     }
 
     /** 入口：OneBot 反向 HTTP 推过来的一条事件。 */
@@ -251,6 +257,7 @@ public class BotMessageService {
         String turnContent = !text.isBlank()
                 ? text
                 : hasVoice ? "（语音消息）" : (quoted.text().isBlank() ? "" : "（引用了：" + quoted.text() + "）");
+        turnContent = redactVerificationCode(turnContent, event.userId());
         String turnId = runtimeStatus.beginTurn(channel, event.groupId(), event.userId(), turnContent);
         executor.submit(() -> {
             try {
@@ -300,8 +307,9 @@ public class BotMessageService {
                 boolean hasImages = !ownImageRefs.isEmpty() || !quotedImageRefs.isEmpty();
 
                 // 先存档用户消息：即使后面回答失败，也能查证「他说了什么、发了什么图/语音」
+                String archiveText = redactVerificationCode(effectiveText, event.userId());
                 String correlationId = archive.recordInbound(event,
-                        describeIncoming(effectiveText, ownImageRefs.size(), ownImages.size(),
+                        describeIncoming(archiveText, ownImageRefs.size(), ownImages.size(),
                                 quotedImageRefs.size(), quotedImages.size(), hasVoice),
                         kindOf(effectiveText, settings, hasImages, hasVoice), identity);
 
@@ -455,8 +463,31 @@ public class BotMessageService {
             return commandRouter.route(commandLine, identity, platformFeature,
                     openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
         }
+        String plainText = text.strip();
+        if (plainText.matches("\\d{6}") && emailBindingService.hasPending(event.userId())) {
+            return text(emailBindingService.verify(event.userId(), plainText));
+        }
+        if (isLotteryIntent(plainText)) {
+            return text(lotteryService.draw(event.userId()));
+        }
         return askModel(event, text, quoted, quotedHasImages, settings, identity, platformFeature,
                 openAiStatusAllowed, channel, images, generated, voiceReply);
+    }
+
+    private static boolean isLotteryIntent(String text) {
+        String normalized = text == null ? "" : text.replaceAll("[。！!？?\\s]+$", "");
+        return switch (normalized) {
+            case "抽奖", "我要抽奖", "参与抽奖", "开始抽奖", "lottery" -> true;
+            default -> false;
+        };
+    }
+
+    private String redactVerificationCode(String text, Long qq) {
+        if (text == null || text.isBlank() || qq == null) {
+            return text == null ? "" : text;
+        }
+        String candidate = text.strip().replaceFirst("^\\S*?验证(?:码)?\\s+", "").strip();
+        return candidate.matches("\\d{6}") && emailBindingService.hasPending(qq) ? "******" : text;
     }
 
     /** 纯文本包成报表：短内容仍按纯文本发出，长内容走段落渲染。 */
