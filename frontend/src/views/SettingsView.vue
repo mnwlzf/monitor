@@ -254,6 +254,13 @@
         class="lottery-alert"
         title="邮箱绑定固定规则：验证码 5 分钟有效；同一 QQ 60 秒内不可重复发送；同一 QQ、同一邮箱每小时各最多 5 次；验证码最多输错 5 次。"
       />
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        class="lottery-alert"
+        title="抽奖只在「指定群（平台功能 / OpenAI 状态）」或指定群临时会话中触发；私聊和非指定群不会执行抽奖。"
+      />
 
       <el-form label-width="180px" :disabled="!canWrite">
         <el-form-item label="启用抽奖">

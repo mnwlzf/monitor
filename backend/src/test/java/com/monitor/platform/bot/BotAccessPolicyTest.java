@@ -61,4 +61,13 @@ class BotAccessPolicyTest {
         assertThat(BotAccessPolicy.openAiStatusAllowed(
                 GUEST, BotChannel.GROUP, 100L, SETTINGS)).isFalse();
     }
+
+    @Test
+    void lotteryOnlyAllowsDesignatedGroupContext() {
+        assertThat(BotAccessPolicy.lotteryAllowed(USER, BotChannel.GROUP, 100L, SETTINGS)).isTrue();
+        assertThat(BotAccessPolicy.lotteryAllowed(ADMIN, BotChannel.TEMP_SESSION, 100L, SETTINGS)).isTrue();
+        assertThat(BotAccessPolicy.lotteryAllowed(ADMIN, BotChannel.GROUP, 200L, SETTINGS)).isFalse();
+        assertThat(BotAccessPolicy.lotteryAllowed(ADMIN, BotChannel.PRIVATE, null, SETTINGS)).isFalse();
+        assertThat(BotAccessPolicy.lotteryAllowed(GUEST, BotChannel.GROUP, 100L, SETTINGS)).isFalse();
+    }
 }

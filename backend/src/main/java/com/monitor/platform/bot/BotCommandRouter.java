@@ -80,6 +80,7 @@ public class BotCommandRouter {
             - /添加违禁词 <内容>  添加违禁词（命中后机器人拒绝回答）
             - /删除违禁词 <内容>  删除违禁词
             也可以直接说「查看违禁词」「添加违禁词 测试词」「把测试词从违禁词中删除」
+            也可以直接说「绑定邮箱 user@example.com」「验证码 123456」完成邮箱绑定
             也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」
             错误排障也可以直接问：「最近一小时错误最多的账号是谁？」「今天 401 多不多？」「现在系统有什么问题？」
             需要新建 Sub2API 密钥时，直接说清五项：厂商 / 名称 / 分组 / 额度限制 / 有效期（天数或 yyyy-MM-dd HH:mm:ss）。
@@ -104,6 +105,7 @@ public class BotCommandRouter {
             - /渠道状态 [时间窗]  我可用分组的渠道状态（默认近 1 小时）
             - /openai          OpenAI 官方服务状态（中文）
             - /我的错误 [时间窗]  我自己的错误（默认近 24 小时）
+            也可以直接说「绑定邮箱 user@example.com」「验证码 123456」完成邮箱绑定
             平台级数据（账号、号池、变更记录）仅管理员可查。""";
 
     private static final String GUEST_HELP = """
@@ -114,10 +116,12 @@ public class BotCommandRouter {
             - /我的信息        查看当前绑定
             - /天气 <城市>     实时天气与预报
             - /画图 <提示词>   生成一张图片
+            也可以直接说「绑定邮箱 user@example.com」「验证码 123456」
             也可以直接和我聊天。""";
 
     /** 非平台用户看到「未知命令」时的统一回复，不暴露平台功能的存在。 */
     private static final String UNKNOWN_COMMAND = "这个命令我用不了，发送 /help 看看能做什么。";
+    static final String UNKNOWN_COMMAND_TEXT = UNKNOWN_COMMAND;
 
     private final MonitorChatTools tools;
     private final BotOrderTools orderTools;
@@ -178,7 +182,7 @@ public class BotCommandRouter {
      *                         并且只在通过限频、真的要开始画时触发。
      */
     public BotReport route(String commandLine, BotIdentity identity, boolean platformFeature,
-                           boolean openAiStatusAllowed, OneBotEvent event,
+                           boolean openAiStatusAllowed, boolean lotteryAllowed, OneBotEvent event,
                            GeneratedImages generated, Runnable imageStartNotice) {
         String[] parts = commandLine.split("\\s+", 2);
         String name = parts[0].toLowerCase(Locale.ROOT);
@@ -190,10 +194,10 @@ public class BotCommandRouter {
             case "verify", "验证", "验证码" ->
                     bindingAction(() -> emailBindingService.verify(event.userId(), arg));
             case "unbind", "解绑" -> text(emailBindingService.unbind(event.userId()));
-            case "抽奖", "lottery" -> lotteryCommand(identity, () -> lotteryService.draw(event.userId()));
-            case "抽奖规则", "lotteryrules" -> lotteryCommand(identity, lotteryService::rules);
+            case "抽奖", "lottery" -> lotteryCommand(identity, lotteryAllowed, () -> lotteryService.draw(event.userId()));
+            case "抽奖规则", "lotteryrules" -> lotteryCommand(identity, lotteryAllowed, lotteryService::rules);
             case "抽奖记录", "lotteryrecords" ->
-                    lotteryCommand(identity, () -> lotteryService.recent(event.userId()));
+                    lotteryCommand(identity, lotteryAllowed, () -> lotteryService.recent(event.userId()));
             case "whoami", "我的信息", "me" -> inGroupContext(event)
                     ? text(UNKNOWN_COMMAND)
                     : text(whoami(identity));
@@ -463,7 +467,10 @@ public class BotCommandRouter {
         }
     }
 
-    private BotReport lotteryCommand(BotIdentity identity, Supplier<String> action) {
+    private BotReport lotteryCommand(BotIdentity identity, boolean lotteryAllowed, Supplier<String> action) {
+        if (!lotteryAllowed) {
+            return text(UNKNOWN_COMMAND);
+        }
         if (identity == null || !identity.platformUser()) {
             return text("请先发送 /绑定 <邮箱> 并完成验证，绑定成功后即可参与抽奖。");
         }

@@ -919,10 +919,10 @@ class BotMessageServiceTest {
         identityIs(normalUser());
         when(lotteryService.draw(999L)).thenReturn("抽奖结果：$0.60");
 
-        service.onEvent(event(privateCommand("/抽奖")));
+        service.onEvent(event(mentionedGroupCommand(222L, "/抽奖")));
 
         verify(lotteryService, timeout(3000)).draw(999L);
-        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("抽奖结果"));
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("抽奖结果"));
     }
 
     @Test
@@ -930,10 +930,53 @@ class BotMessageServiceTest {
         identityIs(normalUser());
         when(lotteryService.draw(999L)).thenReturn("抽奖结果：$0.60");
 
-        service.onEvent(event(privateCommand("我要抽奖")));
+        service.onEvent(event(mentionedGroupCommand(222L, "我要抽奖")));
 
         verify(lotteryService, timeout(3000)).draw(999L);
-        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("抽奖结果"));
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("抽奖结果"));
+    }
+
+    @Test
+    void shouldDenyLotteryInNonDesignatedGroup() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event(mentionedGroupCommand(333L, "/抽奖")));
+
+        verify(lotteryService, never()).draw(999L);
+        verify(client, timeout(3000)).sendGroupMessage(eq(333L), contains("这个命令我用不了"));
+    }
+
+    @Test
+    void shouldDenyLotteryInPrivateChat() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event(privateCommand("/抽奖")));
+
+        verify(lotteryService, never()).draw(999L);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("这个命令我用不了"));
+    }
+
+    @Test
+    void shouldBindEmailWithNaturalLanguage() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(emailBindingService.requestBinding(999L, "user@example.com"))
+                .thenReturn("验证码已发送至 user@example.com，5 分钟内有效。");
+
+        service.onEvent(event(mentionedGroupCommand(222L, "绑定邮箱 user@example.com")));
+
+        verify(emailBindingService, timeout(3000)).requestBinding(999L, "user@example.com");
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("验证码已发送"));
+    }
+
+    @Test
+    void shouldVerifyEmailWithNaturalLanguage() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(emailBindingService.verify(999L, "123456")).thenReturn("绑定成功，当前邮箱：user@example.com。");
+
+        service.onEvent(event(mentionedGroupCommand(222L, "验证码 123456")));
+
+        verify(emailBindingService, timeout(3000)).verify(999L, "123456");
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("绑定成功"));
     }
 
     /** 超过 maxReplyLength 的回复应渲染成图片发送，而不是被截断。 */

@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -436,20 +437,22 @@ public class BotMessageService {
         String prefix = settings.commandPrefix();
         String commandLine = !text.isBlank() && prefix != null && !prefix.isBlank() && text.startsWith(prefix)
                 ? text.substring(prefix.length()).trim() : null;
+        Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
+        boolean lotteryAllowed = BotAccessPolicy.lotteryAllowed(identity, channel, contextGroup, settings);
 
         // 违禁词管理不要求「指定群」，任意已启用群或管理员私聊都可以维护。
         boolean canManageForbiddenWords = identity.admin();
         // 管理命令本身必然会包含待添加/删除的词，因此对有权执行的管理员先于过滤处理。
         if (canManageForbiddenWords && BotCommandRouter.isForbiddenWordManagementCommand(commandLine)) {
             return commandRouter.route(commandLine, identity, platformFeature,
-                    openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
+                    openAiStatusAllowed, lotteryAllowed, event, generated, () -> notifyImageStart(event, generated));
         }
         // 管理员也可以直接用自然语言维护；只执行意图明确的短句，避免误操作。
         if (canManageForbiddenWords && commandLine == null) {
             var naturalLanguageCommand = BotForbiddenWordIntent.toCommandLine(text);
             if (naturalLanguageCommand.isPresent()) {
                 return commandRouter.route(naturalLanguageCommand.get(), identity, platformFeature,
-                        openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
+                        openAiStatusAllowed, lotteryAllowed, event, generated, () -> notifyImageStart(event, generated));
             }
         }
         // 用户原文、引用内容、语音转写已在 text 中合并；普通用户任一命中都不进入大模型。
@@ -461,14 +464,25 @@ public class BotMessageService {
         // 只发图片时 text 为空，不能当命令处理，直接交给模型
         if (commandLine != null) {
             return commandRouter.route(commandLine, identity, platformFeature,
-                    openAiStatusAllowed, event, generated, () -> notifyImageStart(event, generated));
+                    openAiStatusAllowed, lotteryAllowed, event, generated, () -> notifyImageStart(event, generated));
         }
         String plainText = text.strip();
         if (plainText.matches("\\d{6}") && emailBindingService.hasPending(event.userId())) {
             return text(emailBindingService.verify(event.userId(), plainText));
         }
+        Optional<BotEmailBindingIntent.Intent> bindingIntent = BotEmailBindingIntent.parse(plainText);
+        if (bindingIntent.isPresent()) {
+            BotEmailBindingIntent.Intent intent = bindingIntent.get();
+            return text(switch (intent.action()) {
+                case BIND -> emailBindingService.requestBinding(event.userId(), intent.value());
+                case VERIFY -> emailBindingService.verify(event.userId(), intent.value());
+                case UNBIND -> emailBindingService.unbind(event.userId());
+            });
+        }
         if (isLotteryIntent(plainText)) {
-            return text(lotteryService.draw(event.userId()));
+            return lotteryAllowed
+                    ? text(lotteryService.draw(event.userId()))
+                    : text(BotCommandRouter.UNKNOWN_COMMAND_TEXT);
         }
         return askModel(event, text, quoted, quotedHasImages, settings, identity, platformFeature,
                 openAiStatusAllowed, channel, images, generated, voiceReply);
@@ -535,6 +549,7 @@ public class BotMessageService {
                         }));
                     }
                 });
+        request = request.tools(new BotEmailBindingTools(emailBindingService, event.userId()));
         // 用户端工具按请求绑定发送者邮箱：大模型只能查到发送者本人的数据
         if (platformFeature && identity.hasEmail()) {
             request = request.tools(new BotUserTools(botUserService, botKeyUsageService, identity.email()));
