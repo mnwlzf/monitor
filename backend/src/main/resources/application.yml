@@ -126,6 +126,15 @@ monitor:
       # 允许按 <QQ号>@xx.com 的邮箱自动匹配 QQ，无需手动绑定
       qq-local-part-match: ${MONITOR_BOT_IDENTITY_QQ_MATCH:true}
 
+    # 主聊天模型异常时的备用模型；只有配置 API Key 后才启用。
+    # 地址和模型不填时继承主模型配置。
+    model-fallback:
+      enabled: ${SPRING_AI_OPENAI_FALLBACK_ENABLED:true}
+      api-key: ${SPRING_AI_OPENAI_FALLBACK_API_KEY:}
+      base-url: ${SPRING_AI_OPENAI_FALLBACK_BASE_URL:${SPRING_AI_OPENAI_BASE_URL:https://api.openai.com}}
+      model: ${SPRING_AI_OPENAI_FALLBACK_MODEL:${SPRING_AI_OPENAI_MODEL:gpt-4o-mini}}
+      temperature: ${SPRING_AI_OPENAI_FALLBACK_TEMPERATURE:${SPRING_AI_OPENAI_TEMPERATURE:0.2}}
+
   # NapCat WebUI：读取容器日志与离线扫码登录；配置目录由 compose 只读挂载。
   napcat:
     enabled: ${MONITOR_NAPCAT_ENABLED:true}

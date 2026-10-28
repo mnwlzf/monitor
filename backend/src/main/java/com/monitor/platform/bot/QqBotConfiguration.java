@@ -9,6 +9,6 @@ import org.springframework.context.annotation.Configuration;
  * <p>属性必须始终可用（未启用时相关 Bean 也要能注入），所以这里无条件生效。</p>
  */
 @Configuration
-@EnableConfigurationProperties(QqBotProperties.class)
+@EnableConfigurationProperties({QqBotProperties.class, BotModelFallbackProperties.class})
 public class QqBotConfiguration {
 }

@@ -575,6 +575,23 @@ SPRING_AI_OPENAI_BASE_URL=https://api.openai.com   # 兼容 OpenAI 协议的服�
 SPRING_AI_OPENAI_MODEL=gpt-4o-mini
 ```
 
+主模型出现 Key 失效、鉴权失败、网络超时、限流或 5xx 等服务异常时，可以自动切换到备用模型：
+
+```dotenv
+# 只需填写备用 Key；地址和模型默认继承主模型
+SPRING_AI_OPENAI_FALLBACK_API_KEY=sk-fallback...
+
+# 可选：备用模型使用独立的中转地址或模型
+# SPRING_AI_OPENAI_FALLBACK_BASE_URL=https://backup.example.com
+# SPRING_AI_OPENAI_FALLBACK_MODEL=gpt-4o-mini
+# SPRING_AI_OPENAI_FALLBACK_TEMPERATURE=0.2
+# SPRING_AI_OPENAI_FALLBACK_ENABLED=true
+```
+
+未填写 `SPRING_AI_OPENAI_FALLBACK_API_KEY` 时不会启用备用模型。主模型失败后，机器人会记录一条
+`主模型调用失败，切换备用模型` 日志，并使用相同的对话提示词、工具和记忆窗口重新请求一次。
+如果备用模型仍失败，才会向用户返回处理失败。
+
 之后就可以直接说人话，模型会通过 function calling 调用同一批只读查询：
 
 - 近 7 天哪个号池账号缓存率最低？

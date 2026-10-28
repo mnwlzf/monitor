@@ -7,13 +7,21 @@ import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.weather.WeatherTools;
+import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.retry.RetryUtils;
+import org.springframework.ai.retry.TransientAiException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpStatusCodeException;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -122,10 +130,13 @@ public class BotChatClientFactory {
     private final Sub2KeyTools sub2KeyTools;
     private final WebSearchProperties webSearchProperties;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
+    private final BotModelFallbackProperties fallbackProperties;
 
     /** 每种「人设 + 是否管理员」一个客户端；记忆窗口 / 联网搜索开关变了会重建。 */
     private final Map<ClientKey, CachedClient> clients = new ConcurrentHashMap<>();
     private volatile boolean unavailable;
+    private volatile boolean fallbackUnavailable;
+    private volatile ChatClient.Builder fallbackBuilder;
 
     public BotChatClientFactory(MonitorChatTools tools,
                                 BotErrorTools errorTools,
@@ -135,7 +146,8 @@ public class BotChatClientFactory {
                                 WebSearchTools webSearchTools,
                                 Sub2KeyTools sub2KeyTools,
                                 WebSearchProperties webSearchProperties,
-                                ObjectProvider<ChatClient.Builder> chatClientBuilder) {
+                                ObjectProvider<ChatClient.Builder> chatClientBuilder,
+                                BotModelFallbackProperties fallbackProperties) {
         this.tools = tools;
         this.errorTools = errorTools;
         this.orderTools = orderTools;
@@ -145,6 +157,7 @@ public class BotChatClientFactory {
         this.sub2KeyTools = sub2KeyTools;
         this.webSearchProperties = webSearchProperties;
         this.chatClientBuilder = chatClientBuilder;
+        this.fallbackProperties = fallbackProperties;
     }
     /**
      * 机器人人设。
@@ -178,7 +191,7 @@ public class BotChatClientFactory {
     }
 
     /** 客户端缓存键：人设 + 是否管理员（管理员即使人设退化成 CHAT，也要有联网搜索）。 */
-    private record ClientKey(Persona persona, boolean admin) {
+    private record ClientKey(Persona persona, boolean admin, boolean fallback) {
     }
 
     /**
@@ -188,13 +201,26 @@ public class BotChatClientFactory {
      * 因此不同人设之间不会互相带上对方的默认工具 —— 这点对「陌生人拿不到平台工具」是硬要求。</p>
      */
     public ChatClient get(Persona persona, BotSettings settings, boolean admin) {
-        if (unavailable) {
+        ChatClient primary = getClient(false, persona, settings, admin);
+        if (primary != null) {
+            return primary;
+        }
+        return getFallback(persona, settings, admin);
+    }
+
+    /** 获取备用模型客户端；未配置备用 Key 时返回 null。 */
+    public ChatClient getFallback(Persona persona, BotSettings settings, boolean admin) {
+        return getClient(true, persona, settings, admin);
+    }
+
+    private ChatClient getClient(boolean fallback, Persona persona, BotSettings settings, boolean admin) {
+        if (fallback ? fallbackUnavailable : unavailable) {
             return null;
         }
         int window = Math.max(2, settings.memoryWindow());
         // 联网搜索开关来自页面设置（bot_settings），变了要重建客户端，不能只按记忆窗口缓存
         boolean attachWebSearch = shouldAttachWebSearch(admin, settings);
-        ClientKey key = new ClientKey(persona, admin);
+        ClientKey key = new ClientKey(persona, admin, fallback);
         CachedClient cached = clients.get(key);
         if (cached != null && cached.window() == window && cached.webSearch() == attachWebSearch) {
             return cached.client();
@@ -204,10 +230,16 @@ public class BotChatClientFactory {
             if (cached != null && cached.window() == window && cached.webSearch() == attachWebSearch) {
                 return cached.client();
             }
-            ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
+            ChatClient.Builder builder = fallback ? fallbackBuilder() : chatClientBuilder.getIfAvailable();
             if (builder == null) {
-                unavailable = true;
-                log.info("未配置大模型，QQ 机器人只支持命令（/help 查看）");
+                if (fallback) {
+                    fallbackUnavailable = true;
+                } else {
+                    unavailable = true;
+                }
+                log.info(fallback
+                        ? "未配置备用大模型"
+                        : "未配置大模型，QQ 机器人只支持命令（/help 查看）");
                 return null;
             }
             ChatClient.Builder configured = builder
@@ -228,10 +260,88 @@ public class BotChatClientFactory {
             }
             ChatClient built = configured.build();
             clients.put(key, new CachedClient(built, window, attachWebSearch));
-            log.info("QQ 机器人人设已就绪: persona={}, admin={}, 记忆窗口={} 条, 平台工具={}, 联网搜索={}",
-                    persona, admin, window, persona.usesTools(), attachWebSearch);
+            log.info("QQ 机器人{}人设已就绪: persona={}, admin={}, 记忆窗口={} 条, 平台工具={}, 联网搜索={}",
+                    fallback ? "备用" : "", persona, admin, window, persona.usesTools(), attachWebSearch);
             return built;
         }
+    }
+
+    private ChatClient.Builder fallbackBuilder() {
+        if (!fallbackProperties.isConfigured() || fallbackUnavailable) {
+            return null;
+        }
+        ChatClient.Builder current = fallbackBuilder;
+        if (current != null) {
+            return current;
+        }
+        synchronized (this) {
+            if (fallbackBuilder != null) {
+                return fallbackBuilder;
+            }
+            try {
+                OpenAiApi api = OpenAiApi.builder()
+                        .baseUrl(fallbackProperties.getBaseUrl().trim())
+                        .apiKey(fallbackProperties.getApiKey().trim())
+                        .build();
+                OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
+                        .model(fallbackProperties.getModel().trim());
+                if (fallbackProperties.getTemperature() != null) {
+                    options.temperature(fallbackProperties.getTemperature());
+                }
+                OpenAiChatModel model = OpenAiChatModel.builder()
+                        .openAiApi(api)
+                        .defaultOptions(options.build())
+                        .toolCallingManager(ToolCallingManager.builder().build())
+                        .retryTemplate(RetryUtils.DEFAULT_RETRY_TEMPLATE)
+                        .observationRegistry(ObservationRegistry.NOOP)
+                        .build();
+                fallbackBuilder = ChatClient.builder(model);
+                log.info("备用大模型已配置: baseUrl={}, model={}",
+                        fallbackProperties.getBaseUrl(), fallbackProperties.getModel());
+                return fallbackBuilder;
+            } catch (RuntimeException ex) {
+                fallbackUnavailable = true;
+                log.warn("备用大模型初始化失败: {}", ex.getMessage());
+                return null;
+            }
+        }
+    }
+
+    /** 是否为可切换到备用模型的调用故障。 */
+    public boolean shouldFallback(Throwable error) {
+        if (!hasFallback() || error == null) {
+            return false;
+        }
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof TransientAiException) {
+                return true;
+            }
+            if (current instanceof HttpStatusCodeException statusError) {
+                int status = statusError.getStatusCode().value();
+                if (status == 401 || status == 403 || status == 404 || status == 429 || status >= 500) {
+                    return true;
+                }
+            }
+            String message = current.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase(java.util.Locale.ROOT);
+                if (lower.contains("401") || lower.contains("403") || lower.contains("404")
+                        || lower.contains("429") || lower.contains("500") || lower.contains("502")
+                        || lower.contains("503") || lower.contains("504") || lower.contains("timeout")
+                        || lower.contains("timed out") || lower.contains("connection")
+                        || lower.contains("unauthorized") || lower.contains("forbidden")
+                        || lower.contains("model_not_found") || lower.contains("does not exist")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    public boolean hasFallback() {
+        return fallbackBuilder() != null;
     }
 
     /**
@@ -253,6 +363,6 @@ public class BotChatClientFactory {
 
     /** 大模型是否可用（供「机器人状态」页展示）。 */
     public boolean available() {
-        return !unavailable && chatClientBuilder.getIfAvailable() != null;
+        return (!unavailable && chatClientBuilder.getIfAvailable() != null) || hasFallback();
     }
 }

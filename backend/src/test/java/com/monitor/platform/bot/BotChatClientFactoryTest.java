@@ -9,6 +9,7 @@ import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.weather.WeatherTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.mockito.Answers;
 
@@ -38,11 +39,17 @@ class BotChatClientFactoryTest {
 
     @SuppressWarnings("unchecked")
     private BotChatClientFactory factory(ChatClient.Builder builder) {
+        return factory(builder, new BotModelFallbackProperties());
+    }
+
+    @SuppressWarnings("unchecked")
+    private BotChatClientFactory factory(ChatClient.Builder builder, BotModelFallbackProperties fallbackProperties) {
         ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(builder);
         return new BotChatClientFactory(
                 tools, errorTools, orderTools, usageTools, weatherTools,
-                webSearchTools, sub2KeyTools, webSearchProperties, provider);
+                webSearchTools, sub2KeyTools, webSearchProperties, provider,
+                fallbackProperties);
     }
 
     private ChatClient.Builder fluentBuilder() {
@@ -140,5 +147,31 @@ class BotChatClientFactoryTest {
         assertThat(factory.get(BotChatClientFactory.Persona.CHAT, settings(false), false)).isNull();
         // 一次确认不可用后保持不可用，不必反复探测
         assertThat(factory.available()).isFalse();
+    }
+
+    @Test
+    void shouldUseFallbackWhenPrimaryBuilderIsMissing() {
+        BotModelFallbackProperties fallback = new BotModelFallbackProperties();
+        fallback.setApiKey("fallback-key");
+        fallback.setBaseUrl("https://fallback.example.com");
+        fallback.setModel("fallback-model");
+        BotChatClientFactory factory = factory(null, fallback);
+
+        assertThat(factory.available()).isTrue();
+        assertThat(factory.get(BotChatClientFactory.Persona.CHAT, settings(false), false)).isNotNull();
+        assertThat(factory.hasFallback()).isTrue();
+    }
+
+    @Test
+    void shouldFallbackOnlyForModelOrTransportFailures() {
+        BotModelFallbackProperties fallback = new BotModelFallbackProperties();
+        fallback.setApiKey("fallback-key");
+        fallback.setBaseUrl("https://fallback.example.com");
+        fallback.setModel("fallback-model");
+        BotChatClientFactory factory = factory(null, fallback);
+
+        assertThat(factory.shouldFallback(new NonTransientAiException("401 Unauthorized"))).isTrue();
+        assertThat(factory.shouldFallback(new RuntimeException("connect timeout"))).isTrue();
+        assertThat(factory.shouldFallback(new IllegalArgumentException("bad user input"))).isFalse();
     }
 }

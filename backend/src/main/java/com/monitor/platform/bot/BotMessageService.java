@@ -551,9 +551,49 @@ public class BotMessageService {
             }
         }
         String finalPromptText = promptText;
+        String answer;
+        try {
+            answer = callChat(chatClient, event, text, finalPromptText, images, generated,
+                    identity, platformFeature, openAiStatusAllowed, channel, persona);
+        } catch (RuntimeException primaryError) {
+            if (!chatClients.shouldFallback(primaryError)) {
+                throw primaryError;
+            }
+            ChatClient fallbackClient = chatClients.getFallback(persona, settings, identity.admin());
+            if (fallbackClient == null) {
+                throw primaryError;
+            }
+            log.warn("主模型调用失败，切换备用模型: user={}, reason={}", event.userId(), primaryError.getMessage());
+            try {
+                answer = callChat(fallbackClient, event, text, finalPromptText, images, generated,
+                        identity, platformFeature, openAiStatusAllowed, channel, persona);
+            } catch (RuntimeException fallbackError) {
+                fallbackError.addSuppressed(primaryError);
+                throw fallbackError;
+            }
+        }
+
+        // 大模型写 Markdown 表格，这里解析成结构化报表，长回答就能渲染成表格图片
+        BotReport report = BotReport.fromMarkdown(answer);
+
+        // 出现 [[HEATMAP:24h]] 标记时，把标记换成后端确定性渲染的热力图，
+        // 避免大模型自己「重写」矩阵导致图案与页面不一致
+        Matcher matcher = HEATMAP_MARKER.matcher(answer);
+        if (matcher.find()) {
+            String range = matcher.group(1);
+            String cleaned = answer.replace(matcher.group(), "").strip();
+            report = mergeHeatmap(BotReport.fromMarkdown(cleaned), tools.poolReport(range));
+        }
+        return report;
+    }
+
+    private String callChat(ChatClient chatClient, OneBotEvent event, String text, String promptText,
+                            List<BotImageFetcher.FetchedImage> images, GeneratedImages generated,
+                            BotIdentity identity, boolean platformFeature, boolean openAiStatusAllowed,
+                            BotChannel channel, BotChatClientFactory.Persona persona) {
         ChatClient.ChatClientRequestSpec request = chatClient.prompt()
                 .user(spec -> {
-                    spec.text(finalPromptText);
+                    spec.text(promptText);
                     // 图片以多模态附件交给模型；模型不支持视觉时上游会报错，由外层统一兜底
                     for (BotImageFetcher.FetchedImage image : images) {
                         byte[] bytes = image.bytes();
@@ -587,15 +627,15 @@ public class BotMessageService {
         }
         // 生图：所有人都能用，图片归属到本条消息（按请求构造，避免串到别人的回复里）
         request = request.tools(new ImageGenTools(imageGenService, generated,
-                    () -> notifyImageStart(event, generated)));
+                () -> notifyImageStart(event, generated)));
         // ToolContext 必须非空；即使事件缺少 userId 也放入空字符串，工具侧会按未知用户处理。
         request = request.toolContext(Map.of("qqUserId",
                 event.userId() == null ? "" : event.userId()));
         ChatClient.ChatClientRequestSpec finalRequest = request
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId(event, persona, channel)));
-        String answer;
+                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID,
+                        conversationId(event, persona, channel)));
         try {
-            answer = finalRequest.call().content();
+            return finalRequest.call().content();
         } catch (RuntimeException ex) {
             if (!isSseConversionError(ex)) {
                 throw ex;
@@ -604,21 +644,8 @@ public class BotMessageService {
             java.util.List<String> chunks = finalRequest.stream().content()
                     .collectList()
                     .block(java.time.Duration.ofMinutes(2));
-            answer = chunks == null ? "" : String.join("", chunks);
+            return chunks == null ? "" : String.join("", chunks);
         }
-
-        // 大模型写 Markdown 表格，这里解析成结构化报表，长回答就能渲染成表格图片
-        BotReport report = BotReport.fromMarkdown(answer);
-
-        // 出现 [[HEATMAP:24h]] 标记时，把标记换成后端确定性渲染的热力图，
-        // 避免大模型自己「重写」矩阵导致图案与页面不一致
-        Matcher matcher = HEATMAP_MARKER.matcher(answer);
-        if (matcher.find()) {
-            String range = matcher.group(1);
-            String cleaned = answer.replace(matcher.group(), "").strip();
-            report = mergeHeatmap(BotReport.fromMarkdown(cleaned), tools.poolReport(range));
-        }
-        return report;
     }
 
     /** 上游偶发把非流式请求按 SSE 返回；识别后改用 Spring AI 的流式接口兜底。 */

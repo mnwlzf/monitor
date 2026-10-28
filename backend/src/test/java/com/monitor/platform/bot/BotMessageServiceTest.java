@@ -139,7 +139,8 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
-                mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider);
+                mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider,
+                new BotModelFallbackProperties());
         BotCommandRouter commandRouter = new BotCommandRouter(
                 tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService);
         service = new BotMessageService(
