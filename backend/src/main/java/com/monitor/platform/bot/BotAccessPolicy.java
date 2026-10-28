@@ -29,9 +29,7 @@ public final class BotAccessPolicy {
     /** 抽奖只允许在配置的「指定群」或指定群的临时会话中触发，私聊不参与。 */
     public static boolean lotteryAllowed(BotIdentity identity, BotChannel channel,
                                          Long contextGroup, BotSettings settings) {
-        return identity != null
-                && identity.platformUser()
-                && channel != null
+        return channel != null
                 && contextGroup != null
                 && settings != null
                 && settings.isPlatformGroup(contextGroup);

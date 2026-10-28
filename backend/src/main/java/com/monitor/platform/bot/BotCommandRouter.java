@@ -503,9 +503,6 @@ public class BotCommandRouter {
         if (!lotteryAllowed) {
             return text(UNKNOWN_COMMAND);
         }
-        if (identity == null || !identity.platformUser()) {
-            return text("请先发送 /绑定 <邮箱> 并完成验证，绑定成功后即可参与抽奖。");
-        }
         return text(action.get());
     }
 

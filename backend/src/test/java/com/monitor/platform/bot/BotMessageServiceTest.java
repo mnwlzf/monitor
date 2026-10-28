@@ -927,6 +927,17 @@ class BotMessageServiceTest {
     }
 
     @Test
+    void shouldAllowGuestToTriggerLotteryInDesignatedGroup() throws Exception {
+        identityIs(BotIdentity.guest());
+        when(lotteryService.draw(999L)).thenReturn("请先发送 /绑定 <邮箱> 并完成验证。");
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/抽奖")));
+
+        verify(lotteryService, timeout(3000)).draw(999L);
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("请先发送 /绑定"));
+    }
+
+    @Test
     void shouldDrawLotteryWithNaturalLanguage() throws Exception {
         identityIs(normalUser());
         when(lotteryService.draw(999L)).thenReturn("抽奖结果：$0.60");
