@@ -4,10 +4,12 @@
       <div>
         <p class="admin-eyebrow">SYSTEM SETTINGS</p>
         <h2>系统设置</h2>
-        <p>配置 SMTP 邮件服务、余额提醒与各事件的邮件接收人。</p>
+        <p>按功能分组配置邮件服务、通知订阅、QQ 机器人与权限身份。</p>
       </div>
     </div>
 
+    <el-tabs v-model="activeSettingsTab" class="settings-tabs">
+      <el-tab-pane label="邮件服务" name="mail" lazy>
     <el-card shadow="never" class="admin-card" v-loading="loading">
       <template #header>
         <div class="admin-card-header">
@@ -97,7 +99,9 @@
       </div>
       <small class="admin-form-hint">使用上方当前填写的配置（未保存也可）发送一封测试邮件。</small>
     </el-card>
+      </el-tab-pane>
 
+      <el-tab-pane label="通知订阅" name="notifications" lazy>
     <el-card shadow="never" class="admin-card">
       <template #header>
         <div class="admin-card-header">
@@ -220,6 +224,9 @@
       <el-divider content-position="left">该事件的收件人</el-divider>
       <RecipientEditor scene="CHANNEL_DIGEST" :can-write="canWrite" />
     </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane label="机器人配置" name="bot" lazy>
     <el-card shadow="never" class="admin-card" v-loading="botLoading">
       <template #header>
         <div class="admin-card-header">
@@ -386,7 +393,9 @@
         </el-form-item>
       </el-form>
     </el-card>
+      </el-tab-pane>
 
+      <el-tab-pane label="违禁词" name="forbidden" lazy>
     <el-card shadow="never" class="admin-card" v-loading="forbiddenLoading">
       <template #header>
         <div class="admin-card-header">
@@ -434,7 +443,9 @@
         </el-table-column>
       </el-table>
     </el-card>
+      </el-tab-pane>
 
+      <el-tab-pane label="身份与管理员" name="identity" lazy>
     <el-card shadow="never" class="admin-card" v-loading="identityLoading">
       <template #header>
         <div class="admin-card-header">
@@ -518,6 +529,8 @@
         </el-table-column>
       </el-table>
     </el-card>
+      </el-tab-pane>
+    </el-tabs>
 
   </section>
 </template>
@@ -551,6 +564,7 @@ import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotSettings } fro
 
 const props = defineProps<{ canWrite?: boolean }>()
 
+const activeSettingsTab = ref('mail')
 const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
@@ -905,6 +919,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.settings-tabs {
+  margin-top: 4px;
+}
+
+.settings-tabs :deep(.el-tabs__header) {
+  margin-bottom: 18px;
+  padding: 0 4px;
+}
+
+.settings-tabs :deep(.el-tabs__item) {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-tabs :deep(.el-tabs__content) {
+  overflow: visible;
+}
+
 .settings-header-actions {
   display: flex;
   align-items: center;
