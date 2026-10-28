@@ -13,7 +13,7 @@
 - **变更追踪**：上游分组与 API Key 的新增/变更/停用，带快照可回溯
 - **号池监控**：缓存率、请求量、模型维度统计；支持直连自建 Sub2API 只读库做秒级增量采集
 - **邮件告警**：余额不足、API Key 变更、每日余额报表，收件人可在页面配置
-- **QQ 机器人**：OneBot v11 协议（NapCat / Lagrange / go-cqhttp），支持 `/` 命令、自然语言问答、语音转文字，以及按用户明确要求用 MOSS-TTSD 语音回复；支持邮箱验证码绑定、每日消费抽奖、页面和 QQ 管理命令维护违禁词；管理端「机器人状态」页可直接查看 NapCat 实时日志，掉线时显示二维码扫码登录；可直接做 Sub2API 错误诊断、指纹/趋势分析、变更关联、查询审计和页面可配置的主动告警，无需请求 ID；群聊和群临时会话可正常查询，但账号名称、上游平台名称/地址和邮箱会自动脱敏
+- **QQ 机器人**：OneBot v11 协议（NapCat / Lagrange / go-cqhttp），支持 `/` 命令、自然语言问答、语音转文字，以及按用户明确要求用 MOSS-TTSD 语音回复；主聊天模型故障时可自动切换备用 Key/模型；支持邮箱验证码绑定、每日消费抽奖、页面和 QQ 管理命令维护违禁词；管理端「机器人状态」页可直接查看 NapCat 实时日志，掉线时显示二维码扫码登录；可直接做 Sub2API 错误诊断、指纹/趋势分析、变更关联、查询审计和页面可配置的主动告警，无需请求 ID；群聊和群临时会话可正常查询，但账号名称、上游平台名称/地址和邮箱会自动脱敏
 - **OpenAI 状态监控**：每 10 分钟读取官方状态页；异常时向指定群发送一次中文告警，恢复后再次异常重新提醒；机器人支持 `/openai` 与自然语言查询
 - **登录鉴权**：ADMIN 可读写，VIEWER 只读
 
@@ -134,7 +134,74 @@ docker compose up -d postgres redis
 | 机器人语音 | `MONITOR_BOT_SPEECH_*` | 可选；SiliconFlow 转写模型 `XingChenASR-V3.2` + TTS 模型 `MOSS-TTSD-v0.5`，页面配置默认音色/风格 |
 | NapCat | `MONITOR_NAPCAT_*` `NAPCAT_DATA_DIR` `NAPCAT_ACCOUNT` | 日志与扫码登录；数据目录可迁移，账号可留空扫码 |
 | 身份识别 | `MONITOR_BOT_IDENTITY_*` | 可选；把 Sub2API 平台用户邮箱同步到 Redis，用于区分平台用户与陌生人 |
-| 大模型 | `SPRING_AI_*` | 可选，默认 `none`，不配 Key 也能正常启动 |
+| 大模型与备用模型 | `SPRING_AI_*` | 可选，默认 `none`；主模型失败时可自动切换备用 Key，详见下文 |
+
+### 大模型与备用模型
+
+主模型配置：
+
+```dotenv
+SPRING_AI_MODEL_CHAT=openai
+SPRING_AI_OPENAI_API_KEY=主Key
+SPRING_AI_OPENAI_BASE_URL=https://main.example.com
+SPRING_AI_OPENAI_MODEL=gpt-4o-mini
+```
+
+如果备用 Key 和主模型使用**同一个请求地址**，只需要增加：
+
+```dotenv
+SPRING_AI_OPENAI_FALLBACK_API_KEY=备用Key
+```
+
+此时备用模型会复用主模型配置：
+
+```text
+请求地址 = SPRING_AI_OPENAI_BASE_URL
+实际接口 = ${SPRING_AI_OPENAI_BASE_URL}/v1/chat/completions
+请求模型 = SPRING_AI_OPENAI_MODEL
+请求Key  = SPRING_AI_OPENAI_FALLBACK_API_KEY
+```
+
+例如：
+
+```dotenv
+SPRING_AI_OPENAI_BASE_URL=https://codex.example.com
+SPRING_AI_OPENAI_MODEL=gpt-4o-mini
+SPRING_AI_OPENAI_FALLBACK_API_KEY=备用Key
+```
+
+备用请求会发送到：
+
+```text
+https://codex.example.com/v1/chat/completions
+```
+
+如果备用 Key 属于另一个中转平台，需要额外填写备用地址和模型：
+
+```dotenv
+SPRING_AI_OPENAI_FALLBACK_API_KEY=备用Key
+SPRING_AI_OPENAI_FALLBACK_BASE_URL=https://backup.example.com
+SPRING_AI_OPENAI_FALLBACK_MODEL=backup-model
+# 可选，默认 0.2
+# SPRING_AI_OPENAI_FALLBACK_TEMPERATURE=0.2
+# 可选，默认 true
+# SPRING_AI_OPENAI_FALLBACK_ENABLED=true
+```
+
+此时请求地址为：
+
+```text
+https://backup.example.com/v1/chat/completions
+```
+
+切换规则：
+
+- 只有填写 `SPRING_AI_OPENAI_FALLBACK_API_KEY` 后才启用备用模型。
+- 主模型出现 401/403/404、429 限流、5xx、网络超时/连接失败等故障时自动切换。
+- 切换后使用相同的人设、提示词、工具和记忆窗口重新请求。
+- 普通参数错误不会触发备用模型，避免重复执行工具或副作用操作。
+- 日志会出现 `主模型调用失败，切换备用模型`。
+- 备用模型也失败时，才会向用户返回处理失败。
 
 ## 常用命令
 
