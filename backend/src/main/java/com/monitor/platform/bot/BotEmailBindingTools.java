@@ -24,8 +24,4 @@ public class BotEmailBindingTools {
         return bindingService.verify(qq, code);
     }
 
-    @Tool(description = "仅当用户明确要求解除当前 QQ 的邮箱绑定时调用。")
-    public String unbindEmail() {
-        return bindingService.unbind(qq);
-    }
 }

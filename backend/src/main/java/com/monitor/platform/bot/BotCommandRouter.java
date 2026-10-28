@@ -70,7 +70,8 @@ public class BotCommandRouter {
             - /我的信息        查看当前绑定的邮箱
             - /绑定 <邮箱>     发送验证码验证并绑定邮箱
             - /验证 <验证码>   完成邮箱绑定
-            - /解绑            解除绑定
+            - /解绑 <QQ号> <非QQ邮箱>  管理员解除邮箱绑定（需要二次确认）
+            - /确认解绑 <确认码>  确认执行邮箱解绑
             - /抽奖            参与每日消费抽奖
             - /抽奖规则        查看昨日消费门槛与奖励参数
             - /抽奖记录        查看自己的最近抽奖记录
@@ -81,6 +82,7 @@ public class BotCommandRouter {
             - /删除违禁词 <内容>  删除违禁词
             也可以直接说「查看违禁词」「添加违禁词 测试词」「把测试词从违禁词中删除」
             也可以直接说「绑定邮箱 user@example.com」「验证码 123456」完成邮箱绑定
+            管理员解绑邮箱可直接说「用户 123456 邮箱 user@example.com 解除绑定」
             也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」
             错误排障也可以直接问：「最近一小时错误最多的账号是谁？」「今天 401 多不多？」「现在系统有什么问题？」
             需要新建 Sub2API 密钥时，直接说清五项：厂商 / 名称 / 分组 / 额度限制 / 有效期（天数或 yyyy-MM-dd HH:mm:ss）。
@@ -96,7 +98,6 @@ public class BotCommandRouter {
             - /我的信息        查看当前绑定的邮箱
             - /绑定 <邮箱>     发送验证码验证并绑定邮箱
             - /验证 <验证码>   完成邮箱绑定
-            - /解绑            解除绑定
             - /抽奖            参与每日消费抽奖
             - /抽奖规则        查看昨日消费门槛与奖励参数
             - /抽奖记录        查看自己的最近抽奖记录
@@ -112,7 +113,6 @@ public class BotCommandRouter {
             我能做的事：
             - /绑定 <邮箱>     发送验证码验证并绑定邮箱
             - /验证 <验证码>   完成邮箱绑定
-            - /解绑            解除绑定
             - /我的信息        查看当前绑定
             - /天气 <城市>     实时天气与预报
             - /画图 <提示词>   生成一张图片
@@ -193,7 +193,8 @@ public class BotCommandRouter {
             case "bind", "绑定" -> bindingAction(() -> emailBindingService.requestBinding(event.userId(), arg));
             case "verify", "验证", "验证码" ->
                     bindingAction(() -> emailBindingService.verify(event.userId(), arg));
-            case "unbind", "解绑" -> text(emailBindingService.unbind(event.userId()));
+            case "unbind", "解绑" -> adminUnbindCommand(identity, arg, event);
+            case "confirmunbind", "确认解绑" -> adminConfirmUnbind(identity, arg, event);
             case "抽奖", "lottery" -> lotteryCommand(identity, lotteryAllowed, () -> lotteryService.draw(event.userId()));
             case "抽奖规则", "lotteryrules" -> lotteryCommand(identity, lotteryAllowed, lotteryService::rules);
             case "抽奖记录", "lotteryrecords" ->
@@ -464,6 +465,37 @@ public class BotCommandRouter {
             return text(action.get());
         } catch (BusinessException ex) {
             return text(ex.getMessage());
+        }
+    }
+
+    private BotReport adminUnbindCommand(BotIdentity identity, String arg, OneBotEvent event) {
+        if (identity == null || !identity.admin()) {
+            return text("邮箱解绑仅管理员可操作。\n" + BotEmailBindingService.adminUnbindUsage());
+        }
+        var intent = BotAdminUnbindIntent.parse("解绑 " + (arg == null ? "" : arg));
+        if (intent.isEmpty() || intent.get().action() != BotAdminUnbindIntent.Action.REQUEST) {
+            return text(BotEmailBindingService.adminUnbindUsage());
+        }
+        try {
+            return text(emailBindingService.requestAdminUnbind(
+                    event.userId(), intent.get().targetQq(), intent.get().email()));
+        } catch (RuntimeException ex) {
+            return text("发起解绑失败，请稍后再试。");
+        }
+    }
+
+    private BotReport adminConfirmUnbind(BotIdentity identity, String arg, OneBotEvent event) {
+        if (identity == null || !identity.admin()) {
+            return text("邮箱解绑仅管理员可操作。");
+        }
+        var intent = BotAdminUnbindIntent.parse("确认解绑 " + (arg == null ? "" : arg));
+        if (intent.isEmpty() || intent.get().action() != BotAdminUnbindIntent.Action.CONFIRM) {
+            return text("用法：/确认解绑 <6位确认码>");
+        }
+        try {
+            return text(emailBindingService.confirmAdminUnbind(event.userId(), intent.get().code()));
+        } catch (RuntimeException ex) {
+            return text("确认解绑失败，请稍后再试。");
         }
     }
 

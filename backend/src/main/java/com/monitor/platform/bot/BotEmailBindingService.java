@@ -16,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
@@ -48,6 +49,9 @@ public class BotEmailBindingService {
     private static final String COOLDOWN_KEY_PREFIX = "monitor:bot:bind:cooldown:";
     private static final String QQ_HOURLY_KEY_PREFIX = "monitor:bot:bind:hourly:qq:";
     private static final String EMAIL_HOURLY_KEY_PREFIX = "monitor:bot:bind:hourly:email:";
+    private static final String ADMIN_UNBIND_KEY_PREFIX = "monitor:bot:unbind:confirm:";
+    private static final Duration ADMIN_UNBIND_TTL = Duration.ofMinutes(5);
+    private static final String CONFIRM_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -246,18 +250,98 @@ public class BotEmailBindingService {
         return userCache.emailByQq(qq);
     }
 
-    public String unbind(Long qq) {
-        if (qq == null) {
-            return "无法识别当前 QQ。";
+    /** 管理员发起解绑预览，返回二次确认提示。 */
+    public String requestAdminUnbind(Long operatorQq, Long targetQq, String rawEmail) {
+        if (operatorQq == null) {
+            return "无法识别当前管理员 QQ。";
         }
-        repository.delete(CHANNEL_QQ, String.valueOf(qq));
+        if (targetQq == null) {
+            return adminUnbindUsage();
+        }
+        String email = Emails.normalize(rawEmail).orElse("");
+        if (!Emails.isValid(email)) {
+            return adminUnbindUsage();
+        }
+        if (isQqMailbox(email)) {
+            return "QQ 邮箱由 QQ 号自动匹配，不支持解绑。";
+        }
+        Optional<BotUserBindingEntity> binding = repository.findByExternalUser(CHANNEL_QQ, String.valueOf(targetQq));
+        if (binding.isEmpty() || !email.equalsIgnoreCase(binding.get().getEmail())) {
+            return "未找到 用户 " + targetQq + " 与邮箱 " + email + " 的绑定关系。";
+        }
+
+        String code = generateConfirmCode();
+        Map<String, String> pending = new LinkedHashMap<>();
+        pending.put("targetQq", String.valueOf(targetQq));
+        pending.put("email", email);
+        pending.put("code", code);
+        String key = adminUnbindKey(operatorQq);
+        redis.opsForHash().putAll(key, pending);
+        redis.expire(key, ADMIN_UNBIND_TTL);
+        String masked = com.monitor.platform.bot.report.EmailMasker.maskAddress(email);
+        return "确定要解除 用户 " + targetQq + " 和 邮箱 " + masked + " 的绑定吗？\n"
+                + "回复：确认解绑 " + code + "\n确认码 5 分钟内有效。";
+    }
+
+    /** 管理员二次确认后执行解绑。 */
+    public String confirmAdminUnbind(Long operatorQq, String rawCode) {
+        if (operatorQq == null) {
+            return "无法识别当前管理员 QQ。";
+        }
+        String code = rawCode == null ? "" : rawCode.trim().toUpperCase();
+        if (!code.matches("[A-Z0-9]{6}")) {
+            return adminUnbindUsage();
+        }
+        String key = adminUnbindKey(operatorQq);
+        Map<Object, Object> pending = redis.opsForHash().entries(key);
+        if (pending == null || pending.isEmpty()) {
+            return "没有待确认的解绑操作，或确认码已过期。\n" + adminUnbindUsage();
+        }
+        String expected = String.valueOf(pending.get("code"));
+        if (!MessageDigest.isEqual(expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                code.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+            return "解绑确认码不正确。";
+        }
+        Long targetQq = parseLong(pending.get("targetQq"));
+        String email = String.valueOf(pending.get("email"));
+        if (targetQq == null) {
+            redis.delete(key);
+            return "解绑信息无效，请重新发起。\n" + adminUnbindUsage();
+        }
+        Optional<BotUserBindingEntity> binding = repository.findByExternalUser(CHANNEL_QQ, String.valueOf(targetQq));
+        if (binding.isEmpty() || !email.equalsIgnoreCase(binding.get().getEmail())) {
+            redis.delete(key);
+            return "绑定关系已变化，解绑未执行。";
+        }
+
+        repository.delete(CHANNEL_QQ, String.valueOf(targetQq));
         try {
-            legacyBindings.unbind(qq);
-            redis.delete(codeKey(qq));
+            legacyBindings.unbind(targetQq);
+            redis.delete(codeKey(targetQq));
         } catch (RuntimeException ex) {
-            log.warn("解除邮箱绑定时清理缓存失败: qq={}, reason={}", qq, ex.getMessage());
+            log.warn("管理员解绑后清理缓存失败: qq={}, reason={}", targetQq, ex.getMessage());
         }
-        return "已解除邮箱绑定。";
+        redis.delete(key);
+        String masked = com.monitor.platform.bot.report.EmailMasker.maskAddress(email);
+        log.info("管理员解除邮箱绑定: operator={}, targetQq={}, email={}", operatorQq, targetQq, email);
+        return "已解除 用户 " + targetQq + " 和 邮箱 " + masked + " 的绑定。";
+    }
+
+    public static String adminUnbindUsage() {
+        return "解绑格式：用户 <QQ号> 邮箱 <非QQ邮箱> 解除绑定\n"
+                + "指令格式：/解绑 <QQ号> <非QQ邮箱>";
+    }
+
+    private static boolean isQqMailbox(String email) {
+        return email != null && email.toLowerCase(java.util.Locale.ROOT).endsWith("@qq.com");
+    }
+
+    private static Long parseLong(Object value) {
+        try {
+            return value == null ? null : Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private void releaseQuota(String qqHourlyKey, String emailHourlyKey, String cooldownKey) {
@@ -297,6 +381,18 @@ public class BotEmailBindingService {
 
     private static String generateCode() {
         return String.format("%06d", RANDOM.nextInt(1_000_000));
+    }
+
+    private static String generateConfirmCode() {
+        StringBuilder code = new StringBuilder(6);
+        for (int i = 0; i < 6; i++) {
+            code.append(CONFIRM_CHARS.charAt(RANDOM.nextInt(CONFIRM_CHARS.length())));
+        }
+        return code.toString();
+    }
+
+    private static String adminUnbindKey(Long operatorQq) {
+        return ADMIN_UNBIND_KEY_PREFIX + operatorQq;
     }
 
     static String verificationEmailHtml(String email, String code) {

@@ -19,13 +19,11 @@ class BotEmailBindingIntentTest {
     }
 
     @Test
-    void shouldParseVerificationAndUnbind() {
+    void shouldParseVerification() {
         var verify = BotEmailBindingIntent.parse("验证码 123456").orElseThrow();
         assertEquals(BotEmailBindingIntent.Action.VERIFY, verify.action());
         assertEquals("123456", verify.value());
-
-        assertEquals(BotEmailBindingIntent.Action.UNBIND,
-                BotEmailBindingIntent.parse("解除绑定邮箱").orElseThrow().action());
+        assertTrue(BotEmailBindingIntent.parse("解除绑定邮箱").isEmpty());
     }
 
     @Test

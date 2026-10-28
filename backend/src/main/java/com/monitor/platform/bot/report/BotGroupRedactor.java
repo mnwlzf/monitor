@@ -27,8 +27,6 @@ import java.util.regex.Pattern;
 @Service
 public class BotGroupRedactor {
 
-    private static final Pattern EMAIL = Pattern.compile(
-            "(?i)(?<![A-Z0-9_])[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}(?![A-Z0-9_])");
     private static final long CACHE_MILLIS = 30_000L;
 
     private final PlatformRepository platformRepository;
@@ -46,9 +44,6 @@ public class BotGroupRedactor {
             return null;
         }
         List<Replacement> replacements = replacements();
-        if (replacements.isEmpty()) {
-            return report;
-        }
         return report.mapText(text -> redactText(text, replacements));
     }
 
@@ -133,7 +128,7 @@ public class BotGroupRedactor {
             result = replacement.pattern().matcher(result)
                     .replaceAll(Matcher.quoteReplacement(replacement.to()));
         }
-        return EMAIL.matcher(result).replaceAll("[邮箱已隐藏]");
+        return EmailMasker.maskEmails(result);
     }
 
     private record Replacement(String from, Pattern pattern, String to) {

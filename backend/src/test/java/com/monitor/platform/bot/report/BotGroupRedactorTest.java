@@ -45,7 +45,7 @@ class BotGroupRedactorTest {
                 .contains("上游账号1")
                 .contains("上游账号2")
                 .contains("selected")
-                .contains("[邮箱已隐藏]")
+                .contains("***")
                 .doesNotContain("云锦")
                 .doesNotContain("MagicAI")
                 .doesNotContain("yunmian.tech")

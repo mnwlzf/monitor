@@ -262,6 +262,8 @@
         title="抽奖只在「指定群（平台功能 / OpenAI 状态）」或指定群临时会话中触发；私聊和非指定群不会执行抽奖。"
       />
 
+      <div class="lottery-settings-layout">
+        <div class="lottery-settings-form">
       <el-form label-width="180px" :disabled="!canWrite">
         <el-form-item label="启用抽奖">
           <el-switch v-model="lotteryForm.enabled" />
@@ -303,8 +305,13 @@
           <span v-if="lotteryUpdatedAt" class="admin-form-hint">上次保存：{{ lotteryUpdatedAt }}</span>
         </el-form-item>
       </el-form>
+        </div>
 
-      <el-divider content-position="left">成本与奖励预览</el-divider>
+        <div class="lottery-settings-preview">
+      <div class="lottery-preview-heading">
+        <strong>成本与奖励预览</strong>
+        <span>修改左侧参数后立即重新计算</span>
+      </div>
       <div class="lottery-preview">
         <div class="lottery-preview-item">
           <span>平均随机系数</span>
@@ -350,6 +357,8 @@
       <small class="admin-form-hint">
         随机系数围绕 1.0 对称时，长期平均成本基本等于前一日消费 × 中奖比例；最低奖励已取消，金额不足 $0.01 时按 $0.00 处理。
       </small>
+        </div>
+      </div>
 
       <el-divider content-position="left">最近抽奖记录</el-divider>
       <el-table :data="lotteryDraws" size="small" class="lottery-draw-table">
@@ -1273,9 +1282,48 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
+.lottery-settings-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, .95fr) minmax(480px, 1.05fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.lottery-settings-form {
+  min-width: 0;
+}
+
+.lottery-settings-preview {
+  position: sticky;
+  top: 92px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e3ebe8;
+  border-radius: 12px;
+  background: #fbfdfc;
+}
+
+.lottery-preview-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.lottery-preview-heading strong {
+  color: #303133;
+  font-size: 15px;
+}
+
+.lottery-preview-heading span {
+  color: #7b8b87;
+  font-size: 11px;
+}
+
 .lottery-preview {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 14px;
 }
@@ -1326,8 +1374,12 @@ onMounted(() => {
 }
 
 @media (max-width: 1100px) {
-  .lottery-preview {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .lottery-settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .lottery-settings-preview {
+    position: static;
   }
 }
 

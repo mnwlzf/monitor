@@ -874,6 +874,7 @@ class BotMessageServiceTest {
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
         assertTrue(reply.getValue().contains("验证码已发送"));
+        assertFalse(reply.getValue().contains("someone@example.com"));
         verify(emailBindingService).requestBinding(999L, "someone@example.com");
     }
 
@@ -977,6 +978,51 @@ class BotMessageServiceTest {
 
         verify(emailBindingService, timeout(3000)).verify(999L, "123456");
         verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("绑定成功"));
+    }
+
+    @Test
+    void shouldDenySelfUnbindForNormalUser() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(privateCommand("/解绑")));
+
+        verify(emailBindingService, never()).requestAdminUnbind(anyLong(), anyLong(), anyString());
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("仅管理员可操作"));
+    }
+
+    @Test
+    void shouldRequestAdminUnbindWithNaturalLanguage() throws Exception {
+        identityIs(admin());
+        when(emailBindingService.requestAdminUnbind(999L, 123456L, "user@example.com"))
+                .thenReturn("确定要解除 用户 123456 和 邮箱 use***com 的绑定吗？");
+
+        service.onEvent(event(privateCommand("用户 123456 邮箱 user@example.com 解除绑定")));
+
+        verify(emailBindingService, timeout(3000))
+                .requestAdminUnbind(999L, 123456L, "user@example.com");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("确定要解除"));
+    }
+
+    @Test
+    void shouldPromptUnbindFormatWhenAdminLanguageIsInvalid() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event(privateCommand("解除绑定")));
+
+        verify(emailBindingService, never()).requestAdminUnbind(anyLong(), anyLong(), anyString());
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("解绑格式"));
+    }
+
+    @Test
+    void shouldConfirmAdminUnbindWithCommand() throws Exception {
+        identityIs(admin());
+        when(emailBindingService.confirmAdminUnbind(999L, "ABC234"))
+                .thenReturn("已解除 用户 123456 和 邮箱 use***com 的绑定。");
+
+        service.onEvent(event(privateCommand("/确认解绑 ABC234")));
+
+        verify(emailBindingService, timeout(3000)).confirmAdminUnbind(999L, "ABC234");
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("已解除"));
     }
 
     /** 超过 maxReplyLength 的回复应渲染成图片发送，而不是被截断。 */

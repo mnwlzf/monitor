@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 /** 邮箱绑定、验证和解绑的自然语言意图识别。 */
 final class BotEmailBindingIntent {
 
-    enum Action { BIND, VERIFY, UNBIND }
+    enum Action { BIND, VERIFY }
 
     record Intent(Action action, String value) {
     }
@@ -33,9 +33,6 @@ final class BotEmailBindingIntent {
     private static final Pattern VERIFY = Pattern.compile(
             "^" + LEAD + "(?:验证码|验证|校验)(?:我的)?(?:邮箱)?\\s*[:：]?\\s*(\\d{6})$");
 
-    private static final Pattern UNBIND = Pattern.compile(
-            "^" + LEAD + "(?:解绑|解除绑定)(?:我的)?(?:QQ)?(?:邮箱)?[。！!？?]?$");
-
     private BotEmailBindingIntent() {
     }
 
@@ -53,9 +50,6 @@ final class BotEmailBindingIntent {
         Optional<String> verify = capture(VERIFY, normalized);
         if (verify.isPresent()) {
             return Optional.of(new Intent(Action.VERIFY, verify.get()));
-        }
-        if (UNBIND.matcher(normalized).matches()) {
-            return Optional.of(new Intent(Action.UNBIND, ""));
         }
         return Optional.empty();
     }

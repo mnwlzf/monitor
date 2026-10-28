@@ -21,6 +21,7 @@ import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
 import com.monitor.platform.bot.report.BotGroupRedactor;
 import com.monitor.platform.bot.report.BotReport;
+import com.monitor.platform.bot.report.EmailMasker;
 import com.monitor.platform.bot.vision.BotImageFetcher;
 import com.monitor.platform.bot.vision.BotVisionProperties;
 import com.monitor.platform.bot.voice.BotSpeechService;
@@ -335,7 +336,8 @@ public class BotMessageService {
                             : "处理这条消息时出错了，请稍后再试。");
                 }
 
-                // 群聊功能照常执行，但最终输出统一脱敏：不展示账号名称、上游平台名称/地址和邮箱。
+                // 所有输出先做邮箱部分脱敏；群聊再额外隐藏平台和账号名称。
+                report = EmailMasker.maskReport(report);
                 if (BotCommandRouter.inGroupContext(event)) {
                     report = groupRedactor.redact(report);
                 }
@@ -470,13 +472,27 @@ public class BotMessageService {
         if (plainText.matches("\\d{6}") && emailBindingService.hasPending(event.userId())) {
             return text(emailBindingService.verify(event.userId(), plainText));
         }
+        if (BotAdminUnbindIntent.looksLikeUnbind(plainText)) {
+            if (!identity.admin()) {
+                return text("邮箱解绑仅管理员可操作。\n" + BotEmailBindingService.adminUnbindUsage());
+            }
+            Optional<BotAdminUnbindIntent.Intent> unbindIntent = BotAdminUnbindIntent.parse(plainText);
+            if (unbindIntent.isEmpty()) {
+                return text(BotEmailBindingService.adminUnbindUsage());
+            }
+            BotAdminUnbindIntent.Intent intent = unbindIntent.get();
+            return text(switch (intent.action()) {
+                case REQUEST -> emailBindingService.requestAdminUnbind(
+                        event.userId(), intent.targetQq(), intent.email());
+                case CONFIRM -> emailBindingService.confirmAdminUnbind(event.userId(), intent.code());
+            });
+        }
         Optional<BotEmailBindingIntent.Intent> bindingIntent = BotEmailBindingIntent.parse(plainText);
         if (bindingIntent.isPresent()) {
             BotEmailBindingIntent.Intent intent = bindingIntent.get();
             return text(switch (intent.action()) {
                 case BIND -> emailBindingService.requestBinding(event.userId(), intent.value());
                 case VERIFY -> emailBindingService.verify(event.userId(), intent.value());
-                case UNBIND -> emailBindingService.unbind(event.userId());
             });
         }
         if (isLotteryIntent(plainText)) {
