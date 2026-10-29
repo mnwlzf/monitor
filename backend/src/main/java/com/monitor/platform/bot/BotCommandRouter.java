@@ -17,6 +17,7 @@ import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.ops.OpsIncidentService;
+import com.monitor.platform.ops.OpsMonitoringService;
 import com.monitor.platform.status.OpenAiStatusService;
 import org.springframework.stereotype.Component;
 
@@ -57,6 +58,7 @@ public class BotCommandRouter {
             - /入口拒绝 [时间窗]  无效 Key、IP 限制、分组禁用等入口拒绝统计
             - /错误日志 [时间窗] [级别] [关键词]  按时间/级别/关键词查系统日志
             - /错误审计 [时间窗] [条数]  查看错误查询审计和限流拦截
+            - /监控 [总览|渠道|账号|代理|倍率|用户|归因]  智能运维多源监控
             - /事故 [编号]    查看智能运维事故
             - /自愈 #编号     生成自愈计划（仅管理员好友私聊）
             - /确认自愈 <确认码>  执行已审批的自愈计划（仅管理员好友私聊）
@@ -90,6 +92,7 @@ public class BotCommandRouter {
             管理员解绑邮箱可直接说「用户 123456 邮箱 user@example.com 解除绑定」
             也可以直接说人话，例如「近 7 天哪个号池账号缓存率最低？」
             错误排障也可以直接问：「最近一小时错误最多的账号是谁？」「今天 401 多不多？」「现在系统有什么问题？」
+            智能运维也可以不记命令直接问：「现在整体怎么样」「哪个分组最差」「代理快过期了吗」「谁在异常刷请求」「最近有什么事故」。
             需要新建 Sub2API 密钥时，直接说清五项：厂商 / 名称 / 分组 / 额度限制 / 有效期（天数或 yyyy-MM-dd HH:mm:ss）。
             需要外部实时信息（新闻、版本发布、价格、官方文档）时，我会自动联网搜索。
             问机器人功能 / 命令时直接回答，不会联网。
@@ -145,6 +148,7 @@ public class BotCommandRouter {
     private final BotEmailBindingService emailBindingService;
     private final BotLotteryService lotteryService;
     private final OpsIncidentService incidentService;
+    private final OpsMonitoringService monitoringService;
 
     public BotCommandRouter(MonitorChatTools tools,
                             BotOrderTools orderTools,
@@ -162,7 +166,8 @@ public class BotCommandRouter {
                             BotForbiddenWordService forbiddenWordService,
                             BotEmailBindingService emailBindingService,
                             BotLotteryService lotteryService,
-                            OpsIncidentService incidentService) {
+                            OpsIncidentService incidentService,
+                            OpsMonitoringService monitoringService) {
         this.tools = tools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
@@ -180,6 +185,7 @@ public class BotCommandRouter {
         this.emailBindingService = emailBindingService;
         this.lotteryService = lotteryService;
         this.incidentService = incidentService;
+        this.monitoringService = monitoringService;
     }
 
     /**
@@ -283,6 +289,20 @@ public class BotCommandRouter {
             case "myerrors", "我的错误" ->
                     selfErrorCommand(event, identity, platformFeature, arg,
                             () -> errorService.myReport(identity.email(), arg));
+            case "monitoring", "监控", "运维", "运维监控", "监控总览" ->
+                    opsMonitoringCommand(identity, platformFeature, arg);
+            case "渠道健康", "监控渠道", "channelhealth" ->
+                    opsMonitoringCommand(identity, platformFeature, "渠道");
+            case "账号健康", "监控账号", "accounthealth" ->
+                    opsMonitoringCommand(identity, platformFeature, "账号");
+            case "代理健康", "监控代理", "proxyhealth" ->
+                    opsMonitoringCommand(identity, platformFeature, "代理");
+            case "倍率风险", "监控倍率", "raterisk" ->
+                    opsMonitoringCommand(identity, platformFeature, "倍率");
+            case "用户异常", "监控用户", "useranomaly" ->
+                    opsMonitoringCommand(identity, platformFeature, "用户");
+            case "归因", "监控归因", "providerattribution" ->
+                    opsMonitoringCommand(identity, platformFeature, "归因");
             case "incidents", "事故", "故障" ->
                     opsIncidentCommand(identity, platformFeature, event, arg, "incidents");
             case "heal", "自愈", "自愈计划" ->
@@ -606,6 +626,33 @@ public class BotCommandRouter {
         }
         generated.add(result.image());
         return text("画好了。");
+    }
+
+    /** 多源监控总览与分类查询。 */
+    private BotReport opsMonitoringCommand(BotIdentity identity, boolean platformFeature, String arg) {
+        if (!platformFeature) {
+            return text(UNKNOWN_COMMAND);
+        }
+        if (!identity.admin()) {
+            return text("平台级数据仅管理员可查。");
+        }
+        String target = arg == null ? "" : arg.trim().toLowerCase(Locale.ROOT);
+        try {
+            return switch (target) {
+                case "", "总览", "全部", "overview", "all" -> monitoringService.overviewReport();
+                case "渠道", "分组", "channel", "channels" -> monitoringService.channelReport();
+                case "账号", "account", "accounts" -> monitoringService.accountReport();
+                case "代理", "proxy", "proxies" -> monitoringService.proxyReport();
+                case "倍率", "倍率风险", "rate", "rates" -> monitoringService.rateRiskReport();
+                case "用户", "用户异常", "异常用户", "user", "users" -> monitoringService.userAnomalyReport();
+                case "归因", "provider", "provider归因", "attribution" -> monitoringService.providerReport();
+                default -> text("不认识的监控分类：" + arg
+                        + "\n可用分类：总览、渠道、账号、代理、倍率、用户、归因。"
+                        + "\n也可以直接说「现在整体怎么样」「哪个分组最差」「代理快过期了吗」。");
+            };
+        } catch (RuntimeException ex) {
+            return text("查询智能运维监控失败，请稍后再试。");
+        }
     }
 
     /** 智能运维事故查询、自愈计划和确认执行。 */

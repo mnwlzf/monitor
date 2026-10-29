@@ -25,7 +25,7 @@ public class OpsIncidentRefreshTaskHandler implements ScheduledTaskHandler {
 
     @Override
     public String description() {
-        return "每 5 分钟从 Sub2API 错误指纹生成/更新事故，自动关闭已恢复事故";
+        return "每 5 分钟聚合错误、渠道、账号、代理、倍率和用户信号生成/更新事故，自动关闭已恢复事故";
     }
 
     @Override

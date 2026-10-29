@@ -7,6 +7,7 @@ import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.weather.WeatherTools;
+import com.monitor.platform.ops.OpsMonitoringTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -35,6 +36,7 @@ class BotChatClientFactoryTest {
     private final WeatherTools weatherTools = mock(WeatherTools.class);
     private final WebSearchTools webSearchTools = mock(WebSearchTools.class);
     private final Sub2KeyTools sub2KeyTools = mock(Sub2KeyTools.class);
+    private final OpsMonitoringTools opsMonitoringTools = mock(OpsMonitoringTools.class);
     private final WebSearchProperties webSearchProperties = new WebSearchProperties();
 
     @SuppressWarnings("unchecked")
@@ -48,7 +50,7 @@ class BotChatClientFactoryTest {
         when(provider.getIfAvailable()).thenReturn(builder);
         return new BotChatClientFactory(
                 tools, errorTools, orderTools, usageTools, weatherTools,
-                webSearchTools, sub2KeyTools, webSearchProperties, provider,
+                webSearchTools, sub2KeyTools, opsMonitoringTools, webSearchProperties, provider,
                 fallbackProperties);
     }
 
@@ -77,7 +79,8 @@ class BotChatClientFactoryTest {
 
         factory(builder).get(BotChatClientFactory.Persona.MONITOR_ADMIN, settings(false), true);
 
-        verify(builder).defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools);
+        verify(builder).defaultTools(tools, errorTools, orderTools, usageTools, weatherTools,
+                webSearchTools, sub2KeyTools, opsMonitoringTools);
     }
 
     /**

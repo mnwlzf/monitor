@@ -66,7 +66,8 @@ public class OpsIncidentNotifier {
                 + "编号：#" + incident.getId() + "\n"
                 + "故障：" + incident.getTitle() + "\n"
                 + "影响：" + (incident.getImpactSummary() == null ? "—" : incident.getImpactSummary()) + "\n"
+                + "总览：/监控\n"
                 + "查看：/事故 #" + incident.getId() + "\n"
-                + "生成计划：/自愈 #" + incident.getId();
+                + "生成计划：管理员私聊发送 /自愈 #" + incident.getId();
     }
 }

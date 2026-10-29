@@ -9,6 +9,8 @@ import com.monitor.platform.bot.user.BotKeyUsageService;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.ops.OpsIncidentService;
+import com.monitor.platform.ops.OpsMonitoringService;
+import com.monitor.platform.ops.OpsMonitoringTools;
 import com.monitor.platform.bot.report.BotGroupRedactor;
 import com.monitor.platform.bot.report.BotReportRenderer;
 import com.monitor.platform.bot.archive.BotMessageArchiveService;
@@ -110,11 +112,12 @@ class QqBotWebhookIntegrationTest {
         BotEmailBindingService emailBindingService = mock(BotEmailBindingService.class);
         BotLotteryService lotteryService = mock(BotLotteryService.class);
         OpsIncidentService incidentService = mock(OpsIncidentService.class);
+        OpsMonitoringService monitoringService = mock(OpsMonitoringService.class);
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
-                mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider,
-                new BotModelFallbackProperties());
+                mock(WebSearchTools.class), mock(Sub2KeyTools.class), mock(OpsMonitoringTools.class),
+                new WebSearchProperties(), provider, new BotModelFallbackProperties());
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService, incidentService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService, incidentService, monitoringService);
 
         BotMessageService service = new BotMessageService(
                 settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService);

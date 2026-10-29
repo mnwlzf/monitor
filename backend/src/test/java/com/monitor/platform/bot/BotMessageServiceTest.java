@@ -10,6 +10,8 @@ import com.monitor.platform.bot.user.BotKeyUsageService;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.onebot.OneBotEvent;
 import com.monitor.platform.ops.OpsIncidentService;
+import com.monitor.platform.ops.OpsMonitoringService;
+import com.monitor.platform.ops.OpsMonitoringTools;
 import com.monitor.platform.bot.report.BotGroupRedactor;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.report.BotReportRenderer;
@@ -95,6 +97,7 @@ class BotMessageServiceTest {
     private BotEmailBindingService emailBindingService;
     private BotLotteryService lotteryService;
     private OpsIncidentService incidentService;
+    private OpsMonitoringService monitoringService;
     private BotMessageService service;
 
     @BeforeEach
@@ -135,6 +138,7 @@ class BotMessageServiceTest {
         emailBindingService = mock(BotEmailBindingService.class);
         lotteryService = mock(BotLotteryService.class);
         incidentService = mock(OpsIncidentService.class);
+        monitoringService = mock(OpsMonitoringService.class);
         when(groupRedactor.redact(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(openAiStatusService.statusReport()).thenReturn("【OpenAI 服务状态】\n总体状态：全部系统正常");
 
@@ -142,10 +146,10 @@ class BotMessageServiceTest {
         when(provider.getIfAvailable()).thenReturn(null);
 
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
-                mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider,
-                new BotModelFallbackProperties());
+                mock(WebSearchTools.class), mock(Sub2KeyTools.class), mock(OpsMonitoringTools.class),
+                new WebSearchProperties(), provider, new BotModelFallbackProperties());
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService, incidentService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService, incidentService, monitoringService);
         service = new BotMessageService(
                 settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService);
     }
@@ -751,6 +755,18 @@ class BotMessageServiceTest {
 
         verify(incidentService, timeout(3000)).incidentListReport(20);
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("当前事故内容"));
+    }
+
+    /** 管理员可以用一个入口查询全部多源监控分类。 */
+    @Test
+    void shouldQueryOpsMonitoringForAdminInPrivate() throws Exception {
+        identityIs(admin());
+        when(monitoringService.proxyReport()).thenReturn(BotReport.fromMarkdown("代理健康内容"));
+
+        service.onEvent(event(privateCommand("/监控 代理")));
+
+        verify(monitoringService, timeout(3000)).proxyReport();
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("代理健康内容"));
     }
 
     /** 普通平台用户不能查看智能运维事故。 */

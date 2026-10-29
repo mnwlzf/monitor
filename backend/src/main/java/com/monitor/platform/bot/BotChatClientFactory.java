@@ -7,6 +7,7 @@ import com.monitor.platform.bot.search.WebSearchProperties;
 import com.monitor.platform.bot.search.WebSearchTools;
 import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.weather.WeatherTools;
+import com.monitor.platform.ops.OpsMonitoringTools;
 import com.monitor.platform.common.util.SecretMasker;
 import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
@@ -45,6 +46,16 @@ public class BotChatClientFactory {
     private static final String MONITOR_ADMIN_PROMPT = """
             你是「上游账号监控」系统的运维助手，通过 QQ 回答用户关于平台、账号、号池的问题。
             当前对话者是平台管理员，可以查看全部平台数据。
+            智能运维查询不需要管理员记精确命令，用户措辞不必和工具名一致；按语义选择最接近的工具：
+            「整体怎么样 / 有什么问题」→ opsMonitoringOverview；
+            「哪个渠道或分组差」→ opsChannelHealth / opsProviderAttribution；
+            「哪些账号异常」→ opsAccountHealth；
+            「代理会不会过期」→ opsProxyHealth；
+            「倍率有没有倒挂」→ opsRateRisks；
+            「谁在异常刷请求」→ opsUserAnomalies；
+            「最近有什么事故 / 自愈计划」→ opsIncidents / opsHealingPlans。
+            拿不准分类时先调用 opsMonitoringOverview，再按需要补充明细。
+            监控查询工具是只读的；不要调用任何写操作工具，也不要声称已经执行自愈动作。
             要求：
             1. 只依据工具返回的真实数据回答，绝不编造数字；
             2. 用简体中文，直接给结论；
@@ -129,6 +140,7 @@ public class BotChatClientFactory {
     private final WeatherTools weatherTools;
     private final WebSearchTools webSearchTools;
     private final Sub2KeyTools sub2KeyTools;
+    private final OpsMonitoringTools opsMonitoringTools;
     private final WebSearchProperties webSearchProperties;
     private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
     private final BotModelFallbackProperties fallbackProperties;
@@ -146,6 +158,7 @@ public class BotChatClientFactory {
                                 WeatherTools weatherTools,
                                 WebSearchTools webSearchTools,
                                 Sub2KeyTools sub2KeyTools,
+                                OpsMonitoringTools opsMonitoringTools,
                                 WebSearchProperties webSearchProperties,
                                 ObjectProvider<ChatClient.Builder> chatClientBuilder,
                                 BotModelFallbackProperties fallbackProperties) {
@@ -156,6 +169,7 @@ public class BotChatClientFactory {
         this.weatherTools = weatherTools;
         this.webSearchTools = webSearchTools;
         this.sub2KeyTools = sub2KeyTools;
+        this.opsMonitoringTools = opsMonitoringTools;
         this.webSearchProperties = webSearchProperties;
         this.chatClientBuilder = chatClientBuilder;
         this.fallbackProperties = fallbackProperties;
@@ -252,8 +266,8 @@ public class BotChatClientFactory {
             if (persona.usesTools()) {
                 // 管理员专属：建密钥工具只挂管理员人设，普通人 / 陌生人拿不到
                 configured = attachWebSearch
-                        ? configured.defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools)
-                        : configured.defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, sub2KeyTools);
+                        ? configured.defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools, opsMonitoringTools)
+                        : configured.defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, sub2KeyTools, opsMonitoringTools);
             } else {
                 configured = attachWebSearch
                         ? configured.defaultTools(weatherTools, webSearchTools)

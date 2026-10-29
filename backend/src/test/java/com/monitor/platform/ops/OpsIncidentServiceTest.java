@@ -44,7 +44,7 @@ class OpsIncidentServiceTest {
         when(reader.recent(any(), any(), any(), eq(300))).thenReturn(List.of(row));
 
         OpsIncidentService service = new OpsIncidentService(reader, incidents, events, plans, executions,
-                actionClient, platforms, keys, mapper, mock(OpsIncidentNotifier.class));
+                actionClient, platforms, keys, mapper, mock(OpsIncidentNotifier.class), mock(OpsMonitoringService.class));
 
         OpsActionPlanEntity plan = service.createPlan(1L, "admin@example.com");
 
@@ -99,7 +99,7 @@ class OpsIncidentServiceTest {
         when(actionClient.clearRateLimit("https://sub2.example.com", "admin-key", 123L)).thenReturn(after);
 
         OpsIncidentService service = new OpsIncidentService(reader, incidents, events, plans, executions,
-                actionClient, platforms, keys, mapper, mock(OpsIncidentNotifier.class));
+                actionClient, platforms, keys, mapper, mock(OpsIncidentNotifier.class), mock(OpsMonitoringService.class));
 
         OpsIncidentService.ExecutionResult result = service.executePlan(10L, "ABC12345", "admin@example.com");
 
@@ -108,6 +108,32 @@ class OpsIncidentServiceTest {
         verify(actionClient).clearRateLimit("https://sub2.example.com", "admin-key", 123L);
         verify(executions).insert(any(OpsActionExecutionEntity.class));
         verify(events).append(eq(2L), eq("PLAN_EXECUTED"), eq("admin@example.com"), anyString());
+    }
+
+    @Test
+    void shouldCollectMonitoringSignalsEvenWhenErrorSourceIsUnavailable() {
+        Sub2ErrorReader reader = mock(Sub2ErrorReader.class);
+        OpsIncidentRepository incidents = mock(OpsIncidentRepository.class);
+        OpsIncidentEventRepository events = mock(OpsIncidentEventRepository.class);
+        OpsActionPlanRepository plans = mock(OpsActionPlanRepository.class);
+        OpsActionExecutionRepository executions = mock(OpsActionExecutionRepository.class);
+        OpsMonitoringService monitoring = mock(OpsMonitoringService.class);
+        OpsIncidentNotifier notifier = mock(OpsIncidentNotifier.class);
+
+        when(reader.isAvailable()).thenReturn(false);
+        when(monitoring.hasReadableSource()).thenReturn(true);
+        when(monitoring.collectIncidentSignals()).thenReturn(List.of(
+                new OpsMonitoringService.MonitoringSignal("PROXY_HEALTH", "proxy:9",
+                        "代理健康异常：香港出口", "P1", "PROXY", "9", "代理已过期", "{}")));
+
+        OpsIncidentService service = new OpsIncidentService(reader, incidents, events, plans, executions,
+                mock(Sub2OpsActionClient.class), mock(PlatformRepository.class),
+                mock(PoolAdminKeyResolver.class), mapper, notifier, monitoring);
+
+        assertThat(service.refreshIncidents()).isEqualTo(1);
+        verify(incidents).insert(any(OpsIncidentEntity.class));
+        verify(notifier).notifyNewIncident(any(OpsIncidentEntity.class));
+        verify(incidents).resolveStale(any(), any(), any());
     }
 
     private static OpsIncidentEntity incident(long id, String phase, String type, int status) throws Exception {

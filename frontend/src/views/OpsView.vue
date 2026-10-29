@@ -5,7 +5,7 @@
         <div class="admin-card-header">
           <div>
             <h3>智能运维 · 事故中心</h3>
-            <p>把 Sub2API 错误、账号状态和变更关联成事故；低风险动作先生成计划，管理员确认后执行。</p>
+            <p>把 Sub2API 错误、渠道、账号、代理、倍率和用户信号关联成事故；低风险动作先生成计划，管理员确认后执行。</p>
           </div>
           <div class="ops-actions">
             <el-button :icon="Refresh" :loading="loading" @click="loadAll">刷新</el-button>
@@ -18,7 +18,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="当前为最小闭环：事故自动巡检 + 自愈计划 + 确认执行 + 回读验证。自动执行策略暂不开放。"
+        title="当前为最小闭环：多源监控自动巡检 + 自愈计划 + 确认执行 + 回读验证。自动执行策略暂不开放。"
       />
 
       <el-row :gutter="16" class="ops-summary">
@@ -236,7 +236,7 @@ async function refreshIncidents() {
   try {
     const count = await refreshOpsIncidents()
     await loadAll()
-    ElMessage.success(`巡检完成，更新 ${count} 个错误指纹`)
+    ElMessage.success(`巡检完成，更新 ${count} 个监控信号`)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '巡检失败')
   } finally {

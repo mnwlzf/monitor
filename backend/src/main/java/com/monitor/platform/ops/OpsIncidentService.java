@@ -55,6 +55,7 @@ public class OpsIncidentService {
     private final PoolAdminKeyResolver adminKeyResolver;
     private final ObjectMapper objectMapper;
     private final OpsIncidentNotifier notifier;
+    private final OpsMonitoringService monitoringService;
 
     public OpsIncidentService(Sub2ErrorReader errorReader,
                               OpsIncidentRepository incidentRepository,
@@ -65,7 +66,8 @@ public class OpsIncidentService {
                               PlatformRepository platformRepository,
                               PoolAdminKeyResolver adminKeyResolver,
                               ObjectMapper objectMapper,
-                              OpsIncidentNotifier notifier) {
+                              OpsIncidentNotifier notifier,
+                              OpsMonitoringService monitoringService) {
         this.errorReader = errorReader;
         this.incidentRepository = incidentRepository;
         this.eventRepository = eventRepository;
@@ -76,36 +78,51 @@ public class OpsIncidentService {
         this.adminKeyResolver = adminKeyResolver;
         this.objectMapper = objectMapper;
         this.notifier = notifier;
+        this.monitoringService = monitoringService;
     }
 
     /** 定时任务入口：把错误指纹转成事故，并关闭 30 分钟没有新信号的旧事故。 */
     public int refreshIncidents() {
-        if (!errorReader.isAvailable()) {
-            return 0;
-        }
         OffsetDateTime now = OffsetDateTime.now(ZONE);
         OffsetDateTime from = now.minus(LOOKBACK);
         int changed = 0;
-        try {
-            List<ErrorFingerprint> fingerprints = errorReader.topFingerprints(
-                    from, now, ErrorFilter.everything(null), 20);
-            for (ErrorFingerprint fingerprint : fingerprints) {
-                if (fingerprint.count() < MIN_FINGERPRINT_COUNT) {
-                    continue;
+        boolean errorSourceAvailable = errorReader.isAvailable();
+        boolean monitoringSourceAvailable = monitoringService.hasReadableSource();
+        if (errorSourceAvailable) {
+            try {
+                List<ErrorFingerprint> fingerprints = errorReader.topFingerprints(
+                        from, now, ErrorFilter.everything(null), 20);
+                for (ErrorFingerprint fingerprint : fingerprints) {
+                    if (fingerprint.count() < MIN_FINGERPRINT_COUNT) {
+                        continue;
+                    }
+                    upsertIncident(fingerprint, now);
+                    changed++;
                 }
-                upsertIncident(fingerprint, now);
+            } catch (RuntimeException ex) {
+                log.warn("读取错误指纹事故信号失败: {}", ex.getMessage());
+            }
+        }
+        try {
+            for (OpsMonitoringService.MonitoringSignal signal : monitoringService.collectIncidentSignals()) {
+                upsertMonitoringSignal(signal, now);
                 changed++;
             }
-            int resolved = incidentRepository.resolveStale(from, now, now);
-            planRepository.expireStale(now, now);
-            if (resolved > 0) {
-                log.info("智能运维事故巡检关闭过期事故: {}", resolved);
-            }
-            return changed;
         } catch (RuntimeException ex) {
-            log.warn("智能运维事故巡检失败: {}", ex.getMessage());
-            return changed;
+            log.warn("读取多源监控事故信号失败: {}", ex.getMessage());
         }
+        if (errorSourceAvailable || monitoringSourceAvailable) {
+            try {
+                int resolved = incidentRepository.resolveStale(from, now, now);
+                planRepository.expireStale(now, now);
+                if (resolved > 0) {
+                    log.info("智能运维事故巡检关闭过期事故: {}", resolved);
+                }
+            } catch (RuntimeException ex) {
+                log.warn("关闭过期智能运维事故失败: {}", ex.getMessage());
+            }
+        }
+        return changed;
     }
 
     public List<OpsIncidentEntity> listIncidents(String status, int limit) {
@@ -337,6 +354,33 @@ public class OpsIncidentService {
                 + "\n计划：" + result.plan().getPlanCode()
                 + "\n动作：" + actionLabel(result.plan().getActionType())
                 + "\n状态：" + result.plan().getStatus());
+    }
+
+    private void upsertMonitoringSignal(OpsMonitoringService.MonitoringSignal signal, OffsetDateTime now) {
+        OpsIncidentEntity existing = incidentRepository.findActiveByFingerprint(signal.fingerprint()).orElse(null);
+        if (existing == null) {
+            OpsIncidentEntity incident = new OpsIncidentEntity();
+            incident.setFingerprint(signal.fingerprint());
+            incident.setTitle(signal.title());
+            incident.setSeverity(signal.severity());
+            incident.setStatus("ACTIVE");
+            incident.setScopeType(signal.scopeType());
+            incident.setScopeId(signal.scopeId());
+            incident.setRootCauseCode(signal.type() + " / " + signal.scopeId());
+            incident.setImpactSummary(signal.impactSummary());
+            incident.setEvidenceJson(signal.evidenceJson());
+            incident.setFirstSeenAt(now);
+            incident.setLastSeenAt(now);
+            incidentRepository.insert(incident);
+            eventRepository.append(incident.getId(), "MONITORING_INCIDENT_OPENED", "ops-incident-refresh",
+                    "发现监控事故：" + signal.title() + "，" + signal.impactSummary());
+            notifier.notifyNewIncident(incident);
+            return;
+        }
+        incidentRepository.updateObserved(existing.getId(), signal.title(), signal.severity(),
+                signal.impactSummary(), signal.evidenceJson(), now, now);
+        eventRepository.append(existing.getId(), "MONITORING_SIGNAL_UPDATED", "ops-incident-refresh",
+                signal.impactSummary());
     }
 
     private void upsertIncident(ErrorFingerprint fingerprint, OffsetDateTime now) {
