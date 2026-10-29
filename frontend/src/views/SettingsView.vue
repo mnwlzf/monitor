@@ -273,7 +273,15 @@
           <span class="admin-form-hint" style="margin-left: 10px">关闭后 /抽奖 会提示活动未开启</span>
         </el-form-item>
         <el-form-item label="前一日最低消费">
-          <el-input-number v-model="lotteryForm.minUsageDaily" :min="0" :max="1000000" :step="1" :precision="2" />
+          <el-input-number
+            v-model="lotteryForm.minUsageDaily"
+            :min="0"
+            :max="1000000"
+            :step="1"
+            :precision="2"
+            @input="recalculateLotteryPreviewSoon"
+            @change="recalculateLotteryPreview"
+          />
           <span class="admin-form-hint" style="margin-left: 10px">
             前一天实际扣余额消费达到该值才有资格；提高门槛会减少参与人数和总成本
           </span>
@@ -380,7 +388,7 @@
 
       <div class="lottery-ladder-title">
         <strong>奖励阶梯实时预览</strong>
-        <span>前一日消费 $10–$100，每 $1 一档，实时跟随上方参数</span>
+        <span>前一日消费 ${{ lotteryPreviewStart }}–${{ lotteryPreviewEnd }}，每 $1 一档，实时跟随上方参数</span>
       </div>
       <el-table :data="lotteryPreviewRows" size="small" class="lottery-preview-table" max-height="380">
         <el-table-column prop="label" label="前一日实际消费" min-width="180" />
@@ -1046,6 +1054,8 @@ async function removeForbiddenWord(row: BotForbiddenWord) {
 
 const lotteryAverageMultiplier = ref(1)
 const lotteryEffectiveRatio = ref(3)
+const lotteryPreviewStart = ref(10)
+const lotteryPreviewEnd = ref(100)
 const lotteryPreviewRows = ref<Array<{
   label: string
   minReward: number
@@ -1058,10 +1068,16 @@ function recalculateLotteryPreview() {
   const multiplierMin = Number(lotteryForm.multiplierMin || 0)
   const multiplierMax = Number(lotteryForm.multiplierMax || 0)
   const maxReward = Number(lotteryForm.maxReward || 0)
+  const rawPreviewStart = Number(lotteryForm.minUsageDaily)
+  const previewStart = Number.isFinite(rawPreviewStart) ? Math.max(0, rawPreviewStart) : 0
+  const previewEnd = Math.max(100, previewStart)
   const averageMultiplier = (multiplierMin + multiplierMax) / 2
   lotteryAverageMultiplier.value = averageMultiplier
   lotteryEffectiveRatio.value = ratio * averageMultiplier
-  lotteryPreviewRows.value = Array.from({ length: 91 }, (_, index) => index + 10).map((usage) => {
+  lotteryPreviewStart.value = previewStart
+  lotteryPreviewEnd.value = previewEnd
+  const previewRowCount = Math.max(1, Math.floor(previewEnd - previewStart) + 1)
+  lotteryPreviewRows.value = Array.from({ length: previewRowCount }, (_, index) => previewStart + index).map((usage) => {
     const base = usage * ratio / 100
     const rawMin = floorMoney(base * multiplierMin)
     const rawMax = floorMoney(base * multiplierMax)
