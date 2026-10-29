@@ -59,7 +59,7 @@ import java.util.regex.Pattern;
  * <p>回调本身必须尽快返回（OneBot 有超时），所以真正的处理丢到后台线程里做。</p>
  *
  * <h2>身份与人设</h2>
- * 群聊和群临时会话可以正常触发平台查询，但最终输出会统一脱敏：
+ * 除管理员好友私聊外，所有最终输出都会统一脱敏：
  * <strong>账号名称、上游平台名称/地址和邮箱不会直接展示</strong>。判定见
  * {@link BotAccessPolicy}：
  * <ul>
@@ -335,9 +335,10 @@ public class BotMessageService {
                     report = BotReport.fromMarkdown("处理这条消息时出错了，请稍后再试。");
                 }
 
-                // 所有输出先做邮箱部分脱敏；群聊再额外隐藏平台和账号名称。
-                report = EmailMasker.maskReport(report);
-                if (BotCommandRouter.inGroupContext(event)) {
+                // 只有管理员好友私聊保留原始明细；其他通道一律做完整脱敏。
+                boolean adminPrivate = channel == BotChannel.PRIVATE && identity.admin();
+                if (!adminPrivate) {
+                    report = EmailMasker.maskReport(report);
                     report = groupRedactor.redact(report);
                 }
 

@@ -6,6 +6,7 @@ import com.monitor.platform.common.exception.BusinessException;
 import com.monitor.platform.mail.MailService;
 import com.monitor.platform.mail.SmtpConfigProvider;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -70,6 +71,30 @@ class BotEmailBindingServiceTest {
         String reply = service.requestBinding(999L, "user@example.com");
 
         assertEquals("发送太频繁，请 42 秒后再试。", reply);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReturnRawEmailForAdminUnbindPreview() {
+        BotUserBindingRepository repository = mock(BotUserBindingRepository.class);
+        BotUserBindingEntity binding = new BotUserBindingEntity();
+        binding.setEmail("user@example.com");
+        when(repository.findByExternalUser("QQ", "123456")).thenReturn(Optional.of(binding));
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        when(redis.opsForHash()).thenReturn(mock(HashOperations.class));
+        BotEmailBindingService service = new BotEmailBindingService(
+                repository,
+                mock(QqUserBindingService.class),
+                mock(Sub2ApiUserCache.class),
+                mock(SmtpConfigProvider.class),
+                mock(MailService.class),
+                redis,
+                mock(PasswordEncoder.class));
+
+        String reply = service.requestAdminUnbind(999L, 123456L, "user@example.com");
+
+        assertTrue(reply.contains("user@example.com"));
+        assertTrue(reply.contains("确认解绑"));
     }
 
     private static BotEmailBindingService service() {

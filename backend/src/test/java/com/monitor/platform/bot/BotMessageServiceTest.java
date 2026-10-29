@@ -715,14 +715,28 @@ class BotMessageServiceTest {
         verify(groupRedactor, timeout(3000)).redact(any());
     }
 
-    /** 管理员好友私聊保持原始明细，不经过群聊脱敏。 */
+    /** 管理员好友私聊保持原始明细，邮箱也不脱敏。 */
     @Test
-    void shouldNotRedactPrivateOutput() throws Exception {
+    void shouldNotRedactAdminPrivateOutput() throws Exception {
         identityIs(admin());
+        when(tools.platformReport()).thenReturn(BotReport.fromMarkdown("平台明细 admin@example.com"));
 
         service.onEvent(event(privateCommand("/平台")));
 
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
+        assertTrue(reply.getValue().contains("admin@example.com"));
         verify(groupRedactor, never()).redact(any());
+    }
+
+    /** 非管理员好友私聊同样必须经过完整脱敏。 */
+    @Test
+    void shouldRedactNonAdminPrivateOutput() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(privateCommand("/help")));
+
+        verify(groupRedactor, timeout(3000)).redact(any());
     }
     @Test
     void shouldIgnoreNonMessageEvents() throws Exception {

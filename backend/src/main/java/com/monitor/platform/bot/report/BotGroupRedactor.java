@@ -18,11 +18,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 群聊输出脱敏：功能照常执行，但账号名称、上游平台名称和平台地址不直接展示。
+ * 机器人最终输出脱敏：功能照常执行，但账号名称、上游平台名称和平台地址不直接展示。
  *
- * <p>所有群聊/群临时会话的最终报表在发送前经过这里。平台按 ID 排序映射为
- * 「上游平台1/2/…」，账号映射为「上游账号1/2/…」；同一份数据在多轮消息里标签稳定。
- * 邮箱统一替换为「[邮箱已隐藏]」。</p>
+ * <p>除管理员好友私聊由调用方跳过外，其余通道的最终报表在发送前经过这里。
+ * 平台按 ID 排序映射为「上游平台1/2/…」，账号映射为「上游账号1/2/…」；
+ * 同一份数据在多轮消息里标签稳定。邮箱统一替换为「[邮箱已隐藏]」。</p>
  */
 @Service
 public class BotGroupRedactor {
@@ -38,7 +38,7 @@ public class BotGroupRedactor {
         this.accountRepository = accountRepository;
     }
 
-    /** 对群聊最终输出做脱敏；非群聊上下文由调用方决定不调用。 */
+    /** 对最终输出做脱敏；仅管理员好友私聊由调用方跳过。 */
     public BotReport redact(BotReport report) {
         if (report == null) {
             return null;

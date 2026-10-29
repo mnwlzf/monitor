@@ -278,8 +278,7 @@ public class BotEmailBindingService {
         String key = adminUnbindKey(operatorQq);
         redis.opsForHash().putAll(key, pending);
         redis.expire(key, ADMIN_UNBIND_TTL);
-        String masked = com.monitor.platform.bot.report.EmailMasker.maskAddress(email);
-        return "确定要解除 用户 " + targetQq + " 和 邮箱 " + masked + " 的绑定吗？\n"
+        return "确定要解除 用户 " + targetQq + " 和 邮箱 " + email + " 的绑定吗？\n"
                 + "回复：确认解绑 " + code + "\n确认码 5 分钟内有效。";
     }
 
@@ -322,9 +321,8 @@ public class BotEmailBindingService {
             log.warn("管理员解绑后清理缓存失败: qq={}, reason={}", targetQq, ex.getMessage());
         }
         redis.delete(key);
-        String masked = com.monitor.platform.bot.report.EmailMasker.maskAddress(email);
         log.info("管理员解除邮箱绑定: operator={}, targetQq={}, email={}", operatorQq, targetQq, email);
-        return "已解除 用户 " + targetQq + " 和 邮箱 " + masked + " 的绑定。";
+        return "已解除 用户 " + targetQq + " 和 邮箱 " + email + " 的绑定。";
     }
 
     public static String adminUnbindUsage() {
