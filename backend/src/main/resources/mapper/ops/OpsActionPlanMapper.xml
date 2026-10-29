@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.ops.OpsActionPlanMapper">
+
+    <resultMap id="OpsActionPlanResultMap" type="com.monitor.platform.ops.OpsActionPlanEntity">
+        <id column="id" property="id"/>
+        <result column="incident_id" property="incidentId"/>
+        <result column="plan_code" property="planCode"/>
+        <result column="action_type" property="actionType"/>
+        <result column="target_type" property="targetType"/>
+        <result column="target_id" property="targetId"/>
+        <result column="target_name" property="targetName"/>
+        <result column="risk_level" property="riskLevel"/>
+        <result column="status" property="status"/>
+        <result column="summary" property="summary"/>
+        <result column="expected_effect" property="expectedEffect"/>
+        <result column="rollback_plan_json" property="rollbackPlanJson"/>
+        <result column="before_json" property="beforeJson"/>
+        <result column="after_json" property="afterJson"/>
+        <result column="confirmation_code" property="confirmationCode"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="created_by" property="createdBy"/>
+        <result column="approved_by" property="approvedBy"/>
+        <result column="approved_at" property="approvedAt"/>
+        <result column="executed_at" property="executedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="columns">
+        id, incident_id, plan_code, action_type, target_type, target_id, target_name,
+        risk_level, status, summary, expected_effect, rollback_plan_json, before_json,
+        after_json, confirmation_code, expires_at, created_by, approved_by, approved_at,
+        executed_at, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultMap="OpsActionPlanResultMap">
+        SELECT <include refid="columns"/> FROM ops_action_plans WHERE id = #{id}
+    </select>
+
+    <select id="selectRecent" resultMap="OpsActionPlanResultMap">
+        SELECT <include refid="columns"/>
+        FROM ops_action_plans
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ops_action_plans (
+            incident_id, plan_code, action_type, target_type, target_id, target_name,
+            risk_level, status, summary, expected_effect, rollback_plan_json, before_json,
+            confirmation_code, expires_at, created_by, created_at, updated_at
+        ) VALUES (
+            #{incidentId}, #{planCode}, #{actionType}, #{targetType}, #{targetId}, #{targetName},
+            #{riskLevel}, #{status}, #{summary}, #{expectedEffect}, #{rollbackPlanJson}, #{beforeJson},
+            #{confirmationCode}, #{expiresAt}, #{createdBy}, now(), now()
+        )
+    </insert>
+
+    <update id="claimForExecution">
+        UPDATE ops_action_plans
+        SET status = 'EXECUTING',
+            approved_by = #{approvedBy},
+            approved_at = #{approvedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND status = 'PENDING_APPROVAL'
+          AND confirmation_code = #{confirmationCode}
+          AND expires_at &gt; now()
+    </update>
+
+    <update id="markExecuted">
+        UPDATE ops_action_plans
+        SET status = 'EXECUTED',
+            before_json = COALESCE(#{beforeJson}, before_json),
+            after_json = #{afterJson},
+            executed_at = #{executedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND status = 'EXECUTING'
+    </update>
+
+    <update id="markFailed">
+        UPDATE ops_action_plans
+        SET status = 'FAILED',
+            after_json = #{afterJson},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND status = 'EXECUTING'
+    </update>
+
+    <update id="expireStale">
+        UPDATE ops_action_plans
+        SET status = 'EXPIRED',
+            updated_at = #{updatedAt}
+        WHERE status = 'PENDING_APPROVAL'
+          AND expires_at &lt;= #{now}
+    </update>
+</mapper>

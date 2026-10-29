@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.ops.OpsIncidentEventMapper">
+
+    <resultMap id="OpsIncidentEventResultMap" type="com.monitor.platform.ops.OpsIncidentEventEntity">
+        <id column="id" property="id"/>
+        <result column="incident_id" property="incidentId"/>
+        <result column="event_type" property="eventType"/>
+        <result column="actor" property="actor"/>
+        <result column="content" property="content"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ops_incident_events (incident_id, event_type, actor, content, created_at)
+        VALUES (#{incidentId}, #{eventType}, #{actor}, #{content}, now())
+    </insert>
+
+    <select id="selectByIncidentId" resultMap="OpsIncidentEventResultMap">
+        SELECT id, incident_id, event_type, actor, content, created_at
+        FROM ops_incident_events
+        WHERE incident_id = #{incidentId}
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+</mapper>

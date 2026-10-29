@@ -16,6 +16,7 @@ import com.monitor.platform.bot.usage.BotUsageTools;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.weather.WeatherTools;
 import com.monitor.platform.common.exception.BusinessException;
+import com.monitor.platform.ops.OpsIncidentService;
 import com.monitor.platform.status.OpenAiStatusService;
 import org.springframework.stereotype.Component;
 
@@ -56,6 +57,10 @@ public class BotCommandRouter {
             - /入口拒绝 [时间窗]  无效 Key、IP 限制、分组禁用等入口拒绝统计
             - /错误日志 [时间窗] [级别] [关键词]  按时间/级别/关键词查系统日志
             - /错误审计 [时间窗] [条数]  查看错误查询审计和限流拦截
+            - /事故 [编号]    查看智能运维事故
+            - /自愈 #编号     生成自愈计划（仅管理员好友私聊）
+            - /确认自愈 <确认码>  执行已审批的自愈计划（仅管理员好友私聊）
+            - /自愈记录       查看最近自愈计划
             - /我的错误 [时间窗]  我自己的错误
             - /任务            定时任务启用状态与最近一次执行结果
             - /订单 <账号> [起] [止]  指定平台用户的订单（默认近 30 天）
@@ -139,6 +144,7 @@ public class BotCommandRouter {
     private final BotForbiddenWordService forbiddenWordService;
     private final BotEmailBindingService emailBindingService;
     private final BotLotteryService lotteryService;
+    private final OpsIncidentService incidentService;
 
     public BotCommandRouter(MonitorChatTools tools,
                             BotOrderTools orderTools,
@@ -155,7 +161,8 @@ public class BotCommandRouter {
                             OpenAiStatusService openAiStatusService,
                             BotForbiddenWordService forbiddenWordService,
                             BotEmailBindingService emailBindingService,
-                            BotLotteryService lotteryService) {
+                            BotLotteryService lotteryService,
+                            OpsIncidentService incidentService) {
         this.tools = tools;
         this.orderTools = orderTools;
         this.usageTools = usageTools;
@@ -172,6 +179,7 @@ public class BotCommandRouter {
         this.forbiddenWordService = forbiddenWordService;
         this.emailBindingService = emailBindingService;
         this.lotteryService = lotteryService;
+        this.incidentService = incidentService;
     }
 
     /**
@@ -275,6 +283,14 @@ public class BotCommandRouter {
             case "myerrors", "我的错误" ->
                     selfErrorCommand(event, identity, platformFeature, arg,
                             () -> errorService.myReport(identity.email(), arg));
+            case "incidents", "事故", "故障" ->
+                    opsIncidentCommand(identity, platformFeature, event, arg, "incidents");
+            case "heal", "自愈", "自愈计划" ->
+                    opsIncidentCommand(identity, platformFeature, event, arg, "heal");
+            case "confirmheal", "确认自愈" ->
+                    opsIncidentCommand(identity, platformFeature, event, arg, "confirm");
+            case "healplans", "自愈记录" ->
+                    opsIncidentCommand(identity, platformFeature, event, arg, "plans");
             case "tasks", "任务" -> platformOnly(identity, platformFeature, tools::taskReport);
             case "订单", "orders" -> platformOnly(identity, platformFeature, () -> orderReport(arg));
             case "用户余额", "userbalance" ->
@@ -590,6 +606,63 @@ public class BotCommandRouter {
         }
         generated.add(result.image());
         return text("画好了。");
+    }
+
+    /** 智能运维事故查询、自愈计划和确认执行。 */
+    private BotReport opsIncidentCommand(BotIdentity identity, boolean platformFeature,
+                                         OneBotEvent event, String arg, String action) {
+        if (!platformFeature) {
+            return text(UNKNOWN_COMMAND);
+        }
+        if (!identity.admin()) {
+            return text("平台级数据仅管理员可查。");
+        }
+        boolean privateContext = !inGroupContext(event);
+        try {
+            return switch (action) {
+                case "plans" -> incidentService.planListReport(20);
+                case "heal" -> {
+                    if (!privateContext) {
+                        yield text("自愈计划只能在管理员好友私聊中生成。");
+                    }
+                    Long incidentId = parseIncidentId(arg);
+                    yield incidentId == null
+                            ? text("请提供事故编号，例如：/自愈 #1024")
+                            : incidentService.planReport(incidentId, identity.email());
+                }
+                case "confirm" -> {
+                    if (!privateContext) {
+                        yield text("自愈执行只能在管理员好友私聊中确认。");
+                    }
+                    yield incidentService.executePlanReport(arg, identity.email());
+                }
+                default -> {
+                    Long incidentId = parseIncidentId(arg);
+                    yield incidentId == null
+                            ? incidentService.incidentListReport(20)
+                            : incidentService.incidentDetailReport(incidentId);
+                }
+            };
+        } catch (BusinessException ex) {
+            return text(ex.getMessage());
+        } catch (RuntimeException ex) {
+            return text("查询智能运维事故失败，请稍后再试。");
+        }
+    }
+
+    private static Long parseIncidentId(String arg) {
+        if (arg == null || arg.isBlank()) {
+            return null;
+        }
+        String value = arg.trim();
+        if (value.startsWith("#")) {
+            value = value.substring(1);
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private static int parseInt(String value, int fallback) {

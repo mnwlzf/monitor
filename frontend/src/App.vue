@@ -91,6 +91,7 @@
           @refresh="refresh"
           @manage-platforms="selectPage('platforms')"
         />
+        <OpsView v-else-if="currentPage === 'ops'" :can-write="isAdmin" />
         <PoolView
           v-else-if="currentPage === 'pool'"
           :platforms="platformList"
@@ -110,7 +111,7 @@
 
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onMounted, ref, type Component } from 'vue'
-import { Bell, Connection, DataAnalysis, DataLine, Document, Monitor, Odometer, Refresh, Setting, SwitchButton, Timer, User } from '@element-plus/icons-vue'
+import { Bell, Connection, DataAnalysis, DataLine, Document, Monitor, Odometer, Refresh, Setting, SwitchButton, Timer, User, Warning } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import OverviewView from './views/OverviewView.vue'
 import PlatformsView from './views/PlatformsView.vue'
@@ -122,19 +123,21 @@ import BotStatusView from './views/BotStatusView.vue'
 import MessageArchiveView from './views/MessageArchiveView.vue'
 import SettingsView from './views/SettingsView.vue'
 import PoolView from './views/PoolView.vue'
+import OpsView from './views/OpsView.vue'
 import LoginView from './views/LoginView.vue'
 import { collectAccountRecord, listAccountRecords, listApiKeyRecords, listChangeRecords, listGroupRecords, listPlatformRecords, listUsageDashboardRecords } from './api/accounts'
 import { fetchCurrentUser, logout as logoutRequest } from './api/auth'
 import { isUnauthorized } from './api/client'
 import type { Account, ApiKey, ChangeEvent, Channel, CurrentUser, MetricPoint, Platform, UsageDashboard } from './types'
 
-type PageKey = 'overview' | 'platforms' | 'accounts' | 'pool' | 'channels' | 'changes' | 'schedules' | 'botstatus' | 'archive' | 'settings'
+type PageKey = 'overview' | 'platforms' | 'accounts' | 'pool' | 'ops' | 'channels' | 'changes' | 'schedules' | 'botstatus' | 'archive' | 'settings'
 
 const navItems: Array<{ id: PageKey; label: string; description: string; icon: Component; adminOnly?: boolean }> = [
   { id: 'overview', label: '运行总览', description: '账号、余额、额度与渠道变化全景', icon: markRaw(DataAnalysis) },
   { id: 'platforms', label: '平台管理', description: '上游平台实例与采集配置', icon: markRaw(Monitor) },
   { id: 'accounts', label: '账号管理', description: '账号凭证、余额与采集状态', icon: markRaw(User) },
   { id: 'pool', label: '号池监控', description: 'Sub2API 号池账号的缓存命中率、首 Token 与健康状态', icon: markRaw(DataLine) },
+  { id: 'ops', label: '智能运维', description: '事故巡检、故障自愈计划与确认执行', icon: markRaw(Warning), adminOnly: true },
   { id: 'channels', label: '渠道监控', description: '渠道倍率、平台归属和当前状态', icon: markRaw(Connection) },
   { id: 'schedules', label: '定时任务', description: '页面管理任务类型、Cron 表达式和启用状态', icon: markRaw(Timer) },
   { id: 'changes', label: '变更记录', description: '渠道新增、减少、倍率和状态变化', icon: markRaw(Bell) },

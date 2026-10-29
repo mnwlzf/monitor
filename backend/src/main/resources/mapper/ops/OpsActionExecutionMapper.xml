@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.ops.OpsActionExecutionMapper">
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ops_action_executions (
+            plan_id, status, request_json, started_at
+        ) VALUES (
+            #{planId}, #{status}, #{requestJson}, now()
+        )
+    </insert>
+
+    <update id="markFinished">
+        UPDATE ops_action_executions
+        SET status = #{status},
+            response_json = #{responseJson},
+            error_message = #{errorMessage},
+            finished_at = #{finishedAt}
+        WHERE id = #{id}
+    </update>
+</mapper>

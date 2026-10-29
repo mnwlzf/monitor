@@ -9,6 +9,7 @@ import com.monitor.platform.bot.user.BotBalanceService;
 import com.monitor.platform.bot.user.BotKeyUsageService;
 import com.monitor.platform.bot.user.BotUserService;
 import com.monitor.platform.bot.onebot.OneBotEvent;
+import com.monitor.platform.ops.OpsIncidentService;
 import com.monitor.platform.bot.report.BotGroupRedactor;
 import com.monitor.platform.bot.report.BotReport;
 import com.monitor.platform.bot.report.BotReportRenderer;
@@ -93,6 +94,7 @@ class BotMessageServiceTest {
     private BotForbiddenWordService forbiddenWordService;
     private BotEmailBindingService emailBindingService;
     private BotLotteryService lotteryService;
+    private OpsIncidentService incidentService;
     private BotMessageService service;
 
     @BeforeEach
@@ -132,6 +134,7 @@ class BotMessageServiceTest {
         forbiddenWordService = mock(BotForbiddenWordService.class);
         emailBindingService = mock(BotEmailBindingService.class);
         lotteryService = mock(BotLotteryService.class);
+        incidentService = mock(OpsIncidentService.class);
         when(groupRedactor.redact(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(openAiStatusService.statusReport()).thenReturn("【OpenAI 服务状态】\n总体状态：全部系统正常");
 
@@ -142,7 +145,7 @@ class BotMessageServiceTest {
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), new WebSearchProperties(), provider,
                 new BotModelFallbackProperties());
         BotCommandRouter commandRouter = new BotCommandRouter(
-                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService);
+                tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService, incidentService);
         service = new BotMessageService(
                 settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService);
     }
@@ -738,6 +741,40 @@ class BotMessageServiceTest {
 
         verify(groupRedactor, timeout(3000)).redact(any());
     }
+    /** 管理员好友私聊可以查看智能运维事故。 */
+    @Test
+    void shouldListOpsIncidentsForAdminInPrivate() throws Exception {
+        identityIs(admin());
+        when(incidentService.incidentListReport(20)).thenReturn(BotReport.fromMarkdown("当前事故内容"));
+
+        service.onEvent(event(privateCommand("/事故")));
+
+        verify(incidentService, timeout(3000)).incidentListReport(20);
+        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), contains("当前事故内容"));
+    }
+
+    /** 普通平台用户不能查看智能运维事故。 */
+    @Test
+    void shouldDenyOpsIncidentsForNonAdmin() throws Exception {
+        identityIs(normalUser());
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/事故")));
+
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("仅管理员"));
+        verifyNoInteractions(incidentService);
+    }
+
+    /** 群聊不能生成自愈计划，避免在群里误触发写操作。 */
+    @Test
+    void shouldNotCreateHealingPlanInGroup() throws Exception {
+        identityIs(admin());
+
+        service.onEvent(event(mentionedGroupCommand(222L, "/自愈 #1")));
+
+        verify(incidentService, never()).planReport(anyLong(), anyString());
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), contains("管理员好友私聊"));
+    }
+
     @Test
     void shouldIgnoreNonMessageEvents() throws Exception {
         service.onEvent(event("""

@@ -138,6 +138,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/**").authenticated()
                         // 系统设置（含 SMTP 等敏感配置）：仅 ADMIN
                         .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")
+                        // 智能运维事故、自愈计划和执行均仅 ADMIN
+                        .requestMatchers("/api/v1/ops/**").hasRole("ADMIN")
                         // 读接口：ADMIN 与 VIEWER 都可访问
                         .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole("ADMIN", "VIEWER")
                         // 写接口：仅 ADMIN

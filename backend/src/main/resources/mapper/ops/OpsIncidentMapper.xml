@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.ops.OpsIncidentMapper">
+
+    <resultMap id="OpsIncidentResultMap" type="com.monitor.platform.ops.OpsIncidentEntity">
+        <id column="id" property="id"/>
+        <result column="fingerprint" property="fingerprint"/>
+        <result column="title" property="title"/>
+        <result column="severity" property="severity"/>
+        <result column="status" property="status"/>
+        <result column="scope_type" property="scopeType"/>
+        <result column="scope_id" property="scopeId"/>
+        <result column="root_cause_code" property="rootCauseCode"/>
+        <result column="impact_summary" property="impactSummary"/>
+        <result column="evidence_json" property="evidenceJson"/>
+        <result column="first_seen_at" property="firstSeenAt"/>
+        <result column="last_seen_at" property="lastSeenAt"/>
+        <result column="resolved_at" property="resolvedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="columns">
+        id, fingerprint, title, severity, status, scope_type, scope_id, root_cause_code,
+        impact_summary, evidence_json, first_seen_at, last_seen_at, resolved_at, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultMap="OpsIncidentResultMap">
+        SELECT <include refid="columns"/> FROM ops_incidents WHERE id = #{id}
+    </select>
+
+    <select id="selectActiveByFingerprint" resultMap="OpsIncidentResultMap">
+        SELECT <include refid="columns"/>
+        FROM ops_incidents
+        WHERE fingerprint = #{fingerprint}
+          AND status &lt;&gt; 'RESOLVED'
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectRecent" resultMap="OpsIncidentResultMap">
+        SELECT <include refid="columns"/>
+        FROM ops_incidents
+        <where>
+            <if test="status != null and status != ''">
+                <choose>
+                    <when test="status == 'OPEN'">AND status &lt;&gt; 'RESOLVED'</when>
+                    <otherwise>AND status = #{status}</otherwise>
+                </choose>
+            </if>
+        </where>
+        ORDER BY
+            CASE severity WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 ELSE 3 END,
+            last_seen_at DESC,
+            id DESC
+        LIMIT #{limit}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ops_incidents (
+            fingerprint, title, severity, status, scope_type, scope_id, root_cause_code,
+            impact_summary, evidence_json, first_seen_at, last_seen_at, created_at, updated_at
+        ) VALUES (
+            #{fingerprint}, #{title}, #{severity}, #{status}, #{scopeType}, #{scopeId}, #{rootCauseCode},
+            #{impactSummary}, #{evidenceJson}, #{firstSeenAt}, #{lastSeenAt}, now(), now()
+        )
+    </insert>
+
+    <update id="updateObserved">
+        UPDATE ops_incidents
+        SET title = #{title},
+            severity = #{severity},
+            impact_summary = #{impactSummary},
+            evidence_json = #{evidenceJson},
+            last_seen_at = #{lastSeenAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND status &lt;&gt; 'RESOLVED'
+    </update>
+
+    <update id="updateStatus">
+        UPDATE ops_incidents
+        SET status = #{status},
+            resolved_at = CASE WHEN #{status} = 'RESOLVED' THEN now() ELSE resolved_at END,
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+    <update id="resolveStale">
+        UPDATE ops_incidents
+        SET status = 'RESOLVED',
+            resolved_at = #{resolvedAt},
+            updated_at = #{updatedAt}
+        WHERE status &lt;&gt; 'RESOLVED'
+          AND last_seen_at &lt; #{before}
+    </update>
+</mapper>
