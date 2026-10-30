@@ -201,35 +201,22 @@ public class BotMessageService {
         }
         boolean group = channel == BotChannel.GROUP;
         String text = parser.extractText(event);
-        BotSpeechService.VoiceInput voiceInput = BotSpeechService.extract(event.message(), event.rawMessage());
-        boolean hasVoice = voiceInput.present();
-        // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见；
-        // 被引用的消息本身可能就是图片（「引用这张图，总结一下」），所以连图片一起取回来
-        BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event);
 
-        // 违禁词对普通用户全渠道拦截，不受白名单或群聊 @ 影响；管理员完全豁免。
-        boolean rawForbiddenWord = forbiddenWordService.containsForbiddenWord(text)
-                || forbiddenWordService.containsForbiddenWord(quoted.text());
+        // 先确认这条消息是否真的触发了机器人。未通过白名单或群里没有 @ 机器人的消息，
+        // 属于普通群聊，不能因为包含违禁词就被机器人审查或回复。
         boolean managementMessage = isForbiddenWordManagementMessage(text, settings);
         BotIdentity earlyIdentity = null;
-        boolean containsForbiddenWord = false;
-        if (rawForbiddenWord || managementMessage) {
+        if (managementMessage) {
             try {
                 earlyIdentity = identityResolver.resolve(event.userId());
             } catch (Exception ex) {
-                log.warn("违禁词校验时解析身份失败，按普通用户处理: user={}, reason={}",
+                log.warn("解析违禁词管理命令身份失败，按普通用户处理: user={}, reason={}",
                         event.userId(), SecretMasker.safeMessage(ex));
             }
         }
-        boolean earlyAdmin = earlyIdentity != null && earlyIdentity.admin();
-        containsForbiddenWord = rawForbiddenWord && !earlyAdmin;
-        if (containsForbiddenWord) {
-            // 独立提前返回：普通用户不进入白名单/@ 判断，也不请求大模型。
-            replyForbiddenWord(event, channel, group, text, quoted, earlyIdentity);
-            return;
-        }
         // 管理员维护违禁词时不受白名单群和 @ 限制，任意群都可以直接呼出。
-        boolean adminForbiddenWordCommand = managementMessage && earlyAdmin;
+        boolean adminForbiddenWordCommand = managementMessage
+                && earlyIdentity != null && earlyIdentity.admin();
         if (!allowed(event, channel, settings) && !adminForbiddenWordCommand) {
             // 刻意用 info：这条以前是 debug，导致「机器人为什么不回我」在默认日志级别下完全无痕
             log.info("忽略非白名单会话: channel={}, 来源群={}, user={}",
@@ -240,6 +227,35 @@ public class BotMessageService {
         if (group && settings.requireMention() && !parser.mentioned(event) && !adminForbiddenWordCommand) {
             // 刻意不计入「未回复」：这条消息本来就不需要机器人回，
             // 计进去会让统计被正常群聊刷满，反而看不出真正被拦下的消息
+            return;
+        }
+
+        // 到这里才说明机器人被真正触发。只有已触发消息才需要解析语音和引用内容，
+        // 避免普通群聊触发额外查询。
+        BotSpeechService.VoiceInput voiceInput = BotSpeechService.extract(event.message(), event.rawMessage());
+        boolean hasVoice = voiceInput.present();
+        // 引用的那条消息：QQ 的 reply 段通常只带 id，要取回原文模型才看得见；
+        // 被引用的消息本身可能就是图片（「引用这张图，总结一下」），所以连图片一起取回来
+        BotMessageParser.QuotedMessage quoted = parser.quotedMessage(event);
+
+        // 审查普通用户的消息和引用内容；管理员完全豁免，便于测试和维护词条。
+        boolean rawForbiddenWord = forbiddenWordService.containsForbiddenWord(text)
+                || forbiddenWordService.containsForbiddenWord(quoted.text());
+        boolean containsForbiddenWord = false;
+        if (rawForbiddenWord) {
+            if (earlyIdentity == null) {
+                try {
+                    earlyIdentity = identityResolver.resolve(event.userId());
+                } catch (Exception ex) {
+                    log.warn("违禁词校验时解析身份失败，按普通用户处理: user={}, reason={}",
+                            event.userId(), SecretMasker.safeMessage(ex));
+                }
+            }
+            boolean earlyAdmin = earlyIdentity != null && earlyIdentity.admin();
+            containsForbiddenWord = !earlyAdmin;
+        }
+        if (containsForbiddenWord) {
+            replyForbiddenWord(event, channel, group, text, quoted, earlyIdentity);
             return;
         }
         // 图片段单独抽出来：之前只认文本段，导致「只发图片」的消息被当成空消息直接丢掉

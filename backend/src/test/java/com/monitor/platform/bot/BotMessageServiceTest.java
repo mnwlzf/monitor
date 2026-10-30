@@ -175,7 +175,30 @@ class BotMessageServiceTest {
     }
 
     @Test
-    void shouldBlockForbiddenWordInNonWhitelistedGroupWithoutMention() throws Exception {
+    void shouldNotCheckForbiddenWordInGroupWithoutMention() throws Exception {
+        identityIs(normalUser());
+        when(forbiddenWordService.containsForbiddenWord(anyString()))
+                .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
+
+        service.onEvent(event(groupCommand(222L, "这里包含敏感词")));
+
+        verify(forbiddenWordService, never()).containsForbiddenWord(anyString());
+        verifyNoInteractions(client);
+    }
+
+    @Test
+    void shouldBlockForbiddenWordAfterMentionInGroup() throws Exception {
+        identityIs(normalUser());
+        when(forbiddenWordService.containsForbiddenWord(anyString()))
+                .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
+
+        service.onEvent(event(mentionedGroupCommand(222L, "这里包含敏感词")));
+
+        verify(client, timeout(3000)).sendGroupMessage(eq(222L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+    }
+
+    @Test
+    void shouldIgnoreForbiddenWordInNonWhitelistedGroupWithoutMention() throws Exception {
         identityIs(normalUser());
         when(forbiddenWordService.containsForbiddenWord(anyString()))
                 .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
@@ -187,11 +210,12 @@ class BotMessageServiceTest {
 
         service.onEvent(event(body));
 
-        verify(client, timeout(3000)).sendGroupMessage(eq(111L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+        verify(forbiddenWordService, never()).containsForbiddenWord(anyString());
+        verifyNoInteractions(client);
     }
 
     @Test
-    void shouldBlockForbiddenWordInPrivateChatFromNonWhitelistedUser() throws Exception {
+    void shouldIgnoreForbiddenWordInPrivateChatFromNonWhitelistedUser() throws Exception {
         identityIs(normalUser());
         when(forbiddenWordService.containsForbiddenWord(anyString()))
                 .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
@@ -203,11 +227,12 @@ class BotMessageServiceTest {
 
         service.onEvent(event(body));
 
-        verify(client, timeout(3000)).sendPrivateMessage(eq(1000L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+        verify(forbiddenWordService, never()).containsForbiddenWord(anyString());
+        verifyNoInteractions(client);
     }
 
     @Test
-    void shouldBlockForbiddenWordInNonWhitelistedTempSession() throws Exception {
+    void shouldIgnoreForbiddenWordInNonWhitelistedTempSession() throws Exception {
         identityIs(normalUser());
         when(forbiddenWordService.containsForbiddenWord(anyString()))
                 .thenAnswer(invocation -> invocation.<String>getArgument(0).contains("敏感词"));
@@ -219,7 +244,8 @@ class BotMessageServiceTest {
 
         service.onEvent(event(body));
 
-        verify(client, timeout(3000)).sendPrivateMessage(eq(999L), eq(BotMessageService.FORBIDDEN_WORD_REPLY));
+        verify(forbiddenWordService, never()).containsForbiddenWord(anyString());
+        verifyNoInteractions(client);
     }
 
     @Test
