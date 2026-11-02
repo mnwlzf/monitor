@@ -20,7 +20,7 @@ class BotMyErrorToolsTest {
     private final BotErrorQueryAuditService auditService = mock(BotErrorQueryAuditService.class);
     private final BotErrorQueryGuard guard = mock(BotErrorQueryGuard.class);
     private final BotMyErrorTools tools = new BotMyErrorTools(
-            service, "user@example.com", guard, auditService);
+            service, "user@example.com", 123L, guard, auditService);
 
     @Test
     void shouldAuditNaturalLanguageSelfQuery() {
@@ -29,7 +29,7 @@ class BotMyErrorToolsTest {
         when(service.myReport("user@example.com", "24h 429"))
                 .thenReturn(BotReport.fromMarkdown("我的错误"));
 
-        String result = tools.myRecentErrors("24h", "429", context);
+        String result = tools.myRecentErrors("24h", "429", null, context);
 
         assertThat(result).contains("我的错误");
         verify(service).myReport("user@example.com", "24h 429");
@@ -42,10 +42,34 @@ class BotMyErrorToolsTest {
         ToolContext context = new ToolContext(Map.of("qqUserId", 123L));
         when(guard.allow(123L)).thenReturn(false);
 
-        String result = tools.myRecentErrors("24h", "429", context);
+        String result = tools.myRecentErrors("24h", "429", null, context);
 
         assertThat(result).contains("太频繁");
         verify(service, never()).myReport("user@example.com", "24h 429");
         verify(auditService).record(123L, "ai-my-errors", "24h 429", false, 0);
+    }
+
+    @Test
+    void shouldAcceptOwnQqEmailForNaturalLanguageSelfQuery() {
+        ToolContext context = new ToolContext(Map.of("qqUserId", 123L));
+        when(guard.allow(123L)).thenReturn(true);
+        when(service.myReport("user@example.com", "24h 429"))
+                .thenReturn(BotReport.fromMarkdown("我的错误"));
+
+        String result = tools.myRecentErrors("24h", "429", "123@qq.com", context);
+
+        assertThat(result).contains("我的错误");
+        verify(service).myReport("user@example.com", "24h 429");
+    }
+
+    @Test
+    void shouldRejectAnotherAccountBeforeQuerying() {
+        ToolContext context = new ToolContext(Map.of("qqUserId", 123L));
+
+        String result = tools.myRecentErrors("24h", "429", "999@qq.com", context);
+
+        assertThat(result).contains("只能查询当前 QQ 本人");
+        verify(service, never()).myReport(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
     }
 }

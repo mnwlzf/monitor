@@ -49,4 +49,28 @@ class EmailsTest {
         // 位数不足 5 位时不当成 QQ 号
         assertEquals(Optional.empty(), Emails.qqLocalPart("123@qq.com"));
     }
+
+    @Test
+    void shouldMatchOwnerByBoundEmailOrQq() {
+        long qq = 2027142766L;
+        String ownerEmail = "bound@example.com";
+
+        assertTrue(Emails.matchesOwner("bound@example.com", ownerEmail, qq));
+        assertTrue(Emails.matchesOwner("2027142766", ownerEmail, qq));
+        assertTrue(Emails.matchesOwner("2027142766@qq.com", ownerEmail, qq));
+        assertTrue(Emails.matchesOwner(" 2027142766@QQ.COM ", ownerEmail, qq));
+    }
+
+    @Test
+    void shouldRejectOtherAccounts() {
+        long qq = 2027142766L;
+        String ownerEmail = "bound@example.com";
+
+        assertFalse(Emails.matchesOwner("other@example.com", ownerEmail, qq));
+        assertFalse(Emails.matchesOwner("2027142767", ownerEmail, qq));
+        assertFalse(Emails.matchesOwner("2027142767@qq.com", ownerEmail, qq));
+        assertFalse(Emails.matchesOwner("2027142766@example.com", ownerEmail, qq));
+        assertFalse(Emails.matchesOwner("", ownerEmail, qq));
+        assertFalse(Emails.matchesOwner(null, ownerEmail, qq));
+    }
 }

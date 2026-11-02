@@ -625,11 +625,12 @@ public class BotMessageService {
                     }
                 });
         request = request.tools(new BotEmailBindingTools(emailBindingService, event.userId()));
-        // 用户端工具按请求绑定发送者邮箱：大模型只能查到发送者本人的数据
+        // 用户端工具按请求绑定发送者邮箱和 QQ；用户写出的邮箱/QQ 先做本人校验，再查本人数据。
         if (platformFeature && identity.hasEmail()) {
-            request = request.tools(new BotUserTools(botUserService, botKeyUsageService, identity.email()));
-            // 普通用户只能查自己的错误；工具在构造时绑定邮箱，不接受用户标识参数。
-            request = request.tools(new BotMyErrorTools(errorService, identity.email(), errorQueryGuard, errorQueryAuditService));
+            request = request.tools(new BotUserTools(
+                    botUserService, botKeyUsageService, identity.email(), event.userId()));
+            request = request.tools(new BotMyErrorTools(
+                    errorService, identity.email(), event.userId(), errorQueryGuard, errorQueryAuditService));
         }
         // 管理员余额调整：按请求绑定管理员身份和当前消息，二次确认必须出现在当前消息里
         if (platformFeature && identity.admin() && identity.hasEmail()) {

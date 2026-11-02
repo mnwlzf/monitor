@@ -43,4 +43,28 @@ public final class Emails {
             return matcher.find() ? Optional.of(matcher.group(1)) : Optional.empty();
         });
     }
+
+    /**
+     * 判断用户消息里写出的账号标识是否属于当前 QQ 用户。
+     *
+     * <p>可识别当前绑定邮箱、当前 QQ 号，以及由 QQ 号直接推导出的
+     * {@code <QQ号>@qq.com}。用户主动写出自己的账号时，应视为本人查询，
+     * 不能因为消息里出现邮箱或 QQ 号就拒绝。</p>
+     */
+    public static boolean matchesOwner(String candidate, String ownerEmail, Long ownerQq) {
+        Optional<String> normalized = normalize(candidate);
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        String value = normalized.get();
+        Optional<String> owner = normalize(ownerEmail);
+        if (owner.isPresent() && owner.get().equals(value)) {
+            return true;
+        }
+        if (ownerQq == null) {
+            return false;
+        }
+        String qq = String.valueOf(ownerQq);
+        return value.equals(qq) || value.equals(qq + "@qq.com");
+    }
 }
