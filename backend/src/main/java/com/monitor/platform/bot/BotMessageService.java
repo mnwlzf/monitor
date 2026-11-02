@@ -294,6 +294,7 @@ public class BotMessageService {
             try {
                 BotIdentity identity = identityResolver.resolve(event.userId());
                 BotPersonaSnapshot persona = personaFor(event, channel, settings);
+                String groupVoice = voiceFor(event, channel, settings);
                 Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
                 boolean platformFeature =
                         BotAccessPolicy.platformFeatureAllowed(identity, channel, contextGroup, settings);
@@ -373,7 +374,7 @@ public class BotMessageService {
 
                 SendOutcome outcome;
                 try {
-                    outcome = send(event, group, report, settings, generated, voiceReply);
+                    outcome = send(event, group, report, settings, groupVoice, generated, voiceReply);
                 } catch (RuntimeException sendError) {
                     // 发送失败也要把这一轮从「正在处理」里摘掉，否则会永远挂在那儿
                     runtimeStatus.finishTurn(turnId, "发送失败：" + SecretMasker.safeMessage(sendError));
@@ -735,6 +736,14 @@ public class BotMessageService {
         return persona == null ? BotPersonaSnapshot.BUILTIN : persona;
     }
 
+    /** 群绑定的音色优先；未绑定时使用全局默认音色。 */
+    private String voiceFor(OneBotEvent event, BotChannel channel, BotSettings settings) {
+        if (!channel.hasGroupContext()) {
+            return settings.defaultVoice();
+        }
+        return settings.voiceForGroup(event.groupId());
+    }
+
     /**
      * 会话记忆按「人设 + 通道 + <strong>说话的人</strong>」隔离。
      *
@@ -775,7 +784,7 @@ public class BotMessageService {
      * 退回文字，保证用户至少能收到答案。长回答只朗读开头，并补发完整文字。</p>
      */
     private SendOutcome send(OneBotEvent event, boolean group, BotReport report, BotSettings settings,
-                            GeneratedImages generated, VoiceReplyIntent voiceReply) {
+                            String groupVoice, GeneratedImages generated, VoiceReplyIntent voiceReply) {
         int maxReplyLength = settings.maxReplyLength();
         List<byte[]> generatedImages = generated.snapshot();
         // 先生成的图：这是用户明确要的东西，发失败要让他知道，而不是只回一句文字
@@ -810,7 +819,7 @@ public class BotMessageService {
                 return new SendOutcome(archiveContent(truncated, generatedImages), BotMessageArchiveService.KIND_TEXT);
             }
             String voice = voiceReply.voice() == null || voiceReply.voice().isBlank()
-                    ? settings.defaultVoice() : voiceReply.voice();
+                    ? groupVoice : voiceReply.voice();
             var audio = speechService.synthesize(plain, voice);
             if (audio.isPresent() && sendVoice(event, group, audio.get())) {
                 log.info("已发送语音回复: user={}, voice={}, bytes={}", event.userId(), voice, audio.get().length);

@@ -8,6 +8,7 @@ import java.util.Locale;
  *
  * @param groupId       群号
  * @param personaId     绑定的人设 ID；null 表示使用默认人设
+ * @param voice         绑定的音色；null 表示使用全局默认音色
  * @param strategy      未 @ 机器人时的触发策略
  * @param randomPercent 随机回复概率（1-100），仅 {@link BotGroupReplyStrategy#RANDOM} 使用
  * @param keywords      唤醒关键词，仅 {@link BotGroupReplyStrategy#KEYWORD} 使用
@@ -15,15 +16,22 @@ import java.util.Locale;
 public record BotGroupReplyPolicy(
         String groupId,
         Long personaId,
+        String voice,
         BotGroupReplyStrategy strategy,
         int randomPercent,
         List<String> keywords
 ) {
 
-    /** 兼容旧配置：没有绑定人设时使用默认人设。 */
+    /** 兼容旧配置：没有绑定音色时使用默认音色。 */
+    public BotGroupReplyPolicy(String groupId, Long personaId, BotGroupReplyStrategy strategy,
+                               int randomPercent, List<String> keywords) {
+        this(groupId, personaId, null, strategy, randomPercent, keywords);
+    }
+
+    /** 兼容旧配置：没有绑定人设和音色时使用默认值。 */
     public BotGroupReplyPolicy(String groupId, BotGroupReplyStrategy strategy,
                                int randomPercent, List<String> keywords) {
-        this(groupId, null, strategy, randomPercent, keywords);
+        this(groupId, null, null, strategy, randomPercent, keywords);
     }
 
     public BotGroupReplyPolicy {
@@ -39,6 +47,7 @@ public record BotGroupReplyPolicy(
      */
     public boolean shouldTrigger(String text, double randomValue) {
         return switch (strategy) {
+            case INHERIT -> false;
             case MENTION -> false;
             case PROACTIVE -> true;
             case RANDOM -> randomValue < randomPercent / 100.0;

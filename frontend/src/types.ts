@@ -458,13 +458,15 @@ export interface BotSettings {
 }
 
 /** 单个群聊的回复触发策略。 */
-export type BotGroupReplyStrategy = 'MENTION' | 'PROACTIVE' | 'RANDOM' | 'KEYWORD'
+export type BotGroupReplyStrategy = 'INHERIT' | 'MENTION' | 'PROACTIVE' | 'RANDOM' | 'KEYWORD'
 
 /** 按群定制的回复策略；@机器人 始终会触发回复。 */
 export interface BotGroupReplyPolicy {
   groupId: string
   /** 绑定的人设 ID；null 表示使用默认人设。 */
   personaId: number | null
+  /** 绑定的语音音色；null 表示使用全局默认音色。 */
+  voice: string | null
   strategy: BotGroupReplyStrategy
   /** 随机回复概率（1-100），仅 RANDOM 使用。 */
   randomPercent: number

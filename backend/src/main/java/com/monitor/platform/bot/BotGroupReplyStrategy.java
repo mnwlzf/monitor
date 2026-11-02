@@ -7,6 +7,9 @@ package com.monitor.platform.bot;
  */
 public enum BotGroupReplyStrategy {
 
+    /** 未 @ 时沿用全局 requireMention；用于只绑定人设/音色而不覆盖触发策略。 */
+    INHERIT,
+
     /** 仅响应 @机器人（未单独配置的群沿用全局 requireMention 设置）。 */
     MENTION,
 

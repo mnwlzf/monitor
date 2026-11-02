@@ -196,14 +196,15 @@ public class BotSettingsService {
                 throw BusinessException.of("群聊策略绑定的人设不存在或已禁用：" + groupId);
             }
             BotGroupReplyStrategy strategy = policy.strategy() == null
-                    ? BotGroupReplyStrategy.MENTION : policy.strategy();
+                    ? BotGroupReplyStrategy.INHERIT : policy.strategy();
             int randomPercent = clamp(policy.randomPercent(), 1, 100, DEFAULT_RANDOM_REPLY_PERCENT);
             List<String> keywords = normalizeKeywords(policy.keywords());
+            String voice = normalizeOptionalVoice(policy.voice());
             if (strategy == BotGroupReplyStrategy.KEYWORD && keywords.isEmpty()) {
                 throw BusinessException.of("关键词唤醒策略至少需要一个关键词：" + groupId);
             }
             normalized.put(groupId, new BotGroupReplyPolicy(
-                    groupId, policy.personaId(), strategy, randomPercent, keywords));
+                    groupId, policy.personaId(), voice, strategy, randomPercent, keywords));
         }
         return List.copyOf(normalized.values());
     }
@@ -391,6 +392,13 @@ public class BotSettingsService {
             return DEFAULT_VOICE;
         }
         return value.length() > 120 ? value.substring(0, 120) : value;
+    }
+
+    private static String normalizeOptionalVoice(String voice) {
+        if (voice == null || voice.isBlank()) {
+            return null;
+        }
+        return normalizeVoice(voice);
     }
 
     private static String normalizeVoiceStyle(String style) {

@@ -522,103 +522,6 @@
           <span class="admin-form-hint" style="margin-left: 10px">仅对未单独配置策略的群生效；关掉后这些群的任意消息都会触发</span>
         </el-form-item>
 
-        <el-divider content-position="left">按群聊定制发信策略</el-divider>
-
-        <el-form-item label="群聊回复策略">
-          <div class="group-policy-editor">
-            <small class="admin-form-hint">
-              未配置的群沿用上方默认策略；@机器人 始终会触发回复。主动回复会处理群内每条消息，请谨慎开启
-            </small>
-            <div v-if="botForm.groupPolicies.length > 0" class="group-policy-columns">
-              <span>群号</span>
-              <span>触发策略（是否回复）</span>
-              <span>表达人设（怎么说话）</span>
-              <span>策略参数</span>
-              <span></span>
-            </div>
-            <div v-if="botForm.groupPolicies.length > 0" class="group-policy-list">
-              <div v-for="(policy, index) in botForm.groupPolicies" :key="index" class="group-policy-row">
-                <el-select
-                  v-model="policy.groupId"
-                  filterable
-                  :allow-create="botForm.allowedGroups.length === 0"
-                  default-first-option
-                  :reserve-keyword="false"
-                  placeholder="选择或输入群号"
-                  class="group-policy-group"
-                >
-                  <el-option v-for="group in botForm.allowedGroups" :key="group" :label="group" :value="group" />
-                </el-select>
-
-                <div class="group-policy-strategy">
-                  <el-select v-model="policy.strategy" @change="onGroupPolicyStrategyChange(policy)">
-                    <el-option
-                      v-for="option in groupReplyStrategyOptions"
-                      :key="option.value"
-                      :label="option.label"
-                      :value="option.value"
-                    />
-                  </el-select>
-                  <small>{{ groupStrategyHint(policy.strategy) }}</small>
-                </div>
-
-                <div class="group-policy-persona">
-                  <el-select
-                    :model-value="policy.personaId ?? 0"
-                    placeholder="选择人设"
-                    @update:model-value="setPolicyPersona(policy, $event)"
-                  >
-                    <el-option
-                      :value="0"
-                      :label="`跟随默认人设：${defaultPersona?.name ?? '内置默认人设'}`"
-                    />
-                    <el-option
-                      v-for="persona in enabledPersonas"
-                      :key="persona.id"
-                      :label="persona.name"
-                      :value="persona.id"
-                    />
-                  </el-select>
-                  <small>
-                    {{ policy.personaId == null ? '未单独绑定，默认人设变化时会跟随' : '只影响该群的自然语言表达' }}
-                  </small>
-                </div>
-
-                <div class="group-policy-extra">
-                  <template v-if="policy.strategy === 'RANDOM'">
-                    <el-input-number v-model="policy.randomPercent" :min="1" :max="100" :step="5" />
-                    <span class="admin-form-hint">%</span>
-                  </template>
-                  <el-select
-                    v-else-if="policy.strategy === 'KEYWORD'"
-                    v-model="policy.keywords"
-                    multiple
-                    filterable
-                    allow-create
-                    default-first-option
-                    :reserve-keyword="false"
-                    placeholder="输入关键词后回车，可多个"
-                    class="group-policy-keywords"
-                  >
-                    <el-option v-for="keyword in policy.keywords" :key="keyword" :label="keyword" :value="keyword" />
-                  </el-select>
-                  <span v-else class="admin-form-hint">{{ policy.strategy === 'PROACTIVE' ? '每条消息都会回复' : '只响应 @机器人' }}</span>
-                </div>
-
-                <el-button type="danger" link @click="removeGroupPolicy(index)">删除</el-button>
-
-                <div class="group-policy-impact">
-                  <span>触发：{{ groupStrategyHint(policy.strategy) }}</span>
-                  <span>表达：{{ personaName(policy.personaId) }}</span>
-                  <span>权限：仍按发送者身份判断，此配置不会提权</span>
-                </div>
-              </div>
-            </div>
-            <el-empty v-else description="暂无单独配置，所有群沿用默认策略" :image-size="56" />
-            <el-button type="primary" plain @click="addGroupPolicy">添加群策略</el-button>
-          </div>
-        </el-form-item>
-
         <el-form-item label="命令前缀">
           <el-input v-model="botForm.commandPrefix" style="width: 120px" maxlength="8" />
           <span class="admin-form-hint" style="margin-left: 10px">例如 / 表示 /help、/号池</span>
@@ -637,10 +540,18 @@
         <el-divider content-position="left">语音消息与语音回复</el-divider>
 
         <el-form-item label="Qwen 默认音色">
-          <el-select v-model="botForm.defaultVoice" filterable style="width: 360px" placeholder="请选择默认音色">
+          <el-select
+            v-model="botForm.defaultVoice"
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            style="width: 360px"
+            placeholder="选择官方音色，或输入自定义音色 ID"
+          >
             <el-option v-for="voice in qwenVoices" :key="voice.value" :label="voice.label" :value="voice.value" />
           </el-select>
-          <small class="admin-form-hint">使用阿里云百炼 qwen-audio-3.1-tts-flash，共 {{ qwenVoices.length }} 个官方系统音色；用户说「用 longanhuan_v3.1 音色语音回复」时会临时覆盖</small>
+          <small class="admin-form-hint">默认音色可编辑，也可直接输入自定义音色 ID；群未绑定音色时使用这里。用户明确指定音色时仍以用户指令为准</small>
         </el-form-item>
 
         <el-form-item label="默认语音风格">
@@ -707,6 +618,142 @@
     </el-card>
       </el-tab-pane>
 
+      <el-tab-pane label="群聊策略" name="groups" lazy>
+    <el-card shadow="never" class="admin-card">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>群聊触发与人设音色</h3>
+            <p>每个群独立配置触发策略、表达人设和语音音色；未绑定时回退默认人设与默认音色</p>
+          </div>
+        </div>
+      </template>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="bot-impact-alert"
+        title="触发、表达、音色、权限分别独立"
+        description="触发策略决定是否回复；人设决定怎么说话；音色决定语音用什么声音；权限仍由发送者身份决定，群配置不会提权。"
+      />
+
+      <el-form label-width="150px" :disabled="!canWrite">
+        <el-form-item label="群聊回复策略">
+          <div class="group-policy-editor">
+            <small class="admin-form-hint">
+              未配置的群沿用默认策略；新增群默认“跟随全局”，可以只绑定人设或音色而不改变触发方式。@机器人 始终会触发回复
+            </small>
+            <div v-if="botForm.groupPolicies.length > 0" class="group-policy-list">
+              <div v-for="(policy, index) in botForm.groupPolicies" :key="index" class="group-policy-card">
+                <div class="group-policy-card-head">
+                  <div class="group-policy-group">
+                    <span class="group-policy-field-label">群号</span>
+                    <el-select
+                      v-model="policy.groupId"
+                      filterable
+                      :allow-create="botForm.allowedGroups.length === 0"
+                      default-first-option
+                      :reserve-keyword="false"
+                      placeholder="选择或输入群号"
+                    >
+                      <el-option v-for="group in botForm.allowedGroups" :key="group" :label="group" :value="group" />
+                    </el-select>
+                  </div>
+                  <el-button type="danger" link @click="removeGroupPolicy(index)">删除该群配置</el-button>
+                </div>
+
+                <div class="group-policy-card-grid">
+                  <div class="group-policy-strategy">
+                    <span class="group-policy-field-label">触发策略：是否回复</span>
+                    <el-select v-model="policy.strategy" @change="onGroupPolicyStrategyChange(policy)">
+                      <el-option
+                        v-for="option in groupReplyStrategyOptions"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
+                      />
+                    </el-select>
+                    <small>{{ groupStrategyHint(policy.strategy) }}</small>
+                  </div>
+
+                  <div class="group-policy-persona">
+                    <span class="group-policy-field-label">表达人设：怎么说话</span>
+                    <el-select
+                      :model-value="policy.personaId ?? 0"
+                      placeholder="选择人设"
+                      @update:model-value="setPolicyPersona(policy, $event)"
+                    >
+                      <el-option :value="0" :label="`跟随默认人设：${defaultPersona?.name ?? '内置默认人设'}`" />
+                      <el-option
+                        v-for="persona in enabledPersonas"
+                        :key="persona.id"
+                        :label="persona.name"
+                        :value="persona.id"
+                      />
+                    </el-select>
+                    <small>{{ policy.personaId == null ? '未绑定，默认人设变化时跟随' : '只影响该群的自然语言表达' }}</small>
+                  </div>
+
+                  <div class="group-policy-voice">
+                    <span class="group-policy-field-label">语音音色：怎么发声</span>
+                    <el-select
+                      :model-value="policy.voice ?? ''"
+                      filterable
+                      allow-create
+                      default-first-option
+                      :reserve-keyword="false"
+                      placeholder="选择或输入音色"
+                      @update:model-value="setPolicyVoice(policy, $event)"
+                    >
+                      <el-option :value="''" :label="`跟随默认音色：${botForm.defaultVoice}`" />
+                      <el-option v-for="voice in qwenVoices" :key="voice.value" :label="voice.label" :value="voice.value" />
+                    </el-select>
+                    <small>{{ policy.voice ? '只影响该群的语音回复' : '未绑定，默认音色变化时跟随' }}</small>
+                  </div>
+
+                  <div class="group-policy-extra">
+                    <span class="group-policy-field-label">策略参数</span>
+                    <template v-if="policy.strategy === 'RANDOM'">
+                      <div class="group-policy-inline">
+                        <el-input-number v-model="policy.randomPercent" :min="1" :max="100" :step="5" />
+                        <span class="admin-form-hint">% 概率回复</span>
+                      </div>
+                    </template>
+                    <el-select
+                      v-else-if="policy.strategy === 'KEYWORD'"
+                      v-model="policy.keywords"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      :reserve-keyword="false"
+                      placeholder="输入关键词后回车，可多个"
+                      class="group-policy-keywords"
+                    >
+                      <el-option v-for="keyword in policy.keywords" :key="keyword" :label="keyword" :value="keyword" />
+                    </el-select>
+                    <span v-else class="admin-form-hint">{{ policy.strategy === 'PROACTIVE' ? '每条消息都会触发' : '只响应 @机器人' }}</span>
+                  </div>
+                </div>
+
+                <div class="group-policy-impact">
+                  <span>触发：{{ groupStrategyHint(policy.strategy) }}</span>
+                  <span>表达：{{ personaName(policy.personaId) }}</span>
+                  <span>音色：{{ policy.voice || `跟随默认（${botForm.defaultVoice}）` }}</span>
+                  <span>权限：仍按发送者身份判断，此配置不会提权</span>
+                </div>
+              </div>
+            </div>
+            <el-empty v-else description="暂无单独配置，所有群沿用默认策略" :image-size="56" />
+            <el-button type="primary" plain @click="addGroupPolicy">添加群策略</el-button>
+          </div>
+        </el-form-item>
+
+      </el-form>
+    </el-card>
+      </el-tab-pane>
+
       <el-tab-pane label="人设库" name="personas" lazy>
     <el-card shadow="never" class="admin-card" v-loading="personaLoading">
       <template #header>
@@ -725,7 +772,7 @@
         show-icon
         class="persona-impact-alert"
         title="人设不是权限配置"
-        description="无论选择哪个人设，管理员仍只能按管理员权限查询、普通用户仍只能查本人数据、陌生人仍拿不到平台工具。修改人设会递增版本，并自动隔离旧版本的会话记忆。"
+        description="默认人设也可以随时编辑。无论选择哪个人设，管理员仍只能按管理员权限查询、普通用户仍只能查本人数据、陌生人仍拿不到平台工具。修改人设会递增版本，并自动隔离旧版本的会话记忆。"
       />
 
       <el-table :data="personas" size="small" class="persona-table">
@@ -1290,6 +1337,7 @@ const groupReplyStrategyOptions: Array<{
   label: string
   hint: string
 }> = [
+  { value: 'INHERIT', label: '跟随全局默认', hint: '未 @ 时沿用上方“群里需 @机器人”设置' },
   { value: 'MENTION', label: '仅 @ 回复', hint: '群里只有 @机器人 时才响应' },
   { value: 'PROACTIVE', label: '主动回复', hint: '群里的每条消息都会触发回复' },
   { value: 'RANDOM', label: '随机回复', hint: '按设定概率随机回复群消息' },
@@ -1304,7 +1352,8 @@ function addGroupPolicy() {
   botForm.groupPolicies.push({
     groupId: '',
     personaId: null,
-    strategy: 'MENTION',
+    voice: null,
+    strategy: 'INHERIT',
     randomPercent: 10,
     keywords: [],
   })
@@ -1317,6 +1366,11 @@ function removeGroupPolicy(index: number) {
 function setPolicyPersona(policy: BotGroupReplyPolicy, value: unknown) {
   const id = Number(value)
   policy.personaId = Number.isFinite(id) && id > 0 ? id : null
+}
+
+function setPolicyVoice(policy: BotGroupReplyPolicy, value: unknown) {
+  const voice = value == null ? '' : String(value).trim()
+  policy.voice = voice || null
 }
 
 function onGroupPolicyStrategyChange(policy: BotGroupReplyPolicy) {
@@ -1334,6 +1388,7 @@ function applyBotSettings(settings: BotSettings) {
     groupPolicies: (settings.groupPolicies ?? []).map((policy) => ({
       groupId: policy.groupId,
       personaId: policy.personaId ?? null,
+      voice: policy.voice ?? null,
       strategy: policy.strategy,
       randomPercent: policy.randomPercent || 10,
       keywords: [...(policy.keywords ?? [])],
@@ -2017,49 +2072,66 @@ onMounted(() => {
   gap: 10px;
 }
 
-.group-policy-columns {
-  display: grid;
-  grid-template-columns: minmax(150px, 190px) minmax(150px, 190px) minmax(150px, 200px) minmax(220px, 1fr) auto;
-  gap: 10px;
-  padding: 0 12px;
-  color: #7b8b87;
-  font-size: 11px;
-}
-
-.group-policy-row {
-  display: grid;
-  grid-template-columns: minmax(150px, 190px) minmax(150px, 190px) minmax(150px, 200px) minmax(220px, 1fr) auto;
-  gap: 10px;
-  align-items: start;
+.group-policy-card {
   padding: 12px;
   border: 1px solid #e3ebe8;
   border-radius: 10px;
   background: #fbfdfc;
 }
 
+.group-policy-card-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed #dbe6e2;
+}
+
 .group-policy-group,
 .group-policy-strategy,
-.group-policy-persona {
+.group-policy-persona,
+.group-policy-voice {
   width: 100%;
 }
 
+.group-policy-group,
 .group-policy-strategy,
-.group-policy-persona {
+.group-policy-persona,
+.group-policy-voice,
+.group-policy-extra {
   display: grid;
   gap: 4px;
 }
 
+.group-policy-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.group-policy-field-label {
+  color: #60716c;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .group-policy-strategy small,
-.group-policy-persona small {
+.group-policy-persona small,
+.group-policy-voice small {
   color: #7b8b87;
   font-size: 11px;
 }
 
 .group-policy-extra {
+  min-width: 0;
+}
+
+.group-policy-inline {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
 }
 
 .group-policy-keywords {
@@ -2068,11 +2140,11 @@ onMounted(() => {
 }
 
 .group-policy-impact {
-  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 18px;
-  padding-top: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
   border-top: 1px dashed #dbe6e2;
   color: #60716c;
   font-size: 12px;
@@ -2102,35 +2174,21 @@ onMounted(() => {
   color: #7b8b87;
 }
 
-@media (max-width: 900px) {
-  .group-policy-columns {
-    display: none;
-  }
-
-  .group-policy-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .group-policy-extra {
-    grid-column: 1 / -1;
-  }
-
-  .group-policy-persona {
-    grid-column: 1 / -1;
+@media (max-width: 1100px) {
+  .group-policy-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
-  .group-policy-row {
+  .group-policy-card-head,
+  .group-policy-card-grid {
     grid-template-columns: 1fr;
   }
 
-  .group-policy-extra {
-    grid-column: auto;
-  }
-
-  .group-policy-persona {
-    grid-column: auto;
+  .group-policy-card-head {
+    display: grid;
+    align-items: stretch;
   }
 }
 

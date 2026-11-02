@@ -119,6 +119,13 @@ public record BotSettings(
         return null;
     }
 
+    /** 群绑定音色优先；未绑定时使用全局默认音色。 */
+    public String voiceForGroup(Long groupId) {
+        BotGroupReplyPolicy policy = groupPolicy(groupId);
+        return policy != null && policy.voice() != null && !policy.voice().isBlank()
+                ? policy.voice() : defaultVoice;
+    }
+
     /**
      * 判断一条群消息是否应触发机器人。
      *
@@ -133,6 +140,9 @@ public record BotSettings(
         }
         BotGroupReplyPolicy policy = groupPolicy(groupId);
         if (policy != null) {
+            if (policy.strategy() == BotGroupReplyStrategy.INHERIT) {
+                return !requireMention;
+            }
             return policy.shouldTrigger(text, randomValue);
         }
         return !requireMention;
