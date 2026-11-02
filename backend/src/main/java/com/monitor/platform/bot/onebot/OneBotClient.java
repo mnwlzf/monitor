@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +78,63 @@ public class OneBotClient {
     /** OneBot 地址（仅用于状态展示）。 */
     public String baseUrl() {
         return properties.getApiBaseUrl();
+    }
+
+    /**
+     * 获取机器人已加入的群列表。
+     *
+     * <p>OneBot v11 的 {@code /get_group_list} 通常返回群号、群名称和成员数。
+     * 实现不支持或暂时不可用时返回空列表，页面仍允许手动输入群号。</p>
+     */
+    public List<GroupInfo> fetchGroupList() {
+        if (!properties.isConfigured()) {
+            return List.of();
+        }
+        try {
+            JsonNode data = postData("/get_group_list", Map.of());
+            if (data == null || !data.isArray()) {
+                return List.of();
+            }
+            List<GroupInfo> groups = new ArrayList<>();
+            for (JsonNode item : data) {
+                GroupInfo info = groupInfo(item);
+                if (info != null) {
+                    groups.add(info);
+                }
+            }
+            return List.copyOf(groups);
+        } catch (RuntimeException ex) {
+            log.warn("获取 QQ 群列表失败: {}", ex.getMessage());
+            return List.of();
+        }
+    }
+
+    /** 获取单个群的信息；实现不支持或群不存在时返回 null。 */
+    public GroupInfo fetchGroupInfo(long groupId) {
+        if (!properties.isConfigured()) {
+            return null;
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("group_id", groupId);
+        body.put("no_cache", true);
+        try {
+            return groupInfo(postData("/get_group_info", body));
+        } catch (RuntimeException ex) {
+            log.warn("获取 QQ 群信息失败: group={}, err={}", groupId, ex.getMessage());
+            return null;
+        }
+    }
+
+    private static GroupInfo groupInfo(JsonNode data) {
+        if (data == null || data.isMissingNode() || data.isNull()) {
+            return null;
+        }
+        long groupId = data.path("group_id").asLong(0L);
+        String groupName = data.path("group_name").asText("").trim();
+        if (groupId <= 0L || groupName.isEmpty()) {
+            return null;
+        }
+        return new GroupInfo(groupId, groupName);
     }
 
     /**
@@ -237,7 +295,13 @@ public class OneBotClient {
         static ProbeResult failed(String error) {
             return new ProbeResult(true, false, false, null, null, error);
         }
-    }    private boolean send(String path, String idField, long id, String text) {
+    }
+
+    /** OneBot 返回的群基础信息。 */
+    public record GroupInfo(long groupId, String groupName) {
+    }
+
+    private boolean send(String path, String idField, long id, String text) {
         return dispatch(path, idField, id, text, text);
     }
 

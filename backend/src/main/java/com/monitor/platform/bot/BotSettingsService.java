@@ -200,11 +200,14 @@ public class BotSettingsService {
             int randomPercent = clamp(policy.randomPercent(), 1, 100, DEFAULT_RANDOM_REPLY_PERCENT);
             List<String> keywords = normalizeKeywords(policy.keywords());
             String voice = normalizeOptionalVoice(policy.voice());
+            String groupName = normalizeOptionalText(policy.groupName(), "群名称", 120);
+            String groupAlias = normalizeOptionalText(policy.groupAlias(), "群昵称", 80);
             if (strategy == BotGroupReplyStrategy.KEYWORD && keywords.isEmpty()) {
                 throw BusinessException.of("关键词唤醒策略至少需要一个关键词：" + groupId);
             }
             normalized.put(groupId, new BotGroupReplyPolicy(
-                    groupId, policy.personaId(), voice, strategy, randomPercent, keywords));
+                    groupId, groupName, groupAlias, policy.personaId(), voice,
+                    strategy, randomPercent, keywords));
         }
         return List.copyOf(normalized.values());
     }
@@ -399,6 +402,17 @@ public class BotSettingsService {
             return null;
         }
         return normalizeVoice(voice);
+    }
+
+    private static String normalizeOptionalText(String value, String field, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().replaceAll("\\s+", " ");
+        if (normalized.length() > maxLength) {
+            throw BusinessException.of(field + "不能超过 " + maxLength + " 个字符");
+        }
+        return normalized;
     }
 
     private static String normalizeVoiceStyle(String style) {

@@ -478,7 +478,7 @@
             placeholder="输入群号后回车；留空表示不限制"
             style="width: 100%"
           >
-            <el-option v-for="item in botForm.allowedGroups" :key="item" :label="item" :value="item" />
+            <el-option v-for="item in groupSelectOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
           <small class="admin-form-hint">只有这些群里 @机器人 才会响应</small>
         </el-form-item>
@@ -494,7 +494,7 @@
             placeholder="只有这些群才允许平台功能和 OpenAI 状态查询；留空表示都不给"
             style="width: 100%"
           >
-            <el-option v-for="item in botForm.platformGroups" :key="item" :label="item" :value="item" />
+            <el-option v-for="item in groupSelectOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
           <small class="admin-form-hint">
             必须是「允许的群号」的子集。群聊和群临时会话可正常查询，但账号名称、上游平台名称/地址和邮箱会自动脱敏；OpenAI 异常告警也发送到这些群。留空 = 任何群都不给平台功能
@@ -626,6 +626,7 @@
             <h3>群聊触发与人设音色</h3>
             <p>每个群独立配置触发策略、表达人设和语音音色；未绑定时回退默认人设与默认音色</p>
           </div>
+          <el-button :loading="botGroupsLoading" @click="loadBotGroups(true)">同步群列表</el-button>
         </div>
       </template>
 
@@ -649,16 +650,26 @@
                 <div class="group-policy-card-head">
                   <div class="group-policy-group">
                     <span class="group-policy-field-label">群号</span>
-                    <el-select
-                      v-model="policy.groupId"
-                      filterable
-                      :allow-create="botForm.allowedGroups.length === 0"
-                      default-first-option
-                      :reserve-keyword="false"
-                      placeholder="选择或输入群号"
-                    >
-                      <el-option v-for="group in botForm.allowedGroups" :key="group" :label="group" :value="group" />
-                    </el-select>
+                    <div class="group-policy-group-line">
+                      <el-select
+                        v-model="policy.groupId"
+                        filterable
+                        :allow-create="botForm.allowedGroups.length === 0"
+                        default-first-option
+                        :reserve-keyword="false"
+                        placeholder="选择或输入群号"
+                        @change="syncPolicyGroupName(policy)"
+                      >
+                        <el-option v-for="group in policyGroupOptions" :key="group.value" :label="group.label" :value="group.value" />
+                      </el-select>
+                      <el-button @click="syncPolicyGroupName(policy, true)">获取群名</el-button>
+                    </div>
+                    <small>自动获取：{{ policy.groupName || '尚未获取' }}</small>
+                  </div>
+                  <div class="group-policy-alias">
+                    <span class="group-policy-field-label">显示昵称（可选）</span>
+                    <el-input v-model="policy.groupAlias" maxlength="80" placeholder="例如：售后一群、内部测试群" />
+                    <small>手动昵称优先于自动群名</small>
                   </div>
                   <el-button type="danger" link @click="removeGroupPolicy(index)">删除该群配置</el-button>
                 </div>
@@ -738,6 +749,7 @@
                 </div>
 
                 <div class="group-policy-impact">
+                  <span>群：{{ groupDisplayName(policy.groupId, policy.groupName, policy.groupAlias) }}（{{ policy.groupId || '未填写' }}）</span>
                   <span>触发：{{ groupStrategyHint(policy.strategy) }}</span>
                   <span>表达：{{ personaName(policy.personaId) }}</span>
                   <span>音色：{{ policy.voice || `跟随默认（${botForm.defaultVoice}）` }}</span>
@@ -1026,11 +1038,13 @@ import {
   deleteBotForbiddenWord,
   deleteBotPersona,
   getBotLotterySettings,
+  getBotGroupInfo,
   getBotIdentity,
   getBotSettings,
   getMailSettings,
   getNotificationSettings,
   listBotForbiddenWords,
+  listBotGroups,
   listBotLotteryDraws,
   listBotPersonas,
   saveBotLotterySettings,
@@ -1048,7 +1062,7 @@ import {
   type MailSettingsInput,
   type NotificationSettingsInput,
 } from '../api/settings'
-import type { BotAdmin, BotForbiddenWord, BotGroupReplyPolicy, BotGroupReplyStrategy, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotPersona, BotSettings } from '../types'
+import type { BotAdmin, BotForbiddenWord, BotGroupInfo, BotGroupReplyPolicy, BotGroupReplyStrategy, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotPersona, BotSettings } from '../types'
 
 const props = defineProps<{ canWrite?: boolean }>()
 
@@ -1278,6 +1292,8 @@ loongstella_v3.1|loongstella_v3.1
 const botLoading = ref(false)
 const botSaving = ref(false)
 const botUpdatedAt = ref('')
+const botGroups = ref<BotGroupInfo[]>([])
+const botGroupsLoading = ref(false)
 const personaLoading = ref(false)
 const personaSaving = ref(false)
 const personas = ref<BotPersona[]>([])
@@ -1332,6 +1348,32 @@ const botForm = reactive<BotSettingsInput>({
   defaultVoiceStyle: '自然、友好、简洁',
 })
 
+const groupSelectOptions = computed(() => {
+  const options = new Map<string, string>()
+  for (const groupId of botForm.allowedGroups ?? []) {
+    options.set(groupId, groupId)
+  }
+  for (const group of botGroups.value) {
+    options.set(String(group.groupId), `${group.groupName}（${group.groupId}）`)
+  }
+  for (const policy of botForm.groupPolicies ?? []) {
+    if (!policy.groupId) continue
+    const label = policy.groupAlias || policy.groupName
+    if (label) {
+      options.set(policy.groupId, `${label}（${policy.groupId}）`)
+    } else if (!options.has(policy.groupId)) {
+      options.set(policy.groupId, policy.groupId)
+    }
+  }
+  return Array.from(options, ([value, label]) => ({ value, label }))
+})
+const policyGroupOptions = computed(() => {
+  const allowed = botForm.allowedGroups ?? []
+  return allowed.length === 0
+    ? groupSelectOptions.value
+    : groupSelectOptions.value.filter((group) => allowed.includes(group.value))
+})
+
 const groupReplyStrategyOptions: Array<{
   value: BotGroupReplyStrategy
   label: string
@@ -1351,6 +1393,8 @@ function groupStrategyHint(strategy: BotGroupReplyStrategy) {
 function addGroupPolicy() {
   botForm.groupPolicies.push({
     groupId: '',
+    groupName: null,
+    groupAlias: null,
     personaId: null,
     voice: null,
     strategy: 'INHERIT',
@@ -1387,6 +1431,8 @@ function applyBotSettings(settings: BotSettings) {
     platformGroups: [...(settings.platformGroups ?? [])],
     groupPolicies: (settings.groupPolicies ?? []).map((policy) => ({
       groupId: policy.groupId,
+      groupName: policy.groupName ?? null,
+      groupAlias: policy.groupAlias ?? null,
       personaId: policy.personaId ?? null,
       voice: policy.voice ?? null,
       strategy: policy.strategy,
@@ -1417,6 +1463,63 @@ async function loadBot() {
     ElMessage.error(error instanceof Error ? error.message : '加载机器人设置失败')
   } finally {
     botLoading.value = false
+  }
+}
+
+async function loadBotGroups(notify = false) {
+  botGroupsLoading.value = true
+  try {
+    botGroups.value = await listBotGroups()
+    for (const policy of botForm.groupPolicies) {
+      if (!policy.groupName) {
+        const group = botGroups.value.find((item) => String(item.groupId) === policy.groupId)
+        if (group) policy.groupName = group.groupName
+      }
+    }
+    if (notify) {
+      if (botGroups.value.length > 0) {
+        ElMessage.success(`已同步 ${botGroups.value.length} 个群`)
+      } else {
+        ElMessage.warning('OneBot 未返回群列表，可继续手动输入群号并设置昵称')
+      }
+    }
+  } catch (error) {
+    if (notify) {
+      ElMessage.error(error instanceof Error ? error.message : '同步群列表失败')
+    }
+  } finally {
+    botGroupsLoading.value = false
+  }
+}
+
+function groupDisplayName(groupId: string, groupName?: string | null, groupAlias?: string | null) {
+  return groupAlias || groupName || groupId
+}
+
+async function syncPolicyGroupName(policy: BotGroupReplyPolicy, notify = false) {
+  const groupId = policy.groupId.trim()
+  if (!groupId) {
+    if (notify) ElMessage.warning('请先填写群号')
+    return
+  }
+  const known = botGroups.value.find((group) => String(group.groupId) === groupId)
+  if (known) {
+    policy.groupName = known.groupName
+    if (notify) ElMessage.success(`已获取群名称：${known.groupName}`)
+    return
+  }
+  try {
+    const info = await getBotGroupInfo(groupId)
+    if (info) {
+      policy.groupName = info.groupName
+      if (notify) ElMessage.success(`已获取群名称：${info.groupName}`)
+    } else if (notify) {
+      ElMessage.warning('OneBot 没有返回该群信息，请检查群号或手动填写昵称')
+    }
+  } catch (error) {
+    if (notify) {
+      ElMessage.error(error instanceof Error ? error.message : '获取群名称失败')
+    }
   }
 }
 
@@ -1587,6 +1690,8 @@ async function saveBotSettingsForm() {
     const groupPolicies = botForm.groupPolicies.map((policy) => ({
       ...policy,
       groupId: policy.groupId.trim(),
+      groupName: policy.groupName?.trim() || null,
+      groupAlias: policy.groupAlias?.trim() || null,
       keywords: policy.keywords.map((keyword) => keyword.trim()).filter(Boolean),
     }))
     applyBotSettings(await saveBotSettings({ ...botForm, groupPolicies }))
@@ -1856,6 +1961,7 @@ onMounted(() => {
   load()
   loadNotification()
   loadBot()
+  loadBotGroups()
   loadPersonas()
   loadForbiddenWords()
   loadLottery()
@@ -2089,6 +2195,7 @@ onMounted(() => {
 }
 
 .group-policy-group,
+.group-policy-alias,
 .group-policy-strategy,
 .group-policy-persona,
 .group-policy-voice {
@@ -2096,12 +2203,33 @@ onMounted(() => {
 }
 
 .group-policy-group,
+.group-policy-alias,
 .group-policy-strategy,
 .group-policy-persona,
 .group-policy-voice,
 .group-policy-extra {
   display: grid;
   gap: 4px;
+}
+
+.group-policy-alias {
+  flex: 1;
+  min-width: 220px;
+}
+
+.group-policy-group-line {
+  display: flex;
+  gap: 8px;
+}
+
+.group-policy-group-line .el-select {
+  flex: 1;
+}
+
+.group-policy-group small,
+.group-policy-alias small {
+  color: #7b8b87;
+  font-size: 11px;
 }
 
 .group-policy-card-grid {

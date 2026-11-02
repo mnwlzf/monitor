@@ -463,6 +463,10 @@ export type BotGroupReplyStrategy = 'INHERIT' | 'MENTION' | 'PROACTIVE' | 'RANDO
 /** 按群定制的回复策略；@机器人 始终会触发回复。 */
 export interface BotGroupReplyPolicy {
   groupId: string
+  /** OneBot 自动获取的群名称。 */
+  groupName: string | null
+  /** 手动设置的显示昵称，优先级高于 groupName。 */
+  groupAlias: string | null
   /** 绑定的人设 ID；null 表示使用默认人设。 */
   personaId: number | null
   /** 绑定的语音音色；null 表示使用全局默认音色。 */
@@ -472,6 +476,12 @@ export interface BotGroupReplyPolicy {
   randomPercent: number
   /** 唤醒关键词，仅 KEYWORD 使用。 */
   keywords: string[]
+}
+
+/** OneBot 返回的机器人所在群。 */
+export interface BotGroupInfo {
+  groupId: number
+  groupName: string
 }
 
 /** 机器人可复用的人设。仅影响自然语言表达，不影响权限和工具。 */

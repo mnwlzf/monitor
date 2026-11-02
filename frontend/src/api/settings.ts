@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotAdmin, BotForbiddenWord, BotGroupReplyPolicy, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotMessage, BotMessageArchiveStats, BotPersona, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
+import type { BotAdmin, BotForbiddenWord, BotGroupInfo, BotGroupReplyPolicy, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotMessage, BotMessageArchiveStats, BotPersona, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -150,6 +150,16 @@ export async function saveBotSettings(input: BotSettingsInput): Promise<BotSetti
     method: 'PUT',
     body: JSON.stringify(input),
   })
+}
+
+/** 通过 OneBot 获取机器人所在群列表；实现不支持时返回空数组。 */
+export async function listBotGroups(): Promise<BotGroupInfo[]> {
+  return apiRequest<BotGroupInfo[]>('/api/v1/settings/bot/groups')
+}
+
+/** 通过 OneBot 获取单个群名称；取不到时返回 null。 */
+export async function getBotGroupInfo(groupId: string): Promise<BotGroupInfo | null> {
+  return apiRequest<BotGroupInfo | null>(`/api/v1/settings/bot/groups/${encodeURIComponent(groupId)}`)
 }
 
 /** 人设库表单载荷。 */

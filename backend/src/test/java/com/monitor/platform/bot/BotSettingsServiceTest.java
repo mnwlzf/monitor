@@ -180,8 +180,8 @@ class BotSettingsServiceTest {
                 List.of(),
                 List.of(),
                 List.of(
-                        new BotGroupReplyPolicy("111", 7L, "longxiaoxia_v3.1",
-                                BotGroupReplyStrategy.PROACTIVE, 10, List.of()),
+                        new BotGroupReplyPolicy("111", "售后一群", "内部售后群", 7L,
+                                "longxiaoxia_v3.1", BotGroupReplyStrategy.PROACTIVE, 10, List.of()),
                         new BotGroupReplyPolicy("222", BotGroupReplyStrategy.MENTION, 10, List.of()),
                         new BotGroupReplyPolicy("333", BotGroupReplyStrategy.KEYWORD, 10,
                                 List.of("API", "报错"))),
@@ -190,6 +190,8 @@ class BotSettingsServiceTest {
         assertEquals(3, saved.groupPolicies().size());
         assertEquals(7L, saved.groupPolicies().get(0).personaId());
         assertEquals("longxiaoxia_v3.1", saved.groupPolicies().get(0).voice());
+        assertEquals("售后一群", saved.groupPolicies().get(0).groupName());
+        assertEquals("内部售后群", saved.groupPolicies().get(0).groupAlias());
         assertEquals("longxiaoxia_v3.1", service.current().voiceForGroup(111L));
         assertEquals("longanhuan_v3.1", service.current().voiceForGroup(222L));
         assertTrue(service.current().shouldRespondInGroup(111L, false, "随便聊聊", 0.99));
