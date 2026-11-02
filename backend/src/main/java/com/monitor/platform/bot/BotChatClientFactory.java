@@ -29,14 +29,13 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 机器人人设与 {@link ChatClient} 的构建与缓存。
+ * 机器人能力档案与 {@link ChatClient} 的构建与缓存。
  *
- * <p>三个人设（管理员 / 平台普通用户 / 陌生人）各自一套系统提示词与工具集，
- * 提示词里带「陌生人绝不能看到平台信息」的硬约束，因此必须按人设隔离客户端 ——
- * 见 {@code Persona} 与 {@code get} 的说明。</p>
+ * <p>三个能力档案（管理员 / 平台普通用户 / 陌生人）各自一套权限提示词与工具集。
+ * 群聊人设只通过 {@link BotPromptComposer} 追加表达层，不能改变工具挂载或权限。</p>
  *
- * <p>从 {@code BotMessageService} 抽出：消息处理负责「判断该用哪个人设」，
- * 本类负责「按人设把客户端建出来并缓存」。</p>
+ * <p>从 {@code BotMessageService} 抽出：消息处理负责「判断能力档案与群人设」，
+ * 本类负责「按能力 + 人设版本把客户端建出来并缓存」。</p>
  */
 @Component
 public class BotChatClientFactory {
@@ -44,7 +43,7 @@ public class BotChatClientFactory {
     private static final Logger log = LoggerFactory.getLogger(BotChatClientFactory.class);
 
     private static final String MONITOR_ADMIN_PROMPT = """
-            你是「上游账号监控」系统的运维助手，通过 QQ 回答用户关于平台、账号、号池的问题。
+            你正在通过 QQ 为「上游账号监控」系统提供平台、账号、号池查询服务。
             当前对话者是平台管理员，可以查看全部平台数据。
             智能运维查询不需要管理员记精确命令，用户措辞不必和工具名一致；按语义选择最接近的工具：
             「整体怎么样 / 有什么问题」→ opsMonitoringOverview；
@@ -93,7 +92,7 @@ public class BotChatClientFactory {
             """;
 
     private static final String MONITOR_USER_PROMPT = """
-            你是「上游账号监控」系统的助手，通过 QQ 和用户聊天。
+            你正在通过 QQ 为「上游账号监控」系统的普通用户提供对话和本人数据查询服务。
             当前对话者是本平台的普通用户（不是管理员）。
 
             平台相关的问题：
@@ -177,12 +176,13 @@ public class BotChatClientFactory {
         this.fallbackProperties = fallbackProperties;
     }
     /**
-     * 机器人人设。
+     * 机器人能力档案。
      *
-     * <p>提示词在方法里取而不是构造器参数：枚举常量先于类的静态字段初始化，
+     * <p>只决定权限说明和工具集，不决定群聊角色性格。
+     * 提示词在方法里取而不是构造器参数：枚举常量先于类的静态字段初始化，
      * 直接引用 {@code MONITOR_ADMIN_PROMPT} 会拿到 null。</p>
      */
-    public enum Persona {
+    public enum CapabilityProfile {
         /** 平台管理员：监控助手 + 全部只读查询工具。 */
         MONITOR_ADMIN,
         /** 平台普通用户：监控助手，但不挂任何平台级工具。 */
@@ -207,8 +207,9 @@ public class BotChatClientFactory {
     private record CachedClient(ChatClient client, int window, boolean webSearch) {
     }
 
-    /** 客户端缓存键：人设 + 是否管理员（管理员即使人设退化成 CHAT，也要有联网搜索）。 */
-    private record ClientKey(Persona persona, boolean admin, boolean fallback) {
+    /** 客户端缓存键：能力 + 人设版本 + 是否管理员。 */
+    private record ClientKey(CapabilityProfile capability, long personaId, int personaVersion,
+                             boolean admin, boolean fallback) {
     }
 
     /**
@@ -217,27 +218,41 @@ public class BotChatClientFactory {
      * <p>{@code ChatClient.Builder} 在 Spring AI 里是 prototype Bean，每次取都是新实例，
      * 因此不同人设之间不会互相带上对方的默认工具 —— 这点对「陌生人拿不到平台工具」是硬要求。</p>
      */
-    public ChatClient get(Persona persona, BotSettings settings, boolean admin) {
-        ChatClient primary = getClient(false, persona, settings, admin);
+    public ChatClient get(CapabilityProfile capability, BotPersonaSnapshot persona,
+                          BotSettings settings, boolean admin) {
+        ChatClient primary = getClient(false, capability, persona, settings, admin);
         if (primary != null) {
             return primary;
         }
-        return getFallback(persona, settings, admin);
+        return getFallback(capability, persona, settings, admin);
+    }
+
+    /** 兼容旧调用方：使用内置默认人设。 */
+    public ChatClient get(CapabilityProfile capability, BotSettings settings, boolean admin) {
+        return get(capability, BotPersonaSnapshot.BUILTIN, settings, admin);
     }
 
     /** 获取备用模型客户端；未配置备用 Key 时返回 null。 */
-    public ChatClient getFallback(Persona persona, BotSettings settings, boolean admin) {
-        return getClient(true, persona, settings, admin);
+    public ChatClient getFallback(CapabilityProfile capability, BotPersonaSnapshot persona,
+                                  BotSettings settings, boolean admin) {
+        return getClient(true, capability, persona, settings, admin);
     }
 
-    private ChatClient getClient(boolean fallback, Persona persona, BotSettings settings, boolean admin) {
+    /** 兼容旧调用方：使用内置默认人设。 */
+    public ChatClient getFallback(CapabilityProfile capability, BotSettings settings, boolean admin) {
+        return getFallback(capability, BotPersonaSnapshot.BUILTIN, settings, admin);
+    }
+
+    private ChatClient getClient(boolean fallback, CapabilityProfile capability,
+                                 BotPersonaSnapshot persona, BotSettings settings, boolean admin) {
         if (fallback ? fallbackUnavailable : unavailable) {
             return null;
         }
         int window = Math.max(2, settings.memoryWindow());
+        BotPersonaSnapshot resolvedPersona = persona == null ? BotPersonaSnapshot.BUILTIN : persona;
         // 联网搜索开关来自页面设置（bot_settings），变了要重建客户端，不能只按记忆窗口缓存
         boolean attachWebSearch = shouldAttachWebSearch(admin, settings);
-        ClientKey key = new ClientKey(persona, admin, fallback);
+        ClientKey key = new ClientKey(capability, resolvedPersona.id(), resolvedPersona.version(), admin, fallback);
         CachedClient cached = clients.get(key);
         if (cached != null && cached.window() == window && cached.webSearch() == attachWebSearch) {
             return cached.client();
@@ -259,13 +274,17 @@ public class BotChatClientFactory {
                         : "未配置大模型，QQ 机器人只支持命令（/help 查看）");
                 return null;
             }
+            // 人设版本升级后清掉同一人设的旧客户端，避免缓存随修改次数无限增长。
+            clients.keySet().removeIf(cachedKey -> cachedKey.capability() == capability
+                    && cachedKey.personaId() == resolvedPersona.id()
+                    && cachedKey.personaVersion() != resolvedPersona.version());
             ChatClient.Builder configured = builder
-                    .defaultSystem(persona.systemPrompt())
+                    .defaultSystem(BotPromptComposer.compose(capability.systemPrompt(), resolvedPersona))
                     .defaultAdvisors(MessageChatMemoryAdvisor.builder(
                             MessageWindowChatMemory.builder().maxMessages(window).build())
                             .build());
             // 天气与平台无关，三种人设都能用（含陌生人）。
-            if (persona.usesTools()) {
+            if (capability.usesTools()) {
                 // 管理员专属：建密钥工具只挂管理员人设，普通人 / 陌生人拿不到
                 configured = attachWebSearch
                         ? configured.defaultTools(tools, errorTools, orderTools, usageTools, weatherTools, webSearchTools, sub2KeyTools, opsMonitoringTools)
@@ -277,8 +296,9 @@ public class BotChatClientFactory {
             }
             ChatClient built = configured.build();
             clients.put(key, new CachedClient(built, window, attachWebSearch));
-            log.info("QQ 机器人{}人设已就绪: persona={}, admin={}, 记忆窗口={} 条, 平台工具={}, 联网搜索={}",
-                    fallback ? "备用" : "", persona, admin, window, persona.usesTools(), attachWebSearch);
+            log.info("QQ 机器人{}客户端已就绪: capability={}, persona={}#v{}, admin={}, 记忆窗口={} 条, 平台工具={}, 联网搜索={}",
+                    fallback ? "备用" : "", capability, resolvedPersona.name(), resolvedPersona.version(),
+                    admin, window, capability.usesTools(), attachWebSearch);
             return built;
         }
     }

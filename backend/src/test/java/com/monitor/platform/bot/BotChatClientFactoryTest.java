@@ -22,9 +22,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 人设与客户端工厂。
+ * 能力档案、人设与客户端工厂。
  *
- * <p>「只有管理员人设挂平台工具」是安全约束（陌生人绝不能拿到平台数据），这里固定住它；
+ * <p>「只有管理员能力档案挂平台工具」是安全约束（陌生人绝不能拿到平台数据），这里固定住它；
  * 联网搜索是否挂给普通人由页面设置 {@link BotSettings#webSearchForNonAdmin()} 控制。</p>
  */
 class BotChatClientFactoryTest {
@@ -66,10 +66,10 @@ class BotChatClientFactoryTest {
     }
 
     @Test
-    void onlyAdminPersonaCarriesPlatformTools() {
-        assertThat(BotChatClientFactory.Persona.MONITOR_ADMIN.usesTools()).isTrue();
-        assertThat(BotChatClientFactory.Persona.MONITOR_USER.usesTools()).isFalse();
-        assertThat(BotChatClientFactory.Persona.CHAT.usesTools()).isFalse();
+    void onlyAdminCapabilityCarriesPlatformTools() {
+        assertThat(BotChatClientFactory.CapabilityProfile.MONITOR_ADMIN.usesTools()).isTrue();
+        assertThat(BotChatClientFactory.CapabilityProfile.MONITOR_USER.usesTools()).isFalse();
+        assertThat(BotChatClientFactory.CapabilityProfile.CHAT.usesTools()).isFalse();
     }
 
     /** 管理员：功能启用就挂（没配 Key 时工具会提示运维去配）。 */
@@ -77,7 +77,7 @@ class BotChatClientFactoryTest {
     void adminGetsWebSearchWheneverEnabled() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_ADMIN, settings(false), true);
+        factory(builder).get(BotChatClientFactory.CapabilityProfile.MONITOR_ADMIN, settings(false), true);
 
         verify(builder).defaultTools(tools, errorTools, orderTools, usageTools, weatherTools,
                 webSearchTools, sub2KeyTools, opsMonitoringTools);
@@ -89,10 +89,10 @@ class BotChatClientFactoryTest {
      * <p>这是之前的缺陷：按人设判断时，管理员在非指定群会被当成普通人，开关没开就没有联网搜索。</p>
      */
     @Test
-    void adminGetsWebSearchEvenWithChatPersona() {
+    void adminGetsWebSearchEvenWithChatCapability() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.CHAT, settings(false), true);
+        factory(builder).get(BotChatClientFactory.CapabilityProfile.CHAT, settings(false), true);
 
         verify(builder).defaultTools(weatherTools, webSearchTools);
     }
@@ -102,9 +102,24 @@ class BotChatClientFactoryTest {
     void nonAdminDoesNotGetWebSearchByDefault() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings(false), false);
+        factory(builder).get(BotChatClientFactory.CapabilityProfile.MONITOR_USER, settings(false), false);
 
         verify(builder).defaultTools(weatherTools);
+    }
+
+    /** 群人设只改变提示词，不能改变工具挂载。 */
+    @Test
+    void personaDoesNotChangeToolPermissions() {
+        ChatClient.Builder builder = fluentBuilder();
+        BotPersonaSnapshot persona = new BotPersonaSnapshot(
+                9L, "群客服", 1, "你是群客服。", "语气温柔。");
+
+        factory(builder).get(BotChatClientFactory.CapabilityProfile.MONITOR_USER, persona, settings(false), false);
+
+        verify(builder).defaultTools(weatherTools);
+        var promptCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(builder).defaultSystem(promptCaptor.capture());
+        assertThat(promptCaptor.getValue()).contains("群客服", "权限边界");
     }
 
     /** 页面开关打开 + 配好 Key 后，普通人才挂联网搜索。 */
@@ -113,7 +128,7 @@ class BotChatClientFactoryTest {
         webSearchProperties.setApiKey("test-key");
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.CHAT, settings(true), false);
+        factory(builder).get(BotChatClientFactory.CapabilityProfile.CHAT, settings(true), false);
 
         verify(builder).defaultTools(weatherTools, webSearchTools);
     }
@@ -123,7 +138,7 @@ class BotChatClientFactoryTest {
     void nonAdminDoesNotGetUnconfiguredWebSearch() {
         ChatClient.Builder builder = fluentBuilder();
 
-        factory(builder).get(BotChatClientFactory.Persona.MONITOR_USER, settings(true), false);
+        factory(builder).get(BotChatClientFactory.CapabilityProfile.MONITOR_USER, settings(true), false);
 
         verify(builder).defaultTools(weatherTools);
     }
@@ -135,8 +150,8 @@ class BotChatClientFactoryTest {
         ChatClient.Builder builder = fluentBuilder();
         BotChatClientFactory factory = factory(builder);
 
-        factory.get(BotChatClientFactory.Persona.MONITOR_USER, settings(false), false);
-        factory.get(BotChatClientFactory.Persona.MONITOR_USER, settings(true), false);
+        factory.get(BotChatClientFactory.CapabilityProfile.MONITOR_USER, settings(false), false);
+        factory.get(BotChatClientFactory.CapabilityProfile.MONITOR_USER, settings(true), false);
 
         verify(builder).defaultTools(weatherTools);
         verify(builder).defaultTools(weatherTools, webSearchTools);
@@ -147,7 +162,7 @@ class BotChatClientFactoryTest {
         BotChatClientFactory factory = factory(null);
 
         assertThat(factory.available()).isFalse();
-        assertThat(factory.get(BotChatClientFactory.Persona.CHAT, settings(false), false)).isNull();
+        assertThat(factory.get(BotChatClientFactory.CapabilityProfile.CHAT, settings(false), false)).isNull();
         // 一次确认不可用后保持不可用，不必反复探测
         assertThat(factory.available()).isFalse();
     }
@@ -161,7 +176,7 @@ class BotChatClientFactoryTest {
         BotChatClientFactory factory = factory(null, fallback);
 
         assertThat(factory.available()).isTrue();
-        assertThat(factory.get(BotChatClientFactory.Persona.CHAT, settings(false), false)).isNotNull();
+        assertThat(factory.get(BotChatClientFactory.CapabilityProfile.CHAT, settings(false), false)).isNotNull();
         assertThat(factory.hasFallback()).isTrue();
     }
 

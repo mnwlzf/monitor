@@ -120,7 +120,7 @@ class QqBotWebhookIntegrationTest {
                 tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService, incidentService, monitoringService);
 
         BotMessageService service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, mock(BotRuntimeStatus.class), botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, mock(BotPersonaService.class), reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new QqBotWebhookController(properties, service, new ObjectMapper()))
                 .build();

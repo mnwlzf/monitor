@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.monitor.platform.bot.BotPersonaMapper">
+
+    <resultMap id="BotPersonaResultMap" type="com.monitor.platform.bot.BotPersonaEntity">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="description" property="description"/>
+        <result column="character_prompt" property="characterPrompt"/>
+        <result column="style_prompt" property="stylePrompt"/>
+        <result column="enabled" property="enabled"/>
+        <result column="is_default" property="defaultPersona"/>
+        <result column="version" property="version"/>
+        <result column="bound_group_count" property="boundGroupCount"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="personaColumns">
+        p.id, p.name, p.description, p.character_prompt, p.style_prompt,
+        p.enabled, p.is_default, p.version, p.created_at, p.updated_at,
+        (
+            SELECT COUNT(*)
+            FROM bot_settings bs
+            CROSS JOIN LATERAL jsonb_array_elements(bs.group_reply_policies) policy
+            WHERE (policy ->> 'personaId') ~ '^[0-9]+$'
+              AND (policy ->> 'personaId')::bigint = p.id
+        ) AS bound_group_count
+    </sql>
+
+    <select id="findAll" resultMap="BotPersonaResultMap">
+        SELECT <include refid="personaColumns"/>
+        FROM bot_personas p
+        ORDER BY p.is_default DESC, p.enabled DESC, p.id
+    </select>
+
+    <select id="findById" resultMap="BotPersonaResultMap">
+        SELECT <include refid="personaColumns"/>
+        FROM bot_personas p
+        WHERE p.id = #{id}
+    </select>
+
+    <select id="findDefault" resultMap="BotPersonaResultMap">
+        SELECT <include refid="personaColumns"/>
+        FROM bot_personas p
+        WHERE p.is_default = TRUE
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bot_personas (
+            name, description, character_prompt, style_prompt,
+            enabled, is_default, version, created_at, updated_at
+        ) VALUES (
+            #{name}, #{description}, #{characterPrompt}, #{stylePrompt},
+            #{enabled}, FALSE, #{version}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE bot_personas
+        SET name = #{name},
+            description = #{description},
+            character_prompt = #{characterPrompt},
+            style_prompt = #{stylePrompt},
+            enabled = #{enabled},
+            version = #{version},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM bot_personas
+        WHERE id = #{id}
+    </delete>
+
+    <update id="clearDefault">
+        UPDATE bot_personas
+        SET is_default = FALSE,
+            updated_at = now()
+        WHERE is_default = TRUE
+    </update>
+
+    <update id="setDefault">
+        UPDATE bot_personas
+        SET is_default = TRUE,
+            updated_at = now()
+        WHERE id = #{id}
+    </update>
+
+    <select id="countGroupBindings" resultType="int">
+        SELECT COUNT(*)
+        FROM bot_settings bs
+        CROSS JOIN LATERAL jsonb_array_elements(bs.group_reply_policies) policy
+        WHERE (policy ->> 'personaId') ~ '^[0-9]+$'
+          AND (policy ->> 'personaId')::bigint = #{id}
+    </select>
+</mapper>

@@ -1,6 +1,9 @@
 package com.monitor.platform.api.dto;
 
+import com.monitor.platform.bot.BotGroupReplyPolicy;
+
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -10,6 +13,7 @@ import java.util.Set;
  * @param allowedGroups   允许响应的群号（启用群）；为空表示不限制
  * @param allowedUsers    允许响应的私聊 QQ；为空表示不限制
  * @param platformGroups  指定群（平台功能/OpenAI 状态）；必须是启用群的子集；群内输出自动脱敏；为空表示任何群都不给平台功能
+ * @param groupPolicies   按群定制的回复策略；未配置的群沿用 requireMention
  * @param requireMention  群里是否必须 @机器人
  * @param commandPrefix   命令前缀
  * @param maxReplyLength  单条回复最大字符数
@@ -29,6 +33,7 @@ public record BotSettingsResponse(
         Set<String> allowedGroups,
         Set<String> allowedUsers,
         Set<String> platformGroups,
+        List<BotGroupReplyPolicy> groupPolicies,
         boolean requireMention,
         String commandPrefix,
         int maxReplyLength,
@@ -51,9 +56,22 @@ public record BotSettingsResponse(
                                boolean errorAlertEnabled, int errorAlertWindowMinutes, int errorAlertMinCount,
                                double errorAlertSpikeRatio, int errorAlertCooldownMinutes,
                                OffsetDateTime updatedAt) {
-        this(enabled, allowedGroups, allowedUsers, platformGroups, requireMention, commandPrefix,
+        this(enabled, allowedGroups, allowedUsers, platformGroups, List.of(), requireMention, commandPrefix,
                 maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
                 errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
                 "longanhuan_v3.1", "自然、友好、简洁", updatedAt);
+    }
+
+    /** 兼容旧调用方：没有按群策略。 */
+    public BotSettingsResponse(boolean enabled, Set<String> allowedGroups, Set<String> allowedUsers,
+                               Set<String> platformGroups, boolean requireMention, String commandPrefix,
+                               int maxReplyLength, int memoryWindow, boolean webSearchForNonAdmin,
+                               boolean errorAlertEnabled, int errorAlertWindowMinutes, int errorAlertMinCount,
+                               double errorAlertSpikeRatio, int errorAlertCooldownMinutes,
+                               String defaultVoice, String defaultVoiceStyle, OffsetDateTime updatedAt) {
+        this(enabled, allowedGroups, allowedUsers, platformGroups, List.of(), requireMention, commandPrefix,
+                maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
+                errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
+                defaultVoice, defaultVoiceStyle, updatedAt);
     }
 }

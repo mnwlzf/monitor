@@ -1,5 +1,6 @@
 package com.monitor.platform.bot;
 
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -10,12 +11,16 @@ import java.util.Set;
  * <p>{@code platformGroups} 是「指定群」——控制平台功能和 OpenAI 公开状态查询；
  * 群内可以正常查询，但最终输出会自动隐藏账号名称、上游平台名称/地址和邮箱。
  * 它是 {@code allowedGroups} 的子集，为空表示任何群都不给平台功能（fail-closed）。</p>
+ *
+ * <p>{@code groupPolicies} 按群覆盖「未 @机器人时是否回复」的策略；未配置的群沿用
+ * {@code requireMention}。明确 @机器人 始终会触发回复。</p>
  */
 public record BotSettings(
         boolean enabled,
         Set<String> allowedGroups,
         Set<String> allowedUsers,
         Set<String> platformGroups,
+        List<BotGroupReplyPolicy> groupPolicies,
         boolean requireMention,
         String commandPrefix,
         int maxReplyLength,
@@ -38,7 +43,7 @@ public record BotSettings(
         String defaultVoiceStyle
 ) {
 
-    /** 兼容旧测试/调用方：新增语音字段使用内置默认值。 */
+    /** 兼容旧测试/调用方：新增群策略与语音字段使用内置默认值。 */
     public BotSettings(boolean enabled,
                        Set<String> allowedGroups,
                        Set<String> allowedUsers,
@@ -53,10 +58,33 @@ public record BotSettings(
                        int errorAlertMinCount,
                        double errorAlertSpikeRatio,
                        int errorAlertCooldownMinutes) {
-        this(enabled, allowedGroups, allowedUsers, platformGroups, requireMention, commandPrefix,
-                maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
+        this(enabled, allowedGroups, allowedUsers, platformGroups, List.of(), requireMention,
+                commandPrefix, maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
                 errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
                 "longanhuan_v3.1", "自然、友好、简洁");
+    }
+
+    /** 兼容旧调用方：没有按群策略时使用空列表。 */
+    public BotSettings(boolean enabled,
+                       Set<String> allowedGroups,
+                       Set<String> allowedUsers,
+                       Set<String> platformGroups,
+                       boolean requireMention,
+                       String commandPrefix,
+                       int maxReplyLength,
+                       int memoryWindow,
+                       boolean webSearchForNonAdmin,
+                       boolean errorAlertEnabled,
+                       int errorAlertWindowMinutes,
+                       int errorAlertMinCount,
+                       double errorAlertSpikeRatio,
+                       int errorAlertCooldownMinutes,
+                       String defaultVoice,
+                       String defaultVoiceStyle) {
+        this(enabled, allowedGroups, allowedUsers, platformGroups, List.of(), requireMention,
+                commandPrefix, maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
+                errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
+                defaultVoice, defaultVoiceStyle);
     }
 
     public boolean isGroupAllowed(Long groupId) {
@@ -75,6 +103,39 @@ public record BotSettings(
     public boolean isPlatformGroup(Long groupId) {
         return platformGroups != null && groupId != null
                 && platformGroups.contains(String.valueOf(groupId));
+    }
+
+    /** 查找某个群的定制策略；没有单独配置时返回 {@code null}。 */
+    public BotGroupReplyPolicy groupPolicy(Long groupId) {
+        if (groupId == null || groupPolicies == null || groupPolicies.isEmpty()) {
+            return null;
+        }
+        String id = String.valueOf(groupId);
+        for (BotGroupReplyPolicy policy : groupPolicies) {
+            if (policy != null && id.equals(policy.groupId())) {
+                return policy;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 判断一条群消息是否应触发机器人。
+     *
+     * <p>明确 @机器人 永远触发；未 @时优先使用群定制策略，未配置则沿用全局
+     * {@code requireMention}。</p>
+     *
+     * @param randomValue [0, 1) 的随机数，仅随机策略使用
+     */
+    public boolean shouldRespondInGroup(Long groupId, boolean mentioned, String text, double randomValue) {
+        if (mentioned) {
+            return true;
+        }
+        BotGroupReplyPolicy policy = groupPolicy(groupId);
+        if (policy != null) {
+            return policy.shouldTrigger(text, randomValue);
+        }
+        return !requireMention;
     }
 
     private static boolean matches(Set<String> whitelist, Long id) {

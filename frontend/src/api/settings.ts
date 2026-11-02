@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotMessage, BotMessageArchiveStats, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
+import type { BotAdmin, BotForbiddenWord, BotGroupReplyPolicy, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotMessage, BotMessageArchiveStats, BotPersona, BotSettings, BotStatus, MailRecipient, MailScene, MailSettings, NapCatLogs, NapCatStatus, NotificationSettings, QqRecipient, QqTargetType } from '../types'
 
 /** 保存 SMTP 设置的表单载荷；password 留空表示保留已保存的密码。 */
 export interface MailSettingsInput {
@@ -121,6 +121,8 @@ export interface BotSettingsInput {
   allowedUsers: string[]
   /** 平台功能群（指定群），必须是 allowedGroups 的子集。 */
   platformGroups: string[]
+  /** 按群定制的回复策略；未配置的群沿用 requireMention。 */
+  groupPolicies: BotGroupReplyPolicy[]
   requireMention: boolean
   commandPrefix: string
   maxReplyLength: number
@@ -148,6 +150,46 @@ export async function saveBotSettings(input: BotSettingsInput): Promise<BotSetti
     method: 'PUT',
     body: JSON.stringify(input),
   })
+}
+
+/** 人设库表单载荷。 */
+export interface BotPersonaInput {
+  name: string
+  description: string
+  characterPrompt: string
+  stylePrompt: string
+  enabled: boolean
+}
+
+/** 读取机器人人设库。 */
+export async function listBotPersonas(): Promise<BotPersona[]> {
+  return apiRequest<BotPersona[]>('/api/v1/settings/bot/personas')
+}
+
+/** 新增人设。 */
+export async function createBotPersona(input: BotPersonaInput): Promise<BotPersona> {
+  return apiRequest<BotPersona>('/api/v1/settings/bot/personas', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+/** 更新人设；版本号会自动递增，并使该人设的旧会话记忆失效。 */
+export async function updateBotPersona(id: number, input: BotPersonaInput): Promise<BotPersona> {
+  return apiRequest<BotPersona>(`/api/v1/settings/bot/personas/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+/** 设为默认人设。 */
+export async function setDefaultBotPersona(id: number): Promise<void> {
+  await apiRequest<void>(`/api/v1/settings/bot/personas/${id}/default`, { method: 'PUT' })
+}
+
+/** 删除人设；默认人设或被群绑定的人设不能删除。 */
+export async function deleteBotPersona(id: number): Promise<void> {
+  await apiRequest<void>(`/api/v1/settings/bot/personas/${id}`, { method: 'DELETE' })
 }
 
 /** 读取机器人违禁词。 */

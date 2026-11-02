@@ -167,6 +167,52 @@ class BotSettingsServiceTest {
     }
 
     @Test
+    void shouldPersistPerGroupReplyPoliciesAndApplyAtRuntime() {
+        BotSettingsRepository repository = mock(BotSettingsRepository.class);
+        BotSettingsEntity entity = existing();
+        entity.setAllowedGroups("111,222,333");
+        when(repository.find()).thenReturn(entity);
+        BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
+
+        BotSettingsResponse saved = service.save(new BotSettingsRequest(
+                true,
+                List.of("111", "222", "333"),
+                List.of(),
+                List.of(),
+                List.of(
+                        new BotGroupReplyPolicy("111", 7L, BotGroupReplyStrategy.PROACTIVE, 10, List.of()),
+                        new BotGroupReplyPolicy("222", BotGroupReplyStrategy.MENTION, 10, List.of()),
+                        new BotGroupReplyPolicy("333", BotGroupReplyStrategy.KEYWORD, 10,
+                                List.of("API", "报错"))),
+                true, "/", 900, 10, false, false, 15, 5, 1.5, 30, null, null));
+
+        assertEquals(3, saved.groupPolicies().size());
+        assertEquals(7L, saved.groupPolicies().get(0).personaId());
+        assertTrue(service.current().shouldRespondInGroup(111L, false, "随便聊聊", 0.99));
+        assertFalse(service.current().shouldRespondInGroup(222L, false, "随便聊聊", 0.01));
+        assertTrue(service.current().shouldRespondInGroup(222L, true, "随便聊聊", 0.99));
+        assertTrue(service.current().shouldRespondInGroup(333L, false, "帮我看看 api 状态", 0.99));
+        assertFalse(service.current().shouldRespondInGroup(333L, false, "今天天气不错", 0.01));
+    }
+
+    @Test
+    void shouldRejectInvalidPerGroupReplyPolicies() {
+        BotSettingsRepository repository = mock(BotSettingsRepository.class);
+        when(repository.find()).thenReturn(existing());
+        BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
+
+        assertThrows(BusinessException.class, () -> service.save(new BotSettingsRequest(
+                true, List.of("111"), List.of(), List.of(),
+                List.of(new BotGroupReplyPolicy("999", BotGroupReplyStrategy.PROACTIVE, 10, List.of())),
+                true, "/", 900, 10, false, false, 15, 5, 1.5, 30, null, null)));
+
+        assertThrows(BusinessException.class, () -> service.save(new BotSettingsRequest(
+                true, List.of("111"), List.of(), List.of(),
+                List.of(new BotGroupReplyPolicy("111", BotGroupReplyStrategy.KEYWORD, 10, List.of())),
+                true, "/", 900, 10, false, false, 15, 5, 1.5, 30, null, null)));
+    }
+
+    @Test
     void shouldSeedFromEnvironmentWhenRowMissing() {
         BotSettingsRepository repository = mock(BotSettingsRepository.class);
         when(repository.find()).thenReturn(null);

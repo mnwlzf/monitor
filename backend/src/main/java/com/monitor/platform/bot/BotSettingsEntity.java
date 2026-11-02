@@ -15,6 +15,8 @@ public class BotSettingsEntity {
     private String allowedUsers;
     /** 指定群（平台功能/OpenAI 状态），逗号分隔；必须是 allowedGroups 的子集。 */
     private String platformGroups;
+    /** 按群定制的回复策略，JSONB 数组字符串。 */
+    private String groupReplyPolicies;
     private Boolean requireMention;
     private String commandPrefix;
     private Integer maxReplyLength;
@@ -43,6 +45,8 @@ public class BotSettingsEntity {
     public void setAllowedUsers(String allowedUsers) { this.allowedUsers = allowedUsers; }
     public String getPlatformGroups() { return platformGroups; }
     public void setPlatformGroups(String platformGroups) { this.platformGroups = platformGroups; }
+    public String getGroupReplyPolicies() { return groupReplyPolicies; }
+    public void setGroupReplyPolicies(String groupReplyPolicies) { this.groupReplyPolicies = groupReplyPolicies; }
     public Boolean getRequireMention() { return requireMention; }
     public void setRequireMention(Boolean requireMention) { this.requireMention = requireMention; }
     public String getCommandPrefix() { return commandPrefix; }

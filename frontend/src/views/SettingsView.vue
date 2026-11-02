@@ -450,6 +450,15 @@
         </div>
       </template>
 
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="bot-impact-alert"
+        title="三层配置互不越权：触发策略决定「是否回复」，人设决定「怎么说话」，发送者身份决定「能查什么」"
+        description="群人设不会增加平台数据权限，也不会改变工具挂载、数据脱敏、命令路由、违禁词过滤和回复长度。"
+      />
+
       <el-form label-width="150px" :disabled="!canWrite">
         <el-form-item label="启用">
           <el-switch v-model="botForm.enabled" />
@@ -510,7 +519,104 @@
 
         <el-form-item label="群里需 @机器人">
           <el-switch v-model="botForm.requireMention" />
-          <span class="admin-form-hint" style="margin-left: 10px">关掉后群里任意消息都会触发，容易刷屏</span>
+          <span class="admin-form-hint" style="margin-left: 10px">仅对未单独配置策略的群生效；关掉后这些群的任意消息都会触发</span>
+        </el-form-item>
+
+        <el-divider content-position="left">按群聊定制发信策略</el-divider>
+
+        <el-form-item label="群聊回复策略">
+          <div class="group-policy-editor">
+            <small class="admin-form-hint">
+              未配置的群沿用上方默认策略；@机器人 始终会触发回复。主动回复会处理群内每条消息，请谨慎开启
+            </small>
+            <div v-if="botForm.groupPolicies.length > 0" class="group-policy-columns">
+              <span>群号</span>
+              <span>触发策略（是否回复）</span>
+              <span>表达人设（怎么说话）</span>
+              <span>策略参数</span>
+              <span></span>
+            </div>
+            <div v-if="botForm.groupPolicies.length > 0" class="group-policy-list">
+              <div v-for="(policy, index) in botForm.groupPolicies" :key="index" class="group-policy-row">
+                <el-select
+                  v-model="policy.groupId"
+                  filterable
+                  :allow-create="botForm.allowedGroups.length === 0"
+                  default-first-option
+                  :reserve-keyword="false"
+                  placeholder="选择或输入群号"
+                  class="group-policy-group"
+                >
+                  <el-option v-for="group in botForm.allowedGroups" :key="group" :label="group" :value="group" />
+                </el-select>
+
+                <div class="group-policy-strategy">
+                  <el-select v-model="policy.strategy" @change="onGroupPolicyStrategyChange(policy)">
+                    <el-option
+                      v-for="option in groupReplyStrategyOptions"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value"
+                    />
+                  </el-select>
+                  <small>{{ groupStrategyHint(policy.strategy) }}</small>
+                </div>
+
+                <div class="group-policy-persona">
+                  <el-select
+                    :model-value="policy.personaId ?? 0"
+                    placeholder="选择人设"
+                    @update:model-value="setPolicyPersona(policy, $event)"
+                  >
+                    <el-option
+                      :value="0"
+                      :label="`跟随默认人设：${defaultPersona?.name ?? '内置默认人设'}`"
+                    />
+                    <el-option
+                      v-for="persona in enabledPersonas"
+                      :key="persona.id"
+                      :label="persona.name"
+                      :value="persona.id"
+                    />
+                  </el-select>
+                  <small>
+                    {{ policy.personaId == null ? '未单独绑定，默认人设变化时会跟随' : '只影响该群的自然语言表达' }}
+                  </small>
+                </div>
+
+                <div class="group-policy-extra">
+                  <template v-if="policy.strategy === 'RANDOM'">
+                    <el-input-number v-model="policy.randomPercent" :min="1" :max="100" :step="5" />
+                    <span class="admin-form-hint">%</span>
+                  </template>
+                  <el-select
+                    v-else-if="policy.strategy === 'KEYWORD'"
+                    v-model="policy.keywords"
+                    multiple
+                    filterable
+                    allow-create
+                    default-first-option
+                    :reserve-keyword="false"
+                    placeholder="输入关键词后回车，可多个"
+                    class="group-policy-keywords"
+                  >
+                    <el-option v-for="keyword in policy.keywords" :key="keyword" :label="keyword" :value="keyword" />
+                  </el-select>
+                  <span v-else class="admin-form-hint">{{ policy.strategy === 'PROACTIVE' ? '每条消息都会回复' : '只响应 @机器人' }}</span>
+                </div>
+
+                <el-button type="danger" link @click="removeGroupPolicy(index)">删除</el-button>
+
+                <div class="group-policy-impact">
+                  <span>触发：{{ groupStrategyHint(policy.strategy) }}</span>
+                  <span>表达：{{ personaName(policy.personaId) }}</span>
+                  <span>权限：仍按发送者身份判断，此配置不会提权</span>
+                </div>
+              </div>
+            </div>
+            <el-empty v-else description="暂无单独配置，所有群沿用默认策略" :image-size="56" />
+            <el-button type="primary" plain @click="addGroupPolicy">添加群策略</el-button>
+          </div>
         </el-form-item>
 
         <el-form-item label="命令前缀">
@@ -599,6 +705,125 @@
         </el-form-item>
       </el-form>
     </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane label="人设库" name="personas" lazy>
+    <el-card shadow="never" class="admin-card" v-loading="personaLoading">
+      <template #header>
+        <div class="admin-card-header">
+          <div>
+            <h3>机器人人设库</h3>
+            <p>人设可被多个群复用；只改变自然语言回复的称呼、性格和语气，不改变任何权限</p>
+          </div>
+          <el-button type="primary" :disabled="!canWrite" @click="openCreatePersona">新增人设</el-button>
+        </div>
+      </template>
+
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        class="persona-impact-alert"
+        title="人设不是权限配置"
+        description="无论选择哪个人设，管理员仍只能按管理员权限查询、普通用户仍只能查本人数据、陌生人仍拿不到平台工具。修改人设会递增版本，并自动隔离旧版本的会话记忆。"
+      />
+
+      <el-table :data="personas" size="small" class="persona-table">
+        <el-table-column label="人设" min-width="170">
+          <template #default="{ row }">
+            <div class="persona-name-cell">
+              <strong>{{ row.name }}</strong>
+              <el-tag v-if="row.defaultPersona" size="small" type="success">默认</el-tag>
+              <el-tag v-if="!row.enabled" size="small" type="info">已禁用</el-tag>
+            </div>
+            <small>{{ row.description || '未填写说明' }}</small>
+          </template>
+        </el-table-column>
+        <el-table-column label="角色设定（影响身份/性格）" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.characterPrompt }}</template>
+        </el-table-column>
+        <el-table-column label="表达风格（影响语气）" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.stylePrompt || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="影响范围" width="110" align="center">
+          <template #default="{ row }">{{ row.boundGroupCount }} 个群</template>
+        </el-table-column>
+        <el-table-column label="版本" width="70" align="center" prop="version" />
+        <el-table-column label="操作" width="210" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" :disabled="!canWrite" @click="openEditPersona(row)">编辑</el-button>
+            <el-button
+              link
+              type="success"
+              :disabled="!canWrite || row.defaultPersona || !row.enabled"
+              @click="makeDefaultPersona(row)"
+            >设为默认</el-button>
+            <el-button
+              link
+              type="danger"
+              :disabled="!canWrite || row.defaultPersona"
+              @click="removePersona(row)"
+            >删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-dialog
+      v-model="personaDialogVisible"
+      :title="personaEditingId == null ? '新增人设' : '编辑人设'"
+      width="680px"
+      destroy-on-close
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="persona-dialog-alert"
+        title="角色设定和表达风格只影响说话方式"
+        description="不要在这里写权限规则、工具调用规则或数据范围；这些由系统固定控制。"
+      />
+      <el-form label-width="110px" :disabled="!canWrite">
+        <el-form-item label="人设名称" required>
+          <el-input v-model="personaForm.name" maxlength="80" show-word-limit placeholder="例如：温柔客服、二次元助手" />
+        </el-form-item>
+        <el-form-item label="用途说明">
+          <el-input v-model="personaForm.description" maxlength="300" show-word-limit placeholder="例如：用于售后群，语气友好但不要卖萌" />
+        </el-form-item>
+        <el-form-item label="角色设定" required>
+          <el-input
+            v-model="personaForm.characterPrompt"
+            type="textarea"
+            :rows="5"
+            maxlength="8000"
+            show-word-limit
+            placeholder="描述机器人是谁、性格如何、适合什么场景。不要写权限、工具或数据范围。"
+          />
+        </el-form-item>
+        <el-form-item label="表达风格">
+          <el-input
+            v-model="personaForm.stylePrompt"
+            type="textarea"
+            :rows="4"
+            maxlength="2000"
+            show-word-limit
+            placeholder="描述称呼、语气、句子长度、是否使用 emoji 等。"
+          />
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="personaForm.enabled" :disabled="editingPersona?.defaultPersona" />
+          <span class="admin-form-hint" style="margin-left: 10px">
+            {{ editingPersona?.defaultPersona ? '默认人设不能禁用；请先切换默认人设' : '禁用后不能再绑定到群，已有绑定会回退默认人设' }}
+          </span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="personaDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="personaSaving" :disabled="!canWrite" @click="savePersonaForm">
+          保存人设
+        </el-button>
+      </template>
+    </el-dialog>
       </el-tab-pane>
 
       <el-tab-pane label="违禁词" name="forbidden" lazy>
@@ -749,8 +974,10 @@ import QqRecipientEditor from '../components/QqRecipientEditor.vue'
 import {
   addBotAdmin,
   addBotForbiddenWord,
+  createBotPersona,
   deleteBotAdmin,
   deleteBotForbiddenWord,
+  deleteBotPersona,
   getBotLotterySettings,
   getBotIdentity,
   getBotSettings,
@@ -758,19 +985,23 @@ import {
   getNotificationSettings,
   listBotForbiddenWords,
   listBotLotteryDraws,
+  listBotPersonas,
   saveBotLotterySettings,
   saveBotSettings,
   saveMailSettings,
   saveNotificationSettings,
   sendTestMail,
+  setDefaultBotPersona,
   syncBotIdentity,
   testMailConnection,
+  updateBotPersona,
+  type BotPersonaInput,
   type BotLotterySettingsInput,
   type BotSettingsInput,
   type MailSettingsInput,
   type NotificationSettingsInput,
 } from '../api/settings'
-import type { BotAdmin, BotForbiddenWord, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotSettings } from '../types'
+import type { BotAdmin, BotForbiddenWord, BotGroupReplyPolicy, BotGroupReplyStrategy, BotIdentityOverview, BotLotteryDraw, BotLotterySettings, BotPersona, BotSettings } from '../types'
 
 const props = defineProps<{ canWrite?: boolean }>()
 
@@ -1000,6 +1231,23 @@ loongstella_v3.1|loongstella_v3.1
 const botLoading = ref(false)
 const botSaving = ref(false)
 const botUpdatedAt = ref('')
+const personaLoading = ref(false)
+const personaSaving = ref(false)
+const personas = ref<BotPersona[]>([])
+const personaDialogVisible = ref(false)
+const personaEditingId = ref<number | null>(null)
+const personaForm = reactive<BotPersonaInput>({
+  name: '',
+  description: '',
+  characterPrompt: '',
+  stylePrompt: '',
+  enabled: true,
+})
+const defaultPersona = computed(() => personas.value.find((persona) => persona.defaultPersona) ?? null)
+const enabledPersonas = computed(() => personas.value.filter((persona) => persona.enabled))
+const editingPersona = computed(() =>
+  personas.value.find((persona) => persona.id === personaEditingId.value) ?? null,
+)
 const forbiddenLoading = ref(false)
 const forbiddenAdding = ref(false)
 const forbiddenWords = ref<BotForbiddenWord[]>([])
@@ -1022,6 +1270,7 @@ const botForm = reactive<BotSettingsInput>({
   allowedGroups: [],
   allowedUsers: [],
   platformGroups: [],
+  groupPolicies: [],
   requireMention: true,
   commandPrefix: '/',
   maxReplyLength: 900,
@@ -1036,12 +1285,59 @@ const botForm = reactive<BotSettingsInput>({
   defaultVoiceStyle: '自然、友好、简洁',
 })
 
+const groupReplyStrategyOptions: Array<{
+  value: BotGroupReplyStrategy
+  label: string
+  hint: string
+}> = [
+  { value: 'MENTION', label: '仅 @ 回复', hint: '群里只有 @机器人 时才响应' },
+  { value: 'PROACTIVE', label: '主动回复', hint: '群里的每条消息都会触发回复' },
+  { value: 'RANDOM', label: '随机回复', hint: '按设定概率随机回复群消息' },
+  { value: 'KEYWORD', label: '关键词唤醒', hint: '消息包含任一关键词时回复' },
+]
+
+function groupStrategyHint(strategy: BotGroupReplyStrategy) {
+  return groupReplyStrategyOptions.find((option) => option.value === strategy)?.hint ?? ''
+}
+
+function addGroupPolicy() {
+  botForm.groupPolicies.push({
+    groupId: '',
+    personaId: null,
+    strategy: 'MENTION',
+    randomPercent: 10,
+    keywords: [],
+  })
+}
+
+function removeGroupPolicy(index: number) {
+  botForm.groupPolicies.splice(index, 1)
+}
+
+function setPolicyPersona(policy: BotGroupReplyPolicy, value: unknown) {
+  const id = Number(value)
+  policy.personaId = Number.isFinite(id) && id > 0 ? id : null
+}
+
+function onGroupPolicyStrategyChange(policy: BotGroupReplyPolicy) {
+  if (policy.strategy === 'RANDOM' && (!policy.randomPercent || policy.randomPercent < 1)) {
+    policy.randomPercent = 10
+  }
+}
+
 function applyBotSettings(settings: BotSettings) {
   Object.assign(botForm, {
     enabled: settings.enabled,
     allowedGroups: [...(settings.allowedGroups ?? [])],
     allowedUsers: [...(settings.allowedUsers ?? [])],
     platformGroups: [...(settings.platformGroups ?? [])],
+    groupPolicies: (settings.groupPolicies ?? []).map((policy) => ({
+      groupId: policy.groupId,
+      personaId: policy.personaId ?? null,
+      strategy: policy.strategy,
+      randomPercent: policy.randomPercent || 10,
+      keywords: [...(policy.keywords ?? [])],
+    })),
     requireMention: settings.requireMention,
     commandPrefix: settings.commandPrefix || '/',
     maxReplyLength: settings.maxReplyLength || 900,
@@ -1069,6 +1365,119 @@ async function loadBot() {
   }
 }
 
+async function loadPersonas() {
+  personaLoading.value = true
+  try {
+    personas.value = await listBotPersonas()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载人设库失败')
+  } finally {
+    personaLoading.value = false
+  }
+}
+
+function personaName(personaId: number | null | undefined) {
+  if (personaId == null) return defaultPersona.value?.name ?? '内置默认人设'
+  return personas.value.find((persona) => persona.id === personaId)?.name ?? `已失效人设 #${personaId}`
+}
+
+function resetPersonaForm() {
+  personaEditingId.value = null
+  Object.assign(personaForm, {
+    name: '',
+    description: '',
+    characterPrompt: '',
+    stylePrompt: '',
+    enabled: true,
+  })
+}
+
+function openCreatePersona() {
+  resetPersonaForm()
+  personaDialogVisible.value = true
+}
+
+function openEditPersona(row: unknown) {
+  const persona = row as BotPersona
+  personaEditingId.value = persona.id
+  Object.assign(personaForm, {
+    name: persona.name,
+    description: persona.description ?? '',
+    characterPrompt: persona.characterPrompt,
+    stylePrompt: persona.stylePrompt ?? '',
+    enabled: persona.enabled,
+  })
+  personaDialogVisible.value = true
+}
+
+async function savePersonaForm() {
+  if (!personaForm.name.trim()) {
+    ElMessage.warning('请填写人设名称')
+    return
+  }
+  if (!personaForm.characterPrompt.trim()) {
+    ElMessage.warning('请填写角色设定')
+    return
+  }
+  personaSaving.value = true
+  try {
+    const payload = {
+      ...personaForm,
+      name: personaForm.name.trim(),
+      description: personaForm.description.trim(),
+      characterPrompt: personaForm.characterPrompt.trim(),
+      stylePrompt: personaForm.stylePrompt.trim(),
+    }
+    if (personaEditingId.value == null) {
+      await createBotPersona(payload)
+      ElMessage.success('人设已创建')
+    } else {
+      await updateBotPersona(personaEditingId.value, payload)
+      ElMessage.success('人设已更新；新版本会自动隔离旧会话记忆')
+    }
+    personaDialogVisible.value = false
+    await Promise.all([loadPersonas(), loadBot()])
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '保存人设失败')
+  } finally {
+    personaSaving.value = false
+  }
+}
+
+async function makeDefaultPersona(row: unknown) {
+  const persona = row as BotPersona
+  try {
+    await ElMessageBox.confirm(
+      `将「${persona.name}」设为默认人设？未绑定人设的群和好友私聊会立即使用它。`,
+      '切换默认人设',
+      { type: 'warning' },
+    )
+    await setDefaultBotPersona(persona.id)
+    await Promise.all([loadPersonas(), loadBot()])
+    ElMessage.success('默认人设已切换，立即生效')
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error instanceof Error ? error.message : '切换默认人设失败')
+  }
+}
+
+async function removePersona(row: unknown) {
+  const persona = row as BotPersona
+  try {
+    await ElMessageBox.confirm(
+      `确定删除人设「${persona.name}」？默认人设或被群绑定的人设不能删除。`,
+      '删除人设',
+      { type: 'warning' },
+    )
+    await deleteBotPersona(persona.id)
+    await loadPersonas()
+    ElMessage.success('人设已删除')
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error instanceof Error ? error.message : '删除人设失败')
+  }
+}
+
 /** 「指定群」必须是「启用群」的子集；启用群留空（不限制）时无需校验。 */
 function validateBotPlatformGroups(): boolean {
   const allowed = botForm.allowedGroups ?? []
@@ -1081,11 +1490,51 @@ function validateBotPlatformGroups(): boolean {
   return true
 }
 
+/** 校验按群策略：群号不能为空/重复，关键词和随机概率必须可用。 */
+function validateBotGroupPolicies(): boolean {
+  const allowed = botForm.allowedGroups ?? []
+  const seen = new Set<string>()
+  for (const policy of botForm.groupPolicies ?? []) {
+    const groupId = policy.groupId.trim()
+    if (!groupId) {
+      ElMessage.error('请为每条群聊策略填写群号')
+      return false
+    }
+    if (seen.has(groupId)) {
+      ElMessage.error(`同一个群只能配置一条回复策略：${groupId}`)
+      return false
+    }
+    seen.add(groupId)
+    if (allowed.length > 0 && !allowed.includes(groupId)) {
+      ElMessage.error(`群聊策略必须是启用群的子集，以下群号不在启用群里：${groupId}`)
+      return false
+    }
+    if (policy.strategy === 'RANDOM' && (policy.randomPercent < 1 || policy.randomPercent > 100)) {
+      ElMessage.error(`随机回复概率需在 1-100 之间：${groupId}`)
+      return false
+    }
+    if (policy.strategy === 'KEYWORD' && policy.keywords.every((keyword) => !keyword.trim())) {
+      ElMessage.error(`关键词唤醒策略至少需要一个关键词：${groupId}`)
+      return false
+    }
+    if (policy.personaId != null && !enabledPersonas.value.some((persona) => persona.id === policy.personaId)) {
+      ElMessage.error(`群 ${groupId} 绑定的人设已禁用或不存在，请重新选择`)
+      return false
+    }
+  }
+  return true
+}
+
 async function saveBotSettingsForm() {
-  if (!validateBotPlatformGroups()) return
+  if (!validateBotPlatformGroups() || !validateBotGroupPolicies()) return
   botSaving.value = true
   try {
-    applyBotSettings(await saveBotSettings({ ...botForm }))
+    const groupPolicies = botForm.groupPolicies.map((policy) => ({
+      ...policy,
+      groupId: policy.groupId.trim(),
+      keywords: policy.keywords.map((keyword) => keyword.trim()).filter(Boolean),
+    }))
+    applyBotSettings(await saveBotSettings({ ...botForm, groupPolicies }))
     ElMessage.success('机器人设置已保存，立即生效')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存失败')
@@ -1352,6 +1801,7 @@ onMounted(() => {
   load()
   loadNotification()
   loadBot()
+  loadPersonas()
   loadForbiddenWords()
   loadLottery()
   loadIdentity()
@@ -1553,6 +2003,134 @@ onMounted(() => {
 @media (max-width: 640px) {
   .lottery-preview {
     grid-template-columns: 1fr;
+  }
+}
+
+.group-policy-editor {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.group-policy-list {
+  display: grid;
+  gap: 10px;
+}
+
+.group-policy-columns {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(150px, 190px) minmax(150px, 200px) minmax(220px, 1fr) auto;
+  gap: 10px;
+  padding: 0 12px;
+  color: #7b8b87;
+  font-size: 11px;
+}
+
+.group-policy-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(150px, 190px) minmax(150px, 200px) minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid #e3ebe8;
+  border-radius: 10px;
+  background: #fbfdfc;
+}
+
+.group-policy-group,
+.group-policy-strategy,
+.group-policy-persona {
+  width: 100%;
+}
+
+.group-policy-strategy,
+.group-policy-persona {
+  display: grid;
+  gap: 4px;
+}
+
+.group-policy-strategy small,
+.group-policy-persona small {
+  color: #7b8b87;
+  font-size: 11px;
+}
+
+.group-policy-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.group-policy-keywords {
+  flex: 1;
+  min-width: 180px;
+}
+
+.group-policy-impact {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding-top: 8px;
+  border-top: 1px dashed #dbe6e2;
+  color: #60716c;
+  font-size: 12px;
+}
+
+.bot-impact-alert,
+.persona-impact-alert {
+  margin-bottom: 16px;
+}
+
+.persona-dialog-alert {
+  margin-bottom: 16px;
+}
+
+.persona-table {
+  width: 100%;
+}
+
+.persona-name-cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.persona-name-cell + small {
+  color: #7b8b87;
+}
+
+@media (max-width: 900px) {
+  .group-policy-columns {
+    display: none;
+  }
+
+  .group-policy-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .group-policy-extra {
+    grid-column: 1 / -1;
+  }
+
+  .group-policy-persona {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .group-policy-row {
+    grid-template-columns: 1fr;
+  }
+
+  .group-policy-extra {
+    grid-column: auto;
+  }
+
+  .group-policy-persona {
+    grid-column: auto;
   }
 }
 

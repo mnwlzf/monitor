@@ -1,5 +1,7 @@
 package com.monitor.platform.api.dto;
 
+import com.monitor.platform.bot.BotGroupReplyPolicy;
+
 import java.util.List;
 
 /**
@@ -10,12 +12,16 @@ import java.util.List;
  *
  * <p>{@code platformGroups} 是「指定群（平台功能/OpenAI 状态）」——必须是 {@code allowedGroups} 的子集，
  * 超出子集范围会被拒绝保存。</p>
+ *
+ * <p>{@code groupPolicies} 按群覆盖未 @ 时的回复策略；未配置的群沿用 {@code requireMention}。</p>
  */
 public record BotSettingsRequest(
         boolean enabled,
         List<String> allowedGroups,
         List<String> allowedUsers,
         List<String> platformGroups,
+        /** 按群定制的回复策略；空表示所有群沿用全局 requireMention。 */
+        List<BotGroupReplyPolicy> groupPolicies,
         Boolean requireMention,
         String commandPrefix,
         Integer maxReplyLength,
@@ -45,9 +51,23 @@ public record BotSettingsRequest(
                               Boolean errorAlertEnabled, Integer errorAlertWindowMinutes,
                               Integer errorAlertMinCount, Double errorAlertSpikeRatio,
                               Integer errorAlertCooldownMinutes) {
-        this(enabled, allowedGroups, allowedUsers, platformGroups, requireMention, commandPrefix,
+        this(enabled, allowedGroups, allowedUsers, platformGroups, null, requireMention, commandPrefix,
                 maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
                 errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
                 null, null);
+    }
+
+    /** 兼容旧调用方：没有按群策略。 */
+    public BotSettingsRequest(boolean enabled, List<String> allowedGroups, List<String> allowedUsers,
+                              List<String> platformGroups, Boolean requireMention, String commandPrefix,
+                              Integer maxReplyLength, Integer memoryWindow, Boolean webSearchForNonAdmin,
+                              Boolean errorAlertEnabled, Integer errorAlertWindowMinutes,
+                              Integer errorAlertMinCount, Double errorAlertSpikeRatio,
+                              Integer errorAlertCooldownMinutes, String defaultVoice,
+                              String defaultVoiceStyle) {
+        this(enabled, allowedGroups, allowedUsers, platformGroups, null, requireMention, commandPrefix,
+                maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
+                errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
+                defaultVoice, defaultVoiceStyle);
     }
 }

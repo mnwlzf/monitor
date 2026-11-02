@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -114,6 +115,7 @@ public class BotMessageService {
     private final BotVisionProperties visionProperties;
     private final BotSpeechService speechService;
     private final BotIdentityResolver identityResolver;
+    private final BotPersonaService personaService;
     private final BotReportRenderer reportRenderer;
     private final BotChatClientFactory chatClients;
     private final BotCommandRouter commandRouter;
@@ -149,6 +151,7 @@ public class BotMessageService {
                              BotVisionProperties visionProperties,
                              BotSpeechService speechService,
                              BotIdentityResolver identityResolver,
+                             BotPersonaService personaService,
                              BotReportRenderer reportRenderer,
                              BotChatClientFactory chatClients,
                              BotCommandRouter commandRouter,
@@ -175,6 +178,7 @@ public class BotMessageService {
         this.visionProperties = visionProperties;
         this.speechService = speechService;
         this.identityResolver = identityResolver;
+        this.personaService = personaService;
         this.reportRenderer = reportRenderer;
         this.chatClients = chatClients;
         this.commandRouter = commandRouter;
@@ -224,10 +228,18 @@ public class BotMessageService {
             runtimeStatus.dropped(channel, event.groupId(), event.userId(), "不在白名单（群号 / QQ）");
             return;
         }
-        if (group && settings.requireMention() && !parser.mentioned(event) && !adminForbiddenWordCommand) {
-            // 刻意不计入「未回复」：这条消息本来就不需要机器人回，
-            // 计进去会让统计被正常群聊刷满，反而看不出真正被拦下的消息
-            return;
+        if (group && !adminForbiddenWordCommand) {
+            boolean mentioned = parser.mentioned(event);
+            double randomValue = ThreadLocalRandom.current().nextDouble();
+            if (!settings.shouldRespondInGroup(event.groupId(), mentioned, text, randomValue)) {
+                BotGroupReplyPolicy policy = settings.groupPolicy(event.groupId());
+                // 刻意不计入「未回复」：普通群聊和随机/关键词策略未命中都是预期行为，
+                // 计进去会让统计被正常群聊刷满，反而看不出真正被拦下的消息。
+                log.debug("群聊策略未命中，忽略消息: group={}, strategy={}, mentioned={}",
+                        event.groupId(), policy == null ? "DEFAULT" : policy.strategy(),
+                        mentioned);
+                return;
+            }
         }
 
         // 到这里才说明机器人被真正触发。只有已触发消息才需要解析语音和引用内容，
@@ -281,6 +293,7 @@ public class BotMessageService {
         executor.submit(() -> {
             try {
                 BotIdentity identity = identityResolver.resolve(event.userId());
+                BotPersonaSnapshot persona = personaFor(event, channel, settings);
                 Long contextGroup = channel.hasGroupContext() ? event.groupId() : null;
                 boolean platformFeature =
                         BotAccessPolicy.platformFeatureAllowed(identity, channel, contextGroup, settings);
@@ -296,7 +309,7 @@ public class BotMessageService {
                 if (hasVoice) {
                     if (!speechService.transcriptionAvailable()) {
                         if (text.isBlank()) {
-                            sendVoiceFailure(event, group, turnId, identity, platformFeature, text,
+                            sendVoiceFailure(event, group, turnId, identity, persona, text,
                                     ownImageRefs.size(), 0, quotedImageRefs.size(), 0,
                                     "语音识别还没有启用，请先发文字消息。");
                             return;
@@ -306,7 +319,7 @@ public class BotMessageService {
                         String transcript = speechService.transcribe(voiceInput).orElse("");
                         if (transcript.isBlank()) {
                             if (text.isBlank()) {
-                                sendVoiceFailure(event, group, turnId, identity, platformFeature, text,
+                                sendVoiceFailure(event, group, turnId, identity, persona, text,
                                         ownImageRefs.size(), 0, quotedImageRefs.size(), 0,
                                         "这条语音没听清，麻烦再发一次，或者直接发文字。");
                                 return;
@@ -342,7 +355,7 @@ public class BotMessageService {
                 BotReport report;
                 try {
                     report = answer(event, requestText, quoted, !quotedImages.isEmpty(), settings, identity,
-                            platformFeature, openAiStatusAllowed, channel, images, generated, voiceReply);
+                            persona, platformFeature, openAiStatusAllowed, channel, images, generated, voiceReply);
                 } catch (Exception ex) {
                     log.warn("处理 QQ 消息失败: user={}, platformUser={}, reason={}",
                             event.userId(), identity.platformUser(), SecretMasker.safeMessage(ex));
@@ -370,7 +383,7 @@ public class BotMessageService {
                 runtimeStatus.finishTurn(turnId, outcome.content());
                 // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
                 archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
-                        personaOf(identity, platformFeature).name(), correlationId);
+                        persona.archiveLabel(), correlationId);
             } catch (Exception uncaught) {
                 // submit() 返回的 Future 没人接收，任务里未捕获的异常会被静默吞掉：
                 // 没有日志、没有回复、连存档都没有 —— 线上表现就是「调用失败但用户什么都没收到」。
@@ -451,6 +464,7 @@ public class BotMessageService {
 
     private BotReport answer(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
                              boolean quotedHasImages, BotSettings settings, BotIdentity identity,
+                             BotPersonaSnapshot persona,
                              boolean platformFeature, boolean openAiStatusAllowed, BotChannel channel,
                              List<BotImageFetcher.FetchedImage> images, GeneratedImages generated,
                              VoiceReplyIntent voiceReply) {
@@ -518,7 +532,7 @@ public class BotMessageService {
                     ? text(lotteryService.draw(event.userId()))
                     : text(BotCommandRouter.UNKNOWN_COMMAND_TEXT);
         }
-        return askModel(event, text, quoted, quotedHasImages, settings, identity, platformFeature,
+        return askModel(event, text, quoted, quotedHasImages, settings, identity, persona, platformFeature,
                 openAiStatusAllowed, channel, images, generated, voiceReply);
     }
 
@@ -545,11 +559,12 @@ public class BotMessageService {
 
     private BotReport askModel(OneBotEvent event, String text, BotMessageParser.QuotedMessage quoted,
                                boolean quotedHasImages, BotSettings settings, BotIdentity identity,
+                               BotPersonaSnapshot persona,
                                boolean platformFeature, boolean openAiStatusAllowed, BotChannel channel,
                                List<BotImageFetcher.FetchedImage> images, GeneratedImages generated,
                                VoiceReplyIntent voiceReply) {
-        BotChatClientFactory.Persona persona = personaOf(identity, platformFeature);
-        ChatClient chatClient = chatClients.get(persona, settings, identity.admin());
+        BotChatClientFactory.CapabilityProfile capability = capabilityOf(identity, platformFeature);
+        ChatClient chatClient = chatClients.get(capability, persona, settings, identity.admin());
         if (chatClient == null) {
             String message = images.isEmpty()
                     ? "自然语言问答未启用（需要在配置里打开大模型）。当前可用命令：\n"
@@ -572,12 +587,12 @@ public class BotMessageService {
         String answer;
         try {
             answer = callChat(chatClient, event, text, finalPromptText, images, generated,
-                    identity, platformFeature, openAiStatusAllowed, channel, persona);
+                    identity, platformFeature, openAiStatusAllowed, channel, capability, persona);
         } catch (RuntimeException primaryError) {
             if (!chatClients.shouldFallback(primaryError)) {
                 throw primaryError;
             }
-            ChatClient fallbackClient = chatClients.getFallback(persona, settings, identity.admin());
+            ChatClient fallbackClient = chatClients.getFallback(capability, persona, settings, identity.admin());
             if (fallbackClient == null) {
                 throw primaryError;
             }
@@ -585,7 +600,7 @@ public class BotMessageService {
                     event.userId(), SecretMasker.safeMessage(primaryError));
             try {
                 answer = callChat(fallbackClient, event, text, finalPromptText, images, generated,
-                        identity, platformFeature, openAiStatusAllowed, channel, persona);
+                        identity, platformFeature, openAiStatusAllowed, channel, capability, persona);
             } catch (RuntimeException fallbackError) {
                 fallbackError.addSuppressed(primaryError);
                 throw fallbackError;
@@ -609,7 +624,8 @@ public class BotMessageService {
     private String callChat(ChatClient chatClient, OneBotEvent event, String text, String promptText,
                             List<BotImageFetcher.FetchedImage> images, GeneratedImages generated,
                             BotIdentity identity, boolean platformFeature, boolean openAiStatusAllowed,
-                            BotChannel channel, BotChatClientFactory.Persona persona) {
+                            BotChannel channel, BotChatClientFactory.CapabilityProfile capability,
+                            BotPersonaSnapshot persona) {
         ChatClient.ChatClientRequestSpec request = chatClient.prompt()
                 .user(spec -> {
                     spec.text(promptText);
@@ -653,7 +669,7 @@ public class BotMessageService {
                 event.userId() == null ? "" : event.userId()));
         ChatClient.ChatClientRequestSpec finalRequest = request
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID,
-                        conversationId(event, persona, channel)));
+                        conversationId(event, capability, persona, channel)));
         try {
             return finalRequest.call().content();
         } catch (RuntimeException ex) {
@@ -691,11 +707,32 @@ public class BotMessageService {
         return new BotReport(title, blocks, heatmap.notes());
     }
 
-    private BotChatClientFactory.Persona personaOf(BotIdentity identity, boolean platformFeature) {
+    private BotChatClientFactory.CapabilityProfile capabilityOf(BotIdentity identity, boolean platformFeature) {
         if (!platformFeature) {
-            return BotChatClientFactory.Persona.CHAT;
+            return BotChatClientFactory.CapabilityProfile.CHAT;
         }
-        return identity.admin() ? BotChatClientFactory.Persona.MONITOR_ADMIN : BotChatClientFactory.Persona.MONITOR_USER;
+        return identity.admin()
+                ? BotChatClientFactory.CapabilityProfile.MONITOR_ADMIN
+                : BotChatClientFactory.CapabilityProfile.MONITOR_USER;
+    }
+
+    /**
+     * 群聊/群临时会话按群绑定解析人设；好友私聊使用默认人设。
+     *
+     * <p>人设只影响表达，不参与 {@link BotAccessPolicy} 的权限判断。</p>
+     */
+    private BotPersonaSnapshot personaFor(OneBotEvent event, BotChannel channel, BotSettings settings) {
+        if (!channel.hasGroupContext()) {
+            return fallbackPersona(personaService == null ? null : personaService.defaultPersona());
+        }
+        BotGroupReplyPolicy policy = settings.groupPolicy(event.groupId());
+        BotPersonaSnapshot persona = personaService == null
+                ? null : personaService.resolve(policy == null ? null : policy.personaId());
+        return fallbackPersona(persona);
+    }
+
+    private static BotPersonaSnapshot fallbackPersona(BotPersonaSnapshot persona) {
+        return persona == null ? BotPersonaSnapshot.BUILTIN : persona;
     }
 
     /**
@@ -711,9 +748,10 @@ public class BotMessageService {
      * <p>代价：群里不再有跨用户的共享上下文（「他刚才说的那个」这类指代会失效）。
      * 要恢复共享又不串人，得让每一轮都带上说话人标签，那是另一套记忆实现。</p>
      */
-    private String conversationId(OneBotEvent event, BotChatClientFactory.Persona persona, BotChannel channel) {
-        return persona.name().toLowerCase(Locale.ROOT) + "-"
-                + memoryScope(channel, event.groupId(), event.userId());
+    private String conversationId(OneBotEvent event, BotChatClientFactory.CapabilityProfile capability,
+                                  BotPersonaSnapshot persona, BotChannel channel) {
+        return capability.name().toLowerCase(Locale.ROOT) + "-persona-" + persona.id() + "-v" + persona.version()
+                + "-" + memoryScope(channel, event.groupId(), event.userId());
     }
 
     /**
@@ -804,7 +842,7 @@ public class BotMessageService {
 
     /** 语音识别不可用或没听清时，仍然给用户一个明确回复并完成存档。 */
     private void sendVoiceFailure(OneBotEvent event, boolean group, String turnId, BotIdentity identity,
-                                  boolean platformFeature, String text, int ownTotal, int ownFetched,
+                                  BotPersonaSnapshot persona, String text, int ownTotal, int ownFetched,
                                   int quotedTotal, int quotedFetched, String reply) {
         String correlationId = archive.recordInbound(event,
                 describeIncoming(text, ownTotal, ownFetched, quotedTotal, quotedFetched, true),
@@ -813,7 +851,7 @@ public class BotMessageService {
         runtimeStatus.replied();
         runtimeStatus.finishTurn(turnId, reply);
         archive.recordOutbound(event, reply, BotMessageArchiveService.KIND_TEXT, identity,
-                personaOf(identity, platformFeature).name(), correlationId);
+                persona.archiveLabel(), correlationId);
     }
 
     /** 合并同一条消息里的文字与语音转写结果。 */

@@ -8,6 +8,8 @@
         <result column="allowed_groups" property="allowedGroups"/>
         <result column="allowed_users" property="allowedUsers"/>
         <result column="platform_groups" property="platformGroups"/>
+        <result column="group_reply_policies" property="groupReplyPolicies"
+                typeHandler="com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler"/>
         <result column="require_mention" property="requireMention"/>
         <result column="command_prefix" property="commandPrefix"/>
         <result column="max_reply_length" property="maxReplyLength"/>
@@ -24,7 +26,7 @@
     </resultMap>
 
     <select id="selectSettings" resultMap="BotSettingsResultMap">
-        SELECT id, enabled, allowed_groups, allowed_users, platform_groups, require_mention,
+        SELECT id, enabled, allowed_groups, allowed_users, platform_groups, group_reply_policies, require_mention,
                command_prefix, max_reply_length, memory_window, web_search_for_non_admin,
                error_alert_enabled, error_alert_window_minutes, error_alert_min_count,
                error_alert_spike_ratio, error_alert_cooldown_minutes, default_voice,
@@ -35,13 +37,15 @@
 
     <insert id="upsertSettings">
         INSERT INTO bot_settings (
-            id, enabled, allowed_groups, allowed_users, platform_groups, require_mention,
+            id, enabled, allowed_groups, allowed_users, platform_groups, group_reply_policies, require_mention,
             command_prefix, max_reply_length, memory_window, web_search_for_non_admin,
             error_alert_enabled, error_alert_window_minutes, error_alert_min_count,
             error_alert_spike_ratio, error_alert_cooldown_minutes, default_voice,
             default_voice_style, updated_at
         ) VALUES (
-            1, #{enabled}, #{allowedGroups}, #{allowedUsers}, #{platformGroups}, #{requireMention},
+            1, #{enabled}, #{allowedGroups}, #{allowedUsers}, #{platformGroups},
+            #{groupReplyPolicies,typeHandler=com.monitor.platform.infrastructure.mybatis.handler.JsonbStringTypeHandler},
+            #{requireMention},
             #{commandPrefix}, #{maxReplyLength}, #{memoryWindow}, #{webSearchForNonAdmin},
             #{errorAlertEnabled}, #{errorAlertWindowMinutes}, #{errorAlertMinCount},
             #{errorAlertSpikeRatio}, #{errorAlertCooldownMinutes}, #{defaultVoice},
@@ -52,6 +56,7 @@
             allowed_groups = EXCLUDED.allowed_groups,
             allowed_users = EXCLUDED.allowed_users,
             platform_groups = EXCLUDED.platform_groups,
+            group_reply_policies = EXCLUDED.group_reply_policies,
             require_mention = EXCLUDED.require_mention,
             command_prefix = EXCLUDED.command_prefix,
             max_reply_length = EXCLUDED.max_reply_length,

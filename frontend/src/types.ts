@@ -436,6 +436,8 @@ export interface BotSettings {
   allowedUsers: string[]
   /** 平台功能群（指定群），必须是 allowedGroups 的子集；为空表示任何群都不给平台功能。 */
   platformGroups: string[]
+  /** 按群定制的回复策略；未配置的群沿用 requireMention。 */
+  groupPolicies: BotGroupReplyPolicy[]
   requireMention: boolean
   commandPrefix: string
   maxReplyLength: number
@@ -453,6 +455,36 @@ export interface BotSettings {
   /** 默认语音语气/风格。 */
   defaultVoiceStyle: string
   updatedAt: string | null
+}
+
+/** 单个群聊的回复触发策略。 */
+export type BotGroupReplyStrategy = 'MENTION' | 'PROACTIVE' | 'RANDOM' | 'KEYWORD'
+
+/** 按群定制的回复策略；@机器人 始终会触发回复。 */
+export interface BotGroupReplyPolicy {
+  groupId: string
+  /** 绑定的人设 ID；null 表示使用默认人设。 */
+  personaId: number | null
+  strategy: BotGroupReplyStrategy
+  /** 随机回复概率（1-100），仅 RANDOM 使用。 */
+  randomPercent: number
+  /** 唤醒关键词，仅 KEYWORD 使用。 */
+  keywords: string[]
+}
+
+/** 机器人可复用的人设。仅影响自然语言表达，不影响权限和工具。 */
+export interface BotPersona {
+  id: number
+  name: string
+  description: string | null
+  characterPrompt: string
+  stylePrompt: string | null
+  enabled: boolean
+  defaultPersona: boolean
+  version: number
+  boundGroupCount: number
+  createdAt: string
+  updatedAt: string
 }
 
 /** 页面维护的一条机器人违禁词。 */

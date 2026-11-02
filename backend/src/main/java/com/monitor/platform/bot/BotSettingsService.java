@@ -1,17 +1,24 @@
 package com.monitor.platform.bot;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.api.dto.BotSettingsRequest;
 import com.monitor.platform.api.dto.BotSettingsResponse;
 import com.monitor.platform.common.exception.BusinessException;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -41,18 +48,34 @@ public class BotSettingsService {
     private static final int DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES = 30;
     private static final String DEFAULT_VOICE = "longanhuan_v3.1";
     private static final String DEFAULT_VOICE_STYLE = "自然、友好、简洁";
+    private static final int DEFAULT_RANDOM_REPLY_PERCENT = 10;
+    private static final int MAX_GROUP_KEYWORDS = 50;
+    private static final int MAX_KEYWORD_LENGTH = 100;
+    private static final TypeReference<List<BotGroupReplyPolicy>> GROUP_POLICIES_TYPE =
+            new TypeReference<>() { };
     private static final Set<String> LEGACY_MOSS_VOICES = Set.of(
             "alex", "benjamin", "charles", "david", "anna", "bella", "claire", "diana");
 
     private final BotSettingsRepository repository;
     private final QqBotProperties properties;
+    private final ObjectMapper objectMapper;
+    private final BotPersonaService personaService;
 
     /** 内存快照，保存后立即替换。 */
     private volatile BotSettings current;
 
-    public BotSettingsService(BotSettingsRepository repository, QqBotProperties properties) {
+    @Autowired
+    public BotSettingsService(BotSettingsRepository repository, QqBotProperties properties,
+                              ObjectMapper objectMapper, BotPersonaService personaService) {
         this.repository = repository;
         this.properties = properties;
+        this.objectMapper = objectMapper;
+        this.personaService = personaService;
+    }
+
+    /** 单元测试/旧调用方便捷构造：仅用于不涉及复杂 Jackson 配置的策略 JSON。 */
+    BotSettingsService(BotSettingsRepository repository, QqBotProperties properties) {
+        this(repository, properties, new ObjectMapper(), null);
     }
 
     @PostConstruct
@@ -90,6 +113,7 @@ public class BotSettingsService {
         Set<String> allowedGroups = split(join(request.allowedGroups()));
         Set<String> platformGroups = split(join(request.platformGroups()));
         validateSubset(allowedGroups, platformGroups);
+        List<BotGroupReplyPolicy> groupPolicies = normalizeGroupPolicies(request.groupPolicies(), allowedGroups);
 
         BotSettingsEntity entity = repository.find();
         if (entity == null) {
@@ -100,6 +124,7 @@ public class BotSettingsService {
         entity.setAllowedGroups(join(allowedGroups));
         entity.setAllowedUsers(join(request.allowedUsers()));
         entity.setPlatformGroups(join(platformGroups));
+        entity.setGroupReplyPolicies(writeGroupPolicies(groupPolicies));
         entity.setRequireMention(request.requireMention() == null || request.requireMention());
         entity.setCommandPrefix(normalizePrefix(request.commandPrefix()));
         entity.setMaxReplyLength(clamp(request.maxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900));
@@ -120,9 +145,9 @@ public class BotSettingsService {
         repository.save(entity);
 
         current = toSettings(entity);
-        log.info("机器人设置已更新: enabled={}, groups={}, platformGroups={}, users={}, requireMention={}, webSearchForNonAdmin={}, errorAlertEnabled={}, errorAlertWindow={}m",
+        log.info("机器人设置已更新: enabled={}, groups={}, platformGroups={}, groupPolicies={}, users={}, requireMention={}, webSearchForNonAdmin={}, errorAlertEnabled={}, errorAlertWindow={}m",
                 current.enabled(), current.allowedGroups(), current.platformGroups(),
-                current.allowedUsers(), current.requireMention(), current.webSearchForNonAdmin(),
+                current.groupPolicies().size(), current.allowedUsers(), current.requireMention(), current.webSearchForNonAdmin(),
                 current.errorAlertEnabled(), current.errorAlertWindowMinutes());
         return toResponse(entity);
     }
@@ -136,6 +161,92 @@ public class BotSettingsService {
             if (!allowedGroups.contains(group)) {
                 throw BusinessException.of("指定群必须是启用群的子集，以下群号不在启用群里：" + group);
             }
+        }
+    }
+
+    /**
+     * 校验并规范化按群策略。
+     *
+     * <p>启用群不为空时，策略里的群号也必须是启用群的子集，避免保存永远不会生效的配置。</p>
+     */
+    private List<BotGroupReplyPolicy> normalizeGroupPolicies(List<BotGroupReplyPolicy> policies,
+                                                              Set<String> allowedGroups) {
+        if (policies == null || policies.isEmpty()) {
+            return List.of();
+        }
+        Map<String, BotGroupReplyPolicy> normalized = new LinkedHashMap<>();
+        for (BotGroupReplyPolicy policy : policies) {
+            if (policy == null) {
+                continue;
+            }
+            String groupId = policy.groupId() == null ? "" : policy.groupId().trim();
+            if (groupId.isEmpty()) {
+                throw BusinessException.of("群聊策略的群号不能为空");
+            }
+            if (groupId.length() > 32) {
+                throw BusinessException.of("群聊策略的群号过长：" + groupId);
+            }
+            if (!allowedGroups.isEmpty() && !allowedGroups.contains(groupId)) {
+                throw BusinessException.of("群聊策略必须是启用群的子集，以下群号不在启用群里：" + groupId);
+            }
+            if (normalized.containsKey(groupId)) {
+                throw BusinessException.of("同一个群只能配置一条回复策略：" + groupId);
+            }
+            if (personaService != null && !personaService.isSelectable(policy.personaId())) {
+                throw BusinessException.of("群聊策略绑定的人设不存在或已禁用：" + groupId);
+            }
+            BotGroupReplyStrategy strategy = policy.strategy() == null
+                    ? BotGroupReplyStrategy.MENTION : policy.strategy();
+            int randomPercent = clamp(policy.randomPercent(), 1, 100, DEFAULT_RANDOM_REPLY_PERCENT);
+            List<String> keywords = normalizeKeywords(policy.keywords());
+            if (strategy == BotGroupReplyStrategy.KEYWORD && keywords.isEmpty()) {
+                throw BusinessException.of("关键词唤醒策略至少需要一个关键词：" + groupId);
+            }
+            normalized.put(groupId, new BotGroupReplyPolicy(
+                    groupId, policy.personaId(), strategy, randomPercent, keywords));
+        }
+        return List.copyOf(normalized.values());
+    }
+
+    private static List<String> normalizeKeywords(List<String> keywords) {
+        if (keywords == null || keywords.isEmpty()) {
+            return List.of();
+        }
+        Map<String, String> unique = new LinkedHashMap<>();
+        for (String keyword : keywords) {
+            if (keyword == null || keyword.isBlank()) {
+                continue;
+            }
+            String cleaned = keyword.trim().replaceAll("\\s+", " ");
+            if (cleaned.length() > MAX_KEYWORD_LENGTH) {
+                throw BusinessException.of("关键词不能超过 " + MAX_KEYWORD_LENGTH + " 个字符：" + cleaned);
+            }
+            unique.putIfAbsent(cleaned.toLowerCase(Locale.ROOT), cleaned);
+        }
+        if (unique.size() > MAX_GROUP_KEYWORDS) {
+            throw BusinessException.of("单个群最多配置 " + MAX_GROUP_KEYWORDS + " 个关键词");
+        }
+        return List.copyOf(unique.values());
+    }
+
+    private String writeGroupPolicies(List<BotGroupReplyPolicy> policies) {
+        try {
+            return objectMapper.writeValueAsString(policies == null ? List.of() : policies);
+        } catch (Exception ex) {
+            throw BusinessException.of("群聊回复策略序列化失败");
+        }
+    }
+
+    private List<BotGroupReplyPolicy> readGroupPolicies(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<BotGroupReplyPolicy> policies = objectMapper.readValue(json, GROUP_POLICIES_TYPE);
+            return policies == null ? List.of() : List.copyOf(policies);
+        } catch (Exception ex) {
+            log.warn("解析群聊回复策略失败，按空策略处理: {}", ex.getMessage());
+            return List.of();
         }
     }
 
@@ -158,6 +269,7 @@ public class BotSettingsService {
         entity.setAllowedUsers(join(properties.getAllowedUsers()));
         // 指定群没有环境变量来源，首次初始化为空（不给任何群开平台功能）
         entity.setPlatformGroups(null);
+        entity.setGroupReplyPolicies("[]");
         entity.setRequireMention(properties.isRequireMention());
         entity.setCommandPrefix(normalizePrefix(properties.getCommandPrefix()));
         entity.setMaxReplyLength(clamp(properties.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900));
@@ -184,6 +296,7 @@ public class BotSettingsService {
                 split(join(properties.getAllowedGroups())),
                 split(join(properties.getAllowedUsers())),
                 Set.of(),
+                List.of(),
                 properties.isRequireMention(),
                 normalizePrefix(properties.getCommandPrefix()),
                 clamp(properties.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
@@ -204,6 +317,7 @@ public class BotSettingsService {
                 split(entity.getAllowedGroups()),
                 split(entity.getAllowedUsers()),
                 split(entity.getPlatformGroups()),
+                readGroupPolicies(entity.getGroupReplyPolicies()),
                 !Boolean.FALSE.equals(entity.getRequireMention()),
                 normalizePrefix(entity.getCommandPrefix()),
                 clamp(entity.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
@@ -224,6 +338,7 @@ public class BotSettingsService {
                 split(entity.getAllowedGroups()),
                 split(entity.getAllowedUsers()),
                 split(entity.getPlatformGroups()),
+                readGroupPolicies(entity.getGroupReplyPolicies()),
                 !Boolean.FALSE.equals(entity.getRequireMention()),
                 normalizePrefix(entity.getCommandPrefix()),
                 clamp(entity.getMaxReplyLength(), MIN_REPLY_LENGTH, MAX_REPLY_LENGTH, 900),
