@@ -20,7 +20,7 @@ import java.util.Set;
  * @param errorAlertMinCount 最小触发数量
  * @param errorAlertSpikeRatio 突增倍数
  * @param errorAlertCooldownMinutes 告警冷却分钟数
- * @param defaultVoice MOSS 默认音色
+ * @param defaultVoice Qwen-Audio-TTS 默认音色
  * @param defaultVoiceStyle 默认语音语气/风格
  * @param updatedAt       最后保存时间
  */
@@ -54,6 +54,6 @@ public record BotSettingsResponse(
         this(enabled, allowedGroups, allowedUsers, platformGroups, requireMention, commandPrefix,
                 maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
                 errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
-                "fnlp/MOSS-TTSD-v0.5:alex", "自然、友好、简洁", updatedAt);
+                "longanhuan_v3.1", "自然、友好、简洁", updatedAt);
     }
 }

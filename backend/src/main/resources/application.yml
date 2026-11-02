@@ -97,17 +97,29 @@ monitor:
       max-images-per-message: ${MONITOR_BOT_VISION_MAX_IMAGES:3}
       timeout: ${MONITOR_BOT_VISION_TIMEOUT:15s}
 
-    # 语音消息：SiliconFlow 语音转写 + MOSS-TTSD 语音回复。
+    # 语音消息：SiliconFlow 语音转写 + 阿里云百炼 Qwen-Audio-TTS 语音回复。
     # 只有用户明确说「语音回复 / 用某音色语音回复」时才合成语音。
     speech:
       enabled: ${MONITOR_BOT_SPEECH_ENABLED:false}
+      # 语音转写：SiliconFlow
       base-url: ${MONITOR_BOT_SPEECH_BASE_URL:https://api.siliconflow.cn}
       api-key: ${MONITOR_BOT_SPEECH_API_KEY:}
       transcribe-model: ${MONITOR_BOT_SPEECH_TRANSCRIBE_MODEL:XingChenAGI/XingChenASR-V3.2}
       fallback-transcribe-model: ${MONITOR_BOT_SPEECH_FALLBACK_TRANSCRIBE_MODEL:FunAudioLLM/SenseVoiceSmall}
-      tts-model: ${MONITOR_BOT_SPEECH_TTS_MODEL:fnlp/MOSS-TTSD-v0.5}
-      fallback-voice: ${MONITOR_BOT_SPEECH_FALLBACK_VOICE:fnlp/MOSS-TTSD-v0.5:alex}
+      # 语音合成：阿里云百炼 Qwen-Audio-TTS（独立 Key）
+      tts-ws-url: ${MONITOR_BOT_SPEECH_TTS_WS_URL:}
+      tts-workspace-id: ${MONITOR_BOT_SPEECH_TTS_WORKSPACE_ID:}
+      tts-region: ${MONITOR_BOT_SPEECH_TTS_REGION:cn-beijing}
+      tts-api-key: ${MONITOR_BOT_SPEECH_TTS_API_KEY:}
+      tts-model: ${MONITOR_BOT_SPEECH_TTS_MODEL:qwen-audio-3.1-tts-flash}
+      fallback-voice: ${MONITOR_BOT_SPEECH_FALLBACK_VOICE:longanhuan_v3.1}
       response-format: ${MONITOR_BOT_SPEECH_RESPONSE_FORMAT:mp3}
+      tts-sample-rate: ${MONITOR_BOT_SPEECH_TTS_SAMPLE_RATE:22050}
+      tts-volume: ${MONITOR_BOT_SPEECH_TTS_VOLUME:50}
+      tts-rate: ${MONITOR_BOT_SPEECH_TTS_RATE:1.0}
+      tts-pitch: ${MONITOR_BOT_SPEECH_TTS_PITCH:1.0}
+      tts-bit-rate: ${MONITOR_BOT_SPEECH_TTS_BIT_RATE:32}
+      language-hint: ${MONITOR_BOT_SPEECH_LANGUAGE_HINT:zh}
       record-format: ${MONITOR_BOT_SPEECH_RECORD_FORMAT:mp3}
       max-audio-bytes: ${MONITOR_BOT_SPEECH_MAX_AUDIO_BYTES:15728640}
       timeout: ${MONITOR_BOT_SPEECH_TIMEOUT:90s}

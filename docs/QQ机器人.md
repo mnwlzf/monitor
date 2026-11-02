@@ -98,22 +98,27 @@ MONITOR_BOT_REQUIRE_MENTION=true
 
 ## 语音消息与语音回复
 
-语音能力使用 **SiliconFlow**，与聊天模型相互独立：
+语音转写使用 **SiliconFlow**，语音合成使用 **阿里云百炼 Qwen-Audio-TTS**，与聊天模型相互独立：
 
 ```dotenv
 MONITOR_BOT_SPEECH_ENABLED=true
+# 语音转写：SiliconFlow
 MONITOR_BOT_SPEECH_API_KEY=<SiliconFlow API Key>
 MONITOR_BOT_SPEECH_TRANSCRIBE_MODEL=XingChenAGI/XingChenASR-V3.2
 MONITOR_BOT_SPEECH_FALLBACK_TRANSCRIBE_MODEL=FunAudioLLM/SenseVoiceSmall
-MONITOR_BOT_SPEECH_TTS_MODEL=fnlp/MOSS-TTSD-v0.5
-MONITOR_BOT_SPEECH_FALLBACK_VOICE=fnlp/MOSS-TTSD-v0.5:alex
+# 语音合成：阿里云百炼
+MONITOR_BOT_SPEECH_TTS_WORKSPACE_ID=<百炼业务空间 ID>
+MONITOR_BOT_SPEECH_TTS_API_KEY=<百炼 API Key>
+MONITOR_BOT_SPEECH_TTS_MODEL=qwen-audio-3.1-tts-flash
+MONITOR_BOT_SPEECH_FALLBACK_VOICE=longanhuan_v3.1
 ```
 
 - 用户发语音时，先由 `XingChenASR-V3.2` 转成文字；失败自动回退 `SenseVoiceSmall`。
-- 只有明确说「语音回复」「发条语音」「用 alex 音色语音回复」时才合成语音。
-- 语音回复由 `MOSS-TTSD-v0.5` 合成，OneBot 以 `record` 消息段发送。
-- 页面「系统设置 → QQ 机器人 → 语音消息与语音回复」可配置默认 MOSS 音色和默认语气；保存即生效。
-- MOSS-TTSD 负责音色/音质；默认语气用于约束大模型组织回复措辞。
+- 只有明确说「语音回复」「发条语音」「用 longanhuan_v3.1 音色语音回复」时才合成语音。
+- 语音回复由阿里云百炼 `qwen-audio-3.1-tts-flash` 通过 WebSocket 实时合成，OneBot 以 `record` 消息段发送。
+- 页面「系统设置 → QQ 机器人 → 语音消息与语音回复」可配置默认 Qwen 音色和默认语气；保存即生效。
+- 旧 MOSS 音色配置会自动迁移到 `longanhuan_v3.1`。
+- 默认语气用于约束大模型组织回复措辞，实际音色由 Qwen-Audio-TTS 决定。
 
 
 ## 3. 使用

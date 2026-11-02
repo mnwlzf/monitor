@@ -448,7 +448,7 @@ export interface BotSettings {
   errorAlertMinCount: number
   errorAlertSpikeRatio: number
   errorAlertCooldownMinutes: number
-  /** MOSS-TTSD 默认音色，例如 fnlp/MOSS-TTSD-v0.5:alex。 */
+  /** Qwen-Audio-TTS 默认音色，例如 longanhuan_v3.1。 */
   defaultVoice: string
   /** 默认语音语气/风格。 */
   defaultVoiceStyle: string

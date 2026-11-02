@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -44,16 +47,65 @@ class BotSpeechServiceTest {
     }
 
     @Test
-    void shouldResolveMossVoiceId() {
+    void shouldResolveQwenVoiceIdAndMigrateLegacyName() {
         BotSpeechProperties properties = new BotSpeechProperties();
-        properties.setTtsModel("fnlp/MOSS-TTSD-v0.5");
-        properties.setFallbackVoice("fnlp/MOSS-TTSD-v0.5:alex");
-        BotSpeechService service = new BotSpeechService(properties, mock(OneBotClient.class));
+        properties.setTtsModel("qwen-audio-3.1-tts-flash");
+        properties.setFallbackVoice("longanhuan_v3.1");
+        BotSpeechService service = new BotSpeechService(properties, mock(OneBotClient.class), new ObjectMapper());
 
-        assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.resolveVoice("alex"));
-        assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.resolveVoice("fnlp/MOSS-TTSD-v0.5:alex"));
-        assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.resolveVoice(""));
-        assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.resolveVoice("not-a-voice"));
+        assertEquals("longanhuan_v3.1", service.resolveVoice("longanhuan_v3.1"));
+        assertEquals("longanhuan_v3.1", service.resolveVoice("alex"));
+        assertEquals("longanhuan_v3.1", service.resolveVoice("fnlp/MOSS-TTSD-v0.5:alex"));
+        assertEquals("longanhuan_v3.1", service.resolveVoice(""));
+        assertEquals("longanhuan_v3.1", service.resolveVoice("not-a-voice"));
+        assertEquals("xunanchuan_v3.1", service.resolveVoice("xunanchuan_v3.1"));
+    }
+
+    @Test
+    void shouldBuildQwenRunTaskEvent() {
+        BotSpeechProperties properties = new BotSpeechProperties();
+        properties.setTtsModel("qwen-audio-3.1-tts-flash");
+        BotSpeechService service = new BotSpeechService(properties, mock(OneBotClient.class), new ObjectMapper());
+
+        Map<String, Object> event = service.runTaskEvent("task-1", "longanhuan_v3.1");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> header = (Map<String, Object>) event.get("header");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) event.get("payload");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parameters = (Map<String, Object>) payload.get("parameters");
+        assertEquals("run-task", header.get("action"));
+        assertEquals("duplex", header.get("streaming"));
+        assertEquals("audio", payload.get("task_group"));
+        assertEquals("tts", payload.get("task"));
+        assertEquals("SpeechSynthesizer", payload.get("function"));
+        assertEquals("qwen-audio-3.1-tts-flash", payload.get("model"));
+        assertEquals("PlainText", parameters.get("text_type"));
+        assertEquals("longanhuan_v3.1", parameters.get("voice"));
+        assertEquals("mp3", parameters.get("format"));
+        assertEquals(22050, parameters.get("sample_rate"));
+        assertEquals(List.of("zh"), parameters.get("language_hints"));
+    }
+
+    @Test
+    void shouldRequireSeparateBailianTtsKey() {
+        BotSpeechProperties properties = new BotSpeechProperties();
+        properties.setEnabled(true);
+        properties.setApiKey("siliconflow-key");
+        assertFalse(properties.isTtsUsable());
+
+        properties.setTtsApiKey("bailian-key");
+        assertTrue(properties.isTtsUsable());
+    }
+
+    @Test
+    void shouldBuildWorkspaceTtsUrl() {
+        BotSpeechProperties properties = new BotSpeechProperties();
+        properties.setTtsWorkspaceId("ws-123");
+
+        assertEquals("wss://ws-123.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference",
+                properties.effectiveTtsWsUrl());
     }
 
     @Test

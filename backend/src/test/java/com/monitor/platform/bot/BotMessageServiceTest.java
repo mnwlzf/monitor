@@ -477,7 +477,7 @@ class BotMessageServiceTest {
         service.onEvent(event(privateCommand("/平台 语音回复")));
 
         verify(tools, timeout(3000)).platformReport();
-        verify(speechService, timeout(3000)).synthesize(anyString(), eq("fnlp/MOSS-TTSD-v0.5:alex"));
+        verify(speechService, timeout(3000)).synthesize(anyString(), eq("longanhuan_v3.1"));
         verify(client, timeout(3000)).sendPrivateVoice(eq(999L), any(byte[].class));
     }
 

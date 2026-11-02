@@ -144,12 +144,26 @@ class BotSettingsServiceTest {
 
         BotSettingsResponse saved = service.save(new BotSettingsRequest(
                 true, List.of("111"), List.of(), List.of(), true, "/", 900, 10, false,
+                false, 15, 5, 1.5, 30, "longanhuan_v3.1", "温柔亲切"));
+
+        assertEquals("longanhuan_v3.1", saved.defaultVoice());
+        assertEquals("温柔亲切", saved.defaultVoiceStyle());
+        assertEquals("longanhuan_v3.1", service.current().defaultVoice());
+        assertEquals("温柔亲切", service.current().defaultVoiceStyle());
+    }
+
+    @Test
+    void shouldMigrateLegacyMossVoiceToQwen() {
+        BotSettingsRepository repository = mock(BotSettingsRepository.class);
+        when(repository.find()).thenReturn(existing());
+        BotSettingsService service = new BotSettingsService(repository, new QqBotProperties());
+
+        BotSettingsResponse saved = service.save(new BotSettingsRequest(
+                true, List.of("111"), List.of(), List.of(), true, "/", 900, 10, false,
                 false, 15, 5, 1.5, 30, "fnlp/MOSS-TTSD-v0.5:alex", "温柔亲切"));
 
-        assertEquals("fnlp/MOSS-TTSD-v0.5:alex", saved.defaultVoice());
-        assertEquals("温柔亲切", saved.defaultVoiceStyle());
-        assertEquals("fnlp/MOSS-TTSD-v0.5:alex", service.current().defaultVoice());
-        assertEquals("温柔亲切", service.current().defaultVoiceStyle());
+        assertEquals("longanhuan_v3.1", saved.defaultVoice());
+        assertEquals("longanhuan_v3.1", service.current().defaultVoice());
     }
 
     @Test

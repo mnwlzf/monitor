@@ -39,8 +39,10 @@ public class BotSettingsService {
     private static final int DEFAULT_ERROR_ALERT_MIN_COUNT = 5;
     private static final double DEFAULT_ERROR_ALERT_SPIKE_RATIO = 1.5;
     private static final int DEFAULT_ERROR_ALERT_COOLDOWN_MINUTES = 30;
-    private static final String DEFAULT_VOICE = "fnlp/MOSS-TTSD-v0.5:alex";
+    private static final String DEFAULT_VOICE = "longanhuan_v3.1";
     private static final String DEFAULT_VOICE_STYLE = "自然、友好、简洁";
+    private static final Set<String> LEGACY_MOSS_VOICES = Set.of(
+            "alex", "benjamin", "charles", "david", "anna", "bella", "claire", "diana");
 
     private final BotSettingsRepository repository;
     private final QqBotProperties properties;
@@ -269,6 +271,10 @@ public class BotSettingsService {
             return DEFAULT_VOICE;
         }
         String value = voice.trim();
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        if (lower.startsWith("fnlp/moss-ttsd") || LEGACY_MOSS_VOICES.contains(lower)) {
+            return DEFAULT_VOICE;
+        }
         return value.length() > 120 ? value.substring(0, 120) : value;
     }
 

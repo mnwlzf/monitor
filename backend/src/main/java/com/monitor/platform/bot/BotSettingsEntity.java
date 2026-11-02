@@ -27,7 +27,7 @@ public class BotSettingsEntity {
     private Integer errorAlertMinCount;
     private Double errorAlertSpikeRatio;
     private Integer errorAlertCooldownMinutes;
-    /** 默认 MOSS 音色，例如 fnlp/MOSS-TTSD-v0.5:alex。 */
+    /** 默认 Qwen-Audio-TTS 音色，例如 longanhuan_v3.1。 */
     private String defaultVoice;
     /** 默认语音语气/风格。 */
     private String defaultVoiceStyle;

@@ -530,18 +530,18 @@
 
         <el-divider content-position="left">语音消息与语音回复</el-divider>
 
-        <el-form-item label="MOSS 默认音色">
-          <el-select v-model="botForm.defaultVoice" style="width: 360px" placeholder="请选择默认音色">
-            <el-option label="alex（沉稳男声）" value="fnlp/MOSS-TTSD-v0.5:alex" />
-            <el-option label="benjamin（低沉男声）" value="fnlp/MOSS-TTSD-v0.5:benjamin" />
-            <el-option label="charles（磁性男声）" value="fnlp/MOSS-TTSD-v0.5:charles" />
-            <el-option label="david（欢快男声）" value="fnlp/MOSS-TTSD-v0.5:david" />
-            <el-option label="anna（沉稳女声）" value="fnlp/MOSS-TTSD-v0.5:anna" />
-            <el-option label="bella（激情女声）" value="fnlp/MOSS-TTSD-v0.5:bella" />
-            <el-option label="claire（温柔女声）" value="fnlp/MOSS-TTSD-v0.5:claire" />
-            <el-option label="diana（欢快女声）" value="fnlp/MOSS-TTSD-v0.5:diana" />
+        <el-form-item label="Qwen 默认音色">
+          <el-select v-model="botForm.defaultVoice" filterable style="width: 360px" placeholder="请选择默认音色">
+            <el-option label="龙安欢_v3.1（活泼女声）" value="longanhuan_v3.1" />
+            <el-option label="龙安灵心_v3.1（温柔女声）" value="longanlingxin_v3.1" />
+            <el-option label="许南川（磁性男声）" value="xunanchuan_v3.1" />
+            <el-option label="龙安风悦_v3.1（亲和女声）" value="longanfengyue_v3.1" />
+            <el-option label="于小云_v3.1（元气女声）" value="yuxiaoyun_v3.1" />
+            <el-option label="乔小娇_v3.1（俏丽女声）" value="qiaoxiaojiao_v3.1" />
+            <el-option label="夏小晨_v3.1（明亮女声）" value="xiaxiaochen_v3.1" />
+            <el-option label="安明远_v3.1（清亮男声）" value="anmingyuan_v3.1" />
           </el-select>
-          <small class="admin-form-hint">仅支持以上 8 个系统音色；用户说「用 claire 音色语音回复」时会临时覆盖，未知音色自动回退到 alex</small>
+          <small class="admin-form-hint">使用阿里云百炼 qwen-audio-3.1-tts-flash；用户说「用 longanhuan_v3.1 音色语音回复」时会临时覆盖，未知音色回退到龙安欢</small>
         </el-form-item>
 
         <el-form-item label="默认语音风格">
@@ -552,7 +552,7 @@
             <el-option label="活泼轻松" value="活泼轻松" />
             <el-option label="播音腔" value="播音腔" />
           </el-select>
-          <small class="admin-form-hint">用户明确要求语音回复时生效；这个风格用于组织回复措辞，实际音色由上面的 MOSS 音色决定</small>
+          <small class="admin-form-hint">用户明确要求语音回复时生效；这个风格用于组织回复措辞，实际音色由上面的 Qwen 音色决定</small>
         </el-form-item>
 
         <el-form-item label="普通人可用联网搜索">
@@ -945,7 +945,7 @@ const botForm = reactive<BotSettingsInput>({
   errorAlertMinCount: 5,
   errorAlertSpikeRatio: 1.5,
   errorAlertCooldownMinutes: 30,
-  defaultVoice: 'fnlp/MOSS-TTSD-v0.5:alex',
+  defaultVoice: 'longanhuan_v3.1',
   defaultVoiceStyle: '自然、友好、简洁',
 })
 
@@ -965,7 +965,7 @@ function applyBotSettings(settings: BotSettings) {
     errorAlertMinCount: settings.errorAlertMinCount || 5,
     errorAlertSpikeRatio: settings.errorAlertSpikeRatio ?? 1.5,
     errorAlertCooldownMinutes: settings.errorAlertCooldownMinutes || 30,
-    defaultVoice: settings.defaultVoice || 'fnlp/MOSS-TTSD-v0.5:alex',
+    defaultVoice: settings.defaultVoice || 'longanhuan_v3.1',
     defaultVoiceStyle: settings.defaultVoiceStyle || '自然、友好、简洁',
   })
   botUpdatedAt.value = settings.updatedAt ? new Date(settings.updatedAt).toLocaleString('zh-CN') : ''

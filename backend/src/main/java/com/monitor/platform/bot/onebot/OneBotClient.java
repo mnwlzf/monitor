@@ -64,7 +64,7 @@ public class OneBotClient {
         return sendImage("/send_private_msg", "user_id", userId, png);
     }
 
-    /** 发语音到群；MOSS-TTSD 返回的 mp3 直接以 base64 record 消息段发送。 */
+    /** 发语音到群；Qwen-Audio-TTS 返回的 mp3 直接以 base64 record 消息段发送。 */
     public boolean sendGroupVoice(long groupId, byte[] audio) {
         return sendVoice("/send_group_msg", "group_id", groupId, audio);
     }

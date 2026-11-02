@@ -1,23 +1,26 @@
 package com.monitor.platform.bot.voice;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.WebSocket;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -29,32 +32,50 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * SiliconFlow 语音能力：语音转文字 + MOSS-TTSD 文字转语音。
+ * 机器人语音能力：SiliconFlow 语音转文字 + 阿里云百炼 Qwen-Audio-TTS 语音合成。
  *
  * <p>语音文件优先使用 OneBot 消息段里的 URL / base64；拿不到时再调用 OneBot 的
- * {@code /get_record} 转成 mp3。识别失败会自动回退到 SenseVoiceSmall，避免新模型
- * 尚未在全部账号开放时整条语音链路不可用。</p>
+ * {@code /get_record} 转成 mp3。识别失败会自动回退到 SenseVoiceSmall。
+ * 语音合成使用百炼 WebSocket 实时协议，音频通过 binary 帧返回后拼成 mp3。</p>
  */
 @Service
 public class BotSpeechService {
 
     private static final Logger log = LoggerFactory.getLogger(BotSpeechService.class);
     private static final int CONNECT_TIMEOUT_MS = 10_000;
-    private static final Set<String> SYSTEM_VOICES = Set.of(
-            "alex", "benjamin", "charles", "david", "anna", "bella", "claire", "diana");
+    private static final String DEFAULT_VOICE = "longanhuan_v3.1";
+    private static final Set<String> QWEN_VOICES = Set.of(
+            "longanhuan_v3.1", "longanlingxin_v3.1", "xunanchuan_v3.1", "longanfengyue_v3.1",
+            "yuxiaoyun_v3.1", "qiaoxiaojiao_v3.1", "xiaxiaochen_v3.1", "anmingyuan_v3.1",
+            "wenhuaiqing_v3.1", "anxiaolan_v3.1");
+    private static final Map<String, String> LEGACY_VOICES = Map.ofEntries(
+            Map.entry("alex", "longanhuan_v3.1"),
+            Map.entry("benjamin", "xunanchuan_v3.1"),
+            Map.entry("charles", "xunanchuan_v3.1"),
+            Map.entry("david", "longanhuan_v3.1"),
+            Map.entry("anna", "longanlingxin_v3.1"),
+            Map.entry("bella", "longanhuan_v3.1"),
+            Map.entry("claire", "longanlingxin_v3.1"),
+            Map.entry("diana", "longanhuan_v3.1"));
 
     private final BotSpeechProperties properties;
     private final OneBotClient oneBotClient;
     private final RestClient restClient;
     private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
 
-    public BotSpeechService(BotSpeechProperties properties, OneBotClient oneBotClient) {
+    public BotSpeechService(BotSpeechProperties properties, OneBotClient oneBotClient, ObjectMapper objectMapper) {
         this.properties = properties;
         this.oneBotClient = oneBotClient;
+        this.objectMapper = objectMapper;
         this.restClient = buildRestClient(properties);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(java.time.Duration.ofMillis(CONNECT_TIMEOUT_MS))
@@ -151,7 +172,7 @@ public class BotSpeechService {
     }
 
     /**
-     * 合成语音。MOSS-TTSD 的 voice 形如 {@code fnlp/MOSS-TTSD-v0.5:alex}。
+     * 合成语音。使用阿里云百炼 Qwen-Audio-TTS WebSocket 协议。
      * 返回 mp3 字节，由 OneBot 以 record 消息段发送。
      */
     public Optional<byte[]> synthesize(String text, String requestedVoice) {
@@ -162,50 +183,33 @@ public class BotSpeechService {
         if (input.isBlank()) {
             return Optional.empty();
         }
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", properties.getTtsModel());
-        body.put("input", input);
-        body.put("voice", resolveVoice(requestedVoice));
-        body.put("response_format", blank(properties.getResponseFormat()) ? "mp3" : properties.getResponseFormat());
-        body.put("speed", 1.0);
+        String voice = resolveVoice(requestedVoice);
         try {
-            ResponseEntity<byte[]> response = restClient.post()
-                    .uri("/v1/audio/speech")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .headers(this::authorization)
-                    .body(body)
-                    .retrieve()
-                    .toEntity(byte[].class);
-            byte[] audio = response.getBody();
-            String responseType = response.getHeaders().getContentType() == null
-                    ? "" : response.getHeaders().getContentType().toString();
-            if (responseType.contains("json")) {
-                log.warn("语音合成接口返回了 JSON 而不是音频: voice={}", body.get("voice"));
-                return Optional.empty();
-            }
+            byte[] audio = synthesizeWithBailian(input, voice);
             if (audio == null || audio.length == 0) {
-                log.warn("语音合成返回空内容: voice={}", body.get("voice"));
+                log.warn("百炼语音合成返回空内容: voice={}", voice);
                 return Optional.empty();
             }
             return Optional.of(audio);
         } catch (Exception ex) {
-            log.warn("语音合成失败: voice={}, reason={}", body.get("voice"), ex.getMessage());
+            log.warn("百炼语音合成失败: voice={}, reason={}", voice, ex.getMessage());
             return Optional.empty();
         }
     }
 
-    /** 把 MOSS 的短音色名补成完整 voice ID；未知音色回退到配置的兜底音色。 */
+    /** 把旧 MOSS 音色名映射到 Qwen-Audio-TTS 音色；未知音色回退到配置的兜底音色。 */
     public String resolveVoice(String requestedVoice) {
-        String value = blank(requestedVoice) ? properties.getFallbackVoice() : requestedVoice.trim();
-        String name = voiceName(value);
-        if (!SYSTEM_VOICES.contains(name)) {
-            String fallback = voiceName(properties.getFallbackVoice());
-            name = SYSTEM_VOICES.contains(fallback) ? fallback : "alex";
+        String value = normalizeVoiceId(blank(requestedVoice) ? properties.getFallbackVoice() : requestedVoice);
+        value = LEGACY_VOICES.getOrDefault(value, value);
+        if (QWEN_VOICES.contains(value)) {
+            return value;
         }
-        return properties.getTtsModel() + ":" + name;
+        String fallback = normalizeVoiceId(properties.getFallbackVoice());
+        fallback = LEGACY_VOICES.getOrDefault(fallback, fallback);
+        return QWEN_VOICES.contains(fallback) ? fallback : DEFAULT_VOICE;
     }
 
-    private static String voiceName(String value) {
+    private static String normalizeVoiceId(String value) {
         if (blank(value)) {
             return "";
         }
@@ -215,6 +219,93 @@ public class BotSpeechService {
             trimmed = trimmed.substring(colon + 1);
         }
         return trimmed.toLowerCase(Locale.ROOT);
+    }
+
+    private byte[] synthesizeWithBailian(String text, String voice) throws Exception {
+        String taskId = UUID.randomUUID().toString();
+        String runTask = json(runTaskEvent(taskId, voice));
+        String continueTask = json(continueTaskEvent(taskId, text));
+        String finishTask = json(finishTaskEvent(taskId));
+        TtsWebSocketListener listener = new TtsWebSocketListener(runTask, continueTask, finishTask);
+
+        WebSocket.Builder builder = httpClient.newWebSocketBuilder()
+                .connectTimeout(properties.getTimeout())
+                .header("Authorization", "Bearer " + properties.getTtsApiKey().trim())
+                .header("user-agent", "monitor-qq-bot");
+        if (!blank(properties.getTtsWorkspaceId())) {
+            builder.header("X-DashScope-WorkSpace", properties.getTtsWorkspaceId().trim());
+        }
+
+        WebSocket socket = builder.buildAsync(URI.create(properties.effectiveTtsWsUrl()), listener)
+                .get(properties.getTimeout().toMillis(), TimeUnit.MILLISECONDS);
+        try {
+            return listener.audio().get(properties.getTimeout().toMillis(), TimeUnit.MILLISECONDS);
+        } finally {
+            socket.abort();
+        }
+    }
+
+    Map<String, Object> runTaskEvent(String taskId, String voice) {
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("text_type", "PlainText");
+        parameters.put("voice", voice);
+        parameters.put("format", blank(properties.getResponseFormat()) ? "mp3" : properties.getResponseFormat());
+        parameters.put("sample_rate", properties.getTtsSampleRate());
+        parameters.put("volume", properties.getTtsVolume());
+        parameters.put("rate", properties.getTtsRate());
+        parameters.put("pitch", properties.getTtsPitch());
+        parameters.put("enable_ssml", false);
+        String format = String.valueOf(parameters.get("format"));
+        if ("mp3".equalsIgnoreCase(format) || "opus".equalsIgnoreCase(format)) {
+            parameters.put("bit_rate", properties.getTtsBitRate());
+        }
+        if (!blank(properties.getLanguageHint())) {
+            parameters.put("language_hints", List.of(properties.getLanguageHint().trim()));
+        }
+
+        Map<String, Object> header = new LinkedHashMap<>();
+        header.put("action", "run-task");
+        header.put("task_id", taskId);
+        header.put("streaming", "duplex");
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("task_group", "audio");
+        payload.put("task", "tts");
+        payload.put("function", "SpeechSynthesizer");
+        payload.put("model", properties.getTtsModel());
+        payload.put("parameters", parameters);
+        payload.put("input", Map.of());
+
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("header", header);
+        event.put("payload", payload);
+        return event;
+    }
+
+    static Map<String, Object> continueTaskEvent(String taskId, String text) {
+        Map<String, Object> header = new LinkedHashMap<>();
+        header.put("action", "continue-task");
+        header.put("task_id", taskId);
+        header.put("streaming", "duplex");
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("header", header);
+        event.put("payload", Map.of("input", Map.of("text", text)));
+        return event;
+    }
+
+    static Map<String, Object> finishTaskEvent(String taskId) {
+        Map<String, Object> header = new LinkedHashMap<>();
+        header.put("action", "finish-task");
+        header.put("task_id", taskId);
+        header.put("streaming", "duplex");
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("header", header);
+        event.put("payload", Map.of("input", Map.of()));
+        return event;
+    }
+
+    private String json(Object value) throws Exception {
+        return objectMapper.writeValueAsString(value);
     }
     /** 清理 Markdown 表格等不适合朗读的标记，并限制朗读长度。 */
     public static String sanitizeForSpeech(String text, int maxChars) {
@@ -494,6 +585,120 @@ public class BotSpeechService {
             in.close();
         } catch (Exception ignored) {
             // 忽略
+        }
+    }
+
+    /** 百炼 Qwen-Audio-TTS 的 WebSocket 客户端事件监听器。 */
+    private final class TtsWebSocketListener implements WebSocket.Listener {
+
+        private final String runTask;
+        private final String continueTask;
+        private final String finishTask;
+        private final ByteArrayOutputStream audio = new ByteArrayOutputStream();
+        private final CompletableFuture<byte[]> result = new CompletableFuture<>();
+        private final StringBuilder textBuffer = new StringBuilder();
+        private volatile boolean terminal;
+
+        private TtsWebSocketListener(String runTask, String continueTask, String finishTask) {
+            this.runTask = runTask;
+            this.continueTask = continueTask;
+            this.finishTask = finishTask;
+        }
+
+        private CompletableFuture<byte[]> audio() {
+            return result;
+        }
+
+        @Override
+        public void onOpen(WebSocket webSocket) {
+            webSocket.sendText(runTask, true).whenComplete((ignored, error) -> {
+                if (error != null) {
+                    fail(error);
+                }
+            });
+            webSocket.request(1);
+        }
+
+        @Override
+        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            textBuffer.append(data);
+            if (last) {
+                String message = textBuffer.toString();
+                textBuffer.setLength(0);
+                handleEvent(webSocket, message);
+            }
+            webSocket.request(1);
+            return null;
+        }
+
+        @Override
+        public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
+            if (terminal) {
+                webSocket.request(1);
+                return null;
+            }
+            byte[] chunk = new byte[data.remaining()];
+            data.get(chunk);
+            if (audio.size() + chunk.length > properties.getMaxAudioBytes()) {
+                fail(new IllegalStateException("百炼语音合成结果超过大小上限"));
+                webSocket.abort();
+                return null;
+            }
+            audio.write(chunk, 0, chunk.length);
+            webSocket.request(1);
+            return null;
+        }
+
+        @Override
+        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+            if (!terminal) {
+                fail(new IllegalStateException("百炼语音合成连接提前关闭: " + statusCode + " " + reason));
+            }
+            return null;
+        }
+
+        @Override
+        public void onError(WebSocket webSocket, Throwable error) {
+            fail(error);
+        }
+
+        private void handleEvent(WebSocket webSocket, String message) {
+            try {
+                JsonNode root = objectMapper.readTree(message);
+                String event = root.path("header").path("event").asText("");
+                switch (event) {
+                    case "task-started" -> webSocket.sendText(continueTask, true)
+                            .thenCompose(ignored -> webSocket.sendText(finishTask, true))
+                            .whenComplete((ignored, error) -> {
+                                if (error != null) {
+                                    fail(error);
+                                }
+                            });
+                    case "task-failed" -> {
+                        String code = root.path("header").path("error_code").asText("");
+                        String error = root.path("header").path("error_message").asText("未知错误");
+                        fail(new IllegalStateException("百炼语音合成失败 " + code + ": " + error));
+                    }
+                    case "task-finished" -> {
+                        if (!terminal) {
+                            terminal = true;
+                            result.complete(audio.toByteArray());
+                        }
+                    }
+                    default -> {
+                        // result-generated 是句子元信息；音频通过后续 binary 帧返回。
+                    }
+                }
+            } catch (Exception ex) {
+                fail(ex);
+            }
+        }
+
+        private void fail(Throwable error) {
+            if (!terminal) {
+                terminal = true;
+                result.completeExceptionally(error);
+            }
         }
     }
 

@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
  * 从用户文字里识别「明确要求语音回复」以及可选的音色/语气。
  *
  * <p>只有明确指令才触发语音，普通聊天不会自动发语音。支持的说法包括：
- * 「语音回复」「发条语音」「用温柔的语气语音回复」「用 alex 音色语音回复」。
+ * 「语音回复」「发条语音」「用温柔的语气语音回复」「用 longanhuan_v3.1 音色语音回复」。
  * 「不要语音回复」「别发语音」等否定表达优先，不会被误判。</p>
  */
 public record VoiceReplyIntent(boolean requested, String voice, String style, String cleanedText) {
@@ -18,7 +18,7 @@ public record VoiceReplyIntent(boolean requested, String voice, String style, St
 
     /** 带风格/音色的完整指令。 */
     private static final Pattern STYLE_DIRECTIVE = Pattern.compile(
-            "(?:请|麻烦)?\\s*(?:你)?\\s*(?:用|以)\\s*([^，。！？,!?；;\\n]{1,30}?)\\s*(?:的)?\\s*"
+            "(?:请|麻烦)?\\s*(?:你)?\\s*(?:用|以)\\s*([^，。！？,!?；;\\n]{1,120}?)\\s*(?:的)?\\s*"
                     + "(?:语气|声音|音色|风格)?\\s*(?:来|给我|为我)?\\s*"
                     + "(?:语音回复|语音回答|声音回复|声音回答|回复语音|回答语音|发语音|回语音|语音说|回复|回答)"
                     + "(?:我|一下|一条)?(?:语音|声音)?",
@@ -34,7 +34,7 @@ public record VoiceReplyIntent(boolean requested, String voice, String style, St
 
     /** 指令里可能把风格放在别处，例如「语音回复，用温柔的语气」。 */
     private static final Pattern STYLE_ONLY = Pattern.compile(
-            "(?:用|以)\\s*([^，。！？,!?；;\\n]{1,30}?)\\s*(?:的)?\\s*(?:语气|声音|音色|风格)",
+            "(?:用|以)\\s*([^，。！？,!?；;\\n]{1,120}?)\\s*(?:的)?\\s*(?:语气|声音|音色|风格)",
             Pattern.CASE_INSENSITIVE);
 
     public static VoiceReplyIntent parse(String raw) {
@@ -110,7 +110,7 @@ public record VoiceReplyIntent(boolean requested, String voice, String style, St
     }
 
     /**
-     * 把「用 alex 音色」「用 fnlp/MOSS-TTSD-v0.5:alex 音色」里的音色名识别出来。
+     * 把「用 longanhuan_v3.1 音色」里的音色名识别出来。
      * 中文的「温柔 / 活泼」等属于语气描述，交给大模型组织措辞，不当作音色 ID。
      */
     private static String extractVoice(String style) {
@@ -118,7 +118,7 @@ public record VoiceReplyIntent(boolean requested, String voice, String style, St
             return null;
         }
         String value = style.trim();
-        return value.matches("[A-Za-z0-9][A-Za-z0-9._/:\\-]{0,79}") ? value : null;
+        return value.matches("[A-Za-z0-9][A-Za-z0-9._/:\\-]{0,119}") ? value : null;
     }
 
     private static String blankToNull(String value) {

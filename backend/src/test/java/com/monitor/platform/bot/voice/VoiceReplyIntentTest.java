@@ -29,20 +29,20 @@ class VoiceReplyIntentTest {
     }
 
     @Test
-    void shouldExtractMossVoiceName() {
-        VoiceReplyIntent intent = VoiceReplyIntent.parse("用 alex 音色语音回复");
+    void shouldExtractQwenVoiceName() {
+        VoiceReplyIntent intent = VoiceReplyIntent.parse("用 longanhuan_v3.1 音色语音回复");
 
         assertTrue(intent.requested());
-        assertEquals("alex", intent.voice());
+        assertEquals("longanhuan_v3.1", intent.voice());
         assertNull(intent.style());
     }
 
     @Test
-    void shouldExtractFullMossVoiceId() {
-        VoiceReplyIntent intent = VoiceReplyIntent.parse("用 fnlp/MOSS-TTSD-v0.5:alex 音色语音回复");
+    void shouldExtractQwenVoiceId() {
+        VoiceReplyIntent intent = VoiceReplyIntent.parse("用 qwen-audio-3.1-tts-flash:longanhuan_v3.1 音色语音回复");
 
         assertTrue(intent.requested());
-        assertEquals("fnlp/MOSS-TTSD-v0.5:alex", intent.voice());
+        assertEquals("qwen-audio-3.1-tts-flash:longanhuan_v3.1", intent.voice());
     }
 
     @Test

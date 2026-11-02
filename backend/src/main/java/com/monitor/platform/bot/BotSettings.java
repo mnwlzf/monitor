@@ -32,7 +32,7 @@ public record BotSettings(
         double errorAlertSpikeRatio,
         /** 同一告警的冷却分钟数。 */
         int errorAlertCooldownMinutes,
-        /** 默认 MOSS 音色（页面可配），例如 fnlp/MOSS-TTSD-v0.5:alex。 */
+        /** 默认 Qwen-Audio-TTS 音色（页面可配），例如 longanhuan_v3.1。 */
         String defaultVoice,
         /** 默认语气/风格（页面可配），用于组织语音回复的文字措辞。 */
         String defaultVoiceStyle
@@ -56,7 +56,7 @@ public record BotSettings(
         this(enabled, allowedGroups, allowedUsers, platformGroups, requireMention, commandPrefix,
                 maxReplyLength, memoryWindow, webSearchForNonAdmin, errorAlertEnabled,
                 errorAlertWindowMinutes, errorAlertMinCount, errorAlertSpikeRatio, errorAlertCooldownMinutes,
-                "fnlp/MOSS-TTSD-v0.5:alex", "自然、友好、简洁");
+                "longanhuan_v3.1", "自然、友好、简洁");
     }
 
     public boolean isGroupAllowed(Long groupId) {

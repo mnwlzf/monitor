@@ -733,7 +733,7 @@ public class BotMessageService {
     /**
      * 发送回复。
      *
-     * <p>用户明确要求语音回复时，优先发送 MOSS-TTSD 合成的语音；语音不可用或发送失败时
+     * <p>用户明确要求语音回复时，优先发送 Qwen-Audio-TTS 合成的语音；语音不可用或发送失败时
      * 退回文字，保证用户至少能收到答案。长回答只朗读开头，并补发完整文字。</p>
      */
     private SendOutcome send(OneBotEvent event, boolean group, BotReport report, BotSettings settings,
