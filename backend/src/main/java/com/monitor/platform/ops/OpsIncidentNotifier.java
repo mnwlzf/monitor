@@ -1,7 +1,10 @@
 package com.monitor.platform.ops;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.QqBotProperties;
 import com.monitor.platform.bot.onebot.OneBotClient;
+import com.monitor.platform.common.util.SecretMasker;
 import com.monitor.platform.mail.MailScene;
 import com.monitor.platform.notify.QqRecipientEntity;
 import com.monitor.platform.notify.QqRecipientRepository;
@@ -16,17 +19,24 @@ import java.util.List;
 public class OpsIncidentNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(OpsIncidentNotifier.class);
+    private static final int MAX_RESPONSE_CHARS = 500;
+    private static final List<String> RESPONSE_KEYS = List.of(
+            "sampleMessage", "sample_message", "responseBody", "response_body",
+            "response", "errorMessage", "error_message", "detail", "issue", "message");
 
     private final QqBotProperties botProperties;
     private final QqRecipientRepository recipientRepository;
     private final OneBotClient oneBotClient;
+    private final ObjectMapper objectMapper;
 
     public OpsIncidentNotifier(QqBotProperties botProperties,
                                QqRecipientRepository recipientRepository,
-                               OneBotClient oneBotClient) {
+                               OneBotClient oneBotClient,
+                               ObjectMapper objectMapper) {
         this.botProperties = botProperties;
         this.recipientRepository = recipientRepository;
         this.oneBotClient = oneBotClient;
+        this.objectMapper = objectMapper;
     }
 
     public void notifyNewIncident(OpsIncidentEntity incident) {
@@ -61,13 +71,48 @@ public class OpsIncidentNotifier {
         }
     }
 
-    private String buildMessage(OpsIncidentEntity incident) {
-        return "【智能运维事故】" + incident.getSeverity() + "\n"
-                + "编号：#" + incident.getId() + "\n"
-                + "故障：" + incident.getTitle() + "\n"
-                + "影响：" + (incident.getImpactSummary() == null ? "—" : incident.getImpactSummary()) + "\n"
-                + "总览：/监控\n"
-                + "查看：/事故 #" + incident.getId() + "\n"
-                + "生成计划：管理员私聊发送 /自愈 #" + incident.getId();
+    String buildMessage(OpsIncidentEntity incident) {
+        StringBuilder message = new StringBuilder("【智能运维事故】")
+                .append(incident.getSeverity()).append('\n')
+                .append("编号：#").append(incident.getId()).append('\n')
+                .append("故障：").append(incident.getTitle()).append('\n')
+                .append("影响：").append(incident.getImpactSummary() == null ? "—" : incident.getImpactSummary());
+        if ("P1".equalsIgnoreCase(incident.getSeverity())) {
+            message.append('\n').append("响应内容：").append(responseContent(incident));
+        }
+        message.append('\n').append("总览：/监控")
+                .append('\n').append("查看：/事故 #").append(incident.getId())
+                .append('\n').append("生成计划：管理员私聊发送 /自愈 #").append(incident.getId());
+        return message.toString();
+    }
+
+    private String responseContent(OpsIncidentEntity incident) {
+        String evidence = incident.getEvidenceJson();
+        if (evidence == null || evidence.isBlank()) {
+            return "未记录";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(evidence);
+            for (String key : RESPONSE_KEYS) {
+                JsonNode value = root.get(key);
+                if (value == null || value.isNull() || value.isMissingNode()) {
+                    continue;
+                }
+                String text = value.isValueNode() ? value.asText("") : value.toString();
+                if (text != null && !text.isBlank()) {
+                    return clip(SecretMasker.redactSecrets(text.strip()));
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("解析智能运维事故响应内容失败: incident={}, reason={}",
+                    incident.getId(), ex.getMessage());
+        }
+        return "未记录";
+    }
+
+    private static String clip(String text) {
+        return text.length() <= MAX_RESPONSE_CHARS
+                ? text
+                : text.substring(0, MAX_RESPONSE_CHARS) + "…";
     }
 }
