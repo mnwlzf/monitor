@@ -532,16 +532,9 @@
 
         <el-form-item label="Qwen 默认音色">
           <el-select v-model="botForm.defaultVoice" filterable style="width: 360px" placeholder="请选择默认音色">
-            <el-option label="龙安欢_v3.1（活泼女声）" value="longanhuan_v3.1" />
-            <el-option label="龙安灵心_v3.1（温柔女声）" value="longanlingxin_v3.1" />
-            <el-option label="许南川（磁性男声）" value="xunanchuan_v3.1" />
-            <el-option label="龙安风悦_v3.1（亲和女声）" value="longanfengyue_v3.1" />
-            <el-option label="于小云_v3.1（元气女声）" value="yuxiaoyun_v3.1" />
-            <el-option label="乔小娇_v3.1（俏丽女声）" value="qiaoxiaojiao_v3.1" />
-            <el-option label="夏小晨_v3.1（明亮女声）" value="xiaxiaochen_v3.1" />
-            <el-option label="安明远_v3.1（清亮男声）" value="anmingyuan_v3.1" />
+            <el-option v-for="voice in qwenVoices" :key="voice.value" :label="voice.label" :value="voice.value" />
           </el-select>
-          <small class="admin-form-hint">使用阿里云百炼 qwen-audio-3.1-tts-flash；用户说「用 longanhuan_v3.1 音色语音回复」时会临时覆盖，未知音色回退到龙安欢</small>
+          <small class="admin-form-hint">使用阿里云百炼 qwen-audio-3.1-tts-flash，共 {{ qwenVoices.length }} 个官方系统音色；用户说「用 longanhuan_v3.1 音色语音回复」时会临时覆盖</small>
         </el-form-item>
 
         <el-form-item label="默认语音风格">
@@ -909,6 +902,100 @@ async function saveNotification() {
     savingNotification.value = false
   }
 }
+
+const qwenVoices = `
+龙安欢_v3.1|longanhuan_v3.1
+龙安灵心_v3.1|longanlingxin_v3.1
+龙安风悦_v3.1|longanfengyue_v3.1
+许南川|xunanchuan_v3.1
+于小云|yuxiaoyun_v3.1
+乔小娇|qiaoxiaojiao_v3.1
+夏小晨|xiaxiaochen_v3.1
+安明远|anmingyuan_v3.1
+温怀清|wenhuaiqing_v3.1
+安小岚|anxiaolan_v3.1
+谢舒柔|xieshurou_v3.1
+白清岚|baiqinglan_v3.1
+许玉远|xuyuyuan_v3.1
+安若柔|anruorou_v3.1
+闻怀之|wenhuaizhi_v3.1
+萧行之|xiaoxingzhi_v3.1
+顾云舒|guyunshu_v3.1
+霍拙石|huozhuoshi_v3.1
+叶清禾|yeqinghe_v3.1
+云欢欢|yunhuanhuan_v3.1
+徐小俏|xuxiaoqiao_v3.1
+白安然|baianran_v3.1
+许言初|xuyanchu_v3.1
+叶知晴|yezhiqing_v3.1
+安迪|andi_v3.1
+安语晴|anyuqing_v3.1
+林小灵|linxiaoling_v3.1
+龙菲菲_v3.1|longfeifei_v3.1
+龙婧_v3.1|longjing_v3.1
+龙嫱_v3.1|longqiang_v3.1
+龙颜_v3.1|longyan_v3.1
+龙小白_v3.1|longxiaobai_v3.1
+龙悦_v3.1|longyue_v3.1
+龙橙_v3.1|longcheng_v3.1
+龙老铁_v3.1|longlaotie_v3.1
+龙邵_v3.1|longshao_v3.1
+龙书_v3.1|longshu_v3.1
+龙泽_v3.1|longze_v3.1
+龙浩_v3.1|longhao_v3.1
+龙津_v3.1|longjin_v3.1
+龙楠_v3.1|longnan_v3.1
+龙硕_v3.1|longshuo_v3.1
+龙天_v3.1|longtian_v3.1
+龙小诚_v3.1|longxiaocheng_v3.1
+龙可_v3.1|longke_v3.1
+Bella_v3.1|loongbella_v3.1
+Emily|Emily_v3.1
+Luna|Luna_v3.1
+Eric|Eric_v3.1
+Luca|Luca_v3.1
+Abby|Abby_v3.1
+Annie|Annie_v3.1
+Ava|Ava_v3.1
+Beth|Beth_v3.1
+Betty|Betty_v3.1
+Cally|Cally_v3.1
+Cindy|Cindy_v3.1
+Donna|Donna_v3.1
+Andy|Andy_v3.1
+Brian|Brian_v3.1
+David|David_v3.1
+龙安元妃_v3.1|longanyuanfei_v3.1
+龙杰力豆_v3.1|longjielidou_v3.1
+龙安灵希_v3.1|longanlingxi_v3.1
+龙火火_v3.1|longhuohuo_v3.1
+龙应桃_v3.1|longyingtao_v3.1
+龙安雅_v3.1|longanya_v3.1
+龙婉_v3.1|longwan_v3.1
+龙星_v3.1|longxing_v3.1
+龙华_v3.1|longhua_v3.1
+龙寒_v3.1|longhan_v3.1
+龙安智_v3.1|longanzhi_v3.1
+龙哲_v3.1|longzhe_v3.1
+龙安洋_v3.1|longanyang_v3.1
+李白_v3.1|libai_v3.1
+龙铃_v3.1|longling_v3.1
+龙牛牛_v3.1|longniuniu_v3.1
+龙闪闪_v3.1|longshanshan_v3.1
+龙泡泡_v3.1|longpaopao_v3.1
+loongstella_v3.1|loongstella_v3.1
+龙媛_v3.1|longyuan_v3.1
+龙妙_v3.1|longmiao_v3.1
+龙三叔_v3.1|longsanshu_v3.1
+龙安莉_v3.1|longanli_v3.1
+龙安温_v3.1|longanwen_v3.1
+龙安朗_v3.1|longanlang_v3.1
+龙小夏_v3.1|longxiaoxia_v3.1
+龙安冲_v3.1|longanchong_v3.1
+`.trim().split('\n').map((item) => {
+  const [label, value] = item.split('|')
+  return { label, value }
+})
 
 const botLoading = ref(false)
 const botSaving = ref(false)

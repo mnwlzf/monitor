@@ -97,16 +97,19 @@ monitor:
       max-images-per-message: ${MONITOR_BOT_VISION_MAX_IMAGES:3}
       timeout: ${MONITOR_BOT_VISION_TIMEOUT:15s}
 
-    # 语音消息：SiliconFlow 语音转写 + 阿里云百炼 Qwen-Audio-TTS 语音回复。
+    # 语音消息：阿里云百炼 Qwen-Audio-ASR + Qwen-Audio-TTS。
     # 只有用户明确说「语音回复 / 用某音色语音回复」时才合成语音。
     speech:
       enabled: ${MONITOR_BOT_SPEECH_ENABLED:false}
-      # 语音转写：SiliconFlow
-      base-url: ${MONITOR_BOT_SPEECH_BASE_URL:https://api.siliconflow.cn}
-      api-key: ${MONITOR_BOT_SPEECH_API_KEY:}
-      transcribe-model: ${MONITOR_BOT_SPEECH_TRANSCRIBE_MODEL:XingChenAGI/XingChenASR-V3.2}
-      fallback-transcribe-model: ${MONITOR_BOT_SPEECH_FALLBACK_TRANSCRIBE_MODEL:FunAudioLLM/SenseVoiceSmall}
-      # 语音合成：阿里云百炼 Qwen-Audio-TTS（独立 Key）
+      # 语音转写：百炼同步 HTTP API，ASR/TTS 可共用工作空间和 Key
+      asr-api-url: ${MONITOR_BOT_SPEECH_ASR_API_URL:}
+      asr-workspace-id: ${MONITOR_BOT_SPEECH_ASR_WORKSPACE_ID:}
+      asr-api-key: ${MONITOR_BOT_SPEECH_ASR_API_KEY:}
+      transcribe-model: ${MONITOR_BOT_SPEECH_TRANSCRIBE_MODEL:qwen-audio-3.1-asr-flash}
+      asr-language-hint: ${MONITOR_BOT_SPEECH_ASR_LANGUAGE_HINT:zh}
+      asr-sample-rate: ${MONITOR_BOT_SPEECH_ASR_SAMPLE_RATE:0}
+      keep-dialect: ${MONITOR_BOT_SPEECH_ASR_KEEP_DIALECT:false}
+      # 语音合成：阿里云百炼 Qwen-Audio-TTS
       tts-ws-url: ${MONITOR_BOT_SPEECH_TTS_WS_URL:}
       tts-workspace-id: ${MONITOR_BOT_SPEECH_TTS_WORKSPACE_ID:}
       tts-region: ${MONITOR_BOT_SPEECH_TTS_REGION:cn-beijing}

@@ -89,23 +89,55 @@ class BotSpeechServiceTest {
     }
 
     @Test
-    void shouldRequireSeparateBailianTtsKey() {
+    void shouldShareBailianKeyBetweenAsrAndTts() {
         BotSpeechProperties properties = new BotSpeechProperties();
         properties.setEnabled(true);
-        properties.setApiKey("siliconflow-key");
-        assertFalse(properties.isTtsUsable());
+        properties.setAsrApiKey("bailian-key");
+        assertTrue(properties.isTranscriptionUsable());
+        assertTrue(properties.isTtsUsable());
 
+        properties.setAsrApiKey("");
         properties.setTtsApiKey("bailian-key");
+        assertTrue(properties.isTranscriptionUsable());
         assertTrue(properties.isTtsUsable());
     }
 
     @Test
-    void shouldBuildWorkspaceTtsUrl() {
+    void shouldBuildWorkspaceAsrAndTtsUrls() {
         BotSpeechProperties properties = new BotSpeechProperties();
         properties.setTtsWorkspaceId("ws-123");
 
         assertEquals("wss://ws-123.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference",
                 properties.effectiveTtsWsUrl());
+        assertEquals("https://ws-123.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+                properties.effectiveAsrApiUrl());
+    }
+
+    @Test
+    void shouldBuildQwenAsrRequestWithBase64Audio() {
+        BotSpeechProperties properties = new BotSpeechProperties();
+        properties.setEnabled(true);
+        properties.setAsrApiKey("bailian-key");
+        BotSpeechService service = new BotSpeechService(properties, mock(OneBotClient.class), new ObjectMapper());
+        BotSpeechService.AudioCandidate candidate = new BotSpeechService.AudioCandidate(
+                new byte[]{1, 2, 3}, "voice.mp3", "audio/mpeg");
+
+        Map<String, Object> request = service.transcribeRequest(candidate, "data:audio/mpeg;base64,AQID");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> input = (Map<String, Object>) request.get("input");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> messages = (List<Map<String, Object>>) input.get("messages");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> content = (List<Map<String, Object>>) messages.get(0).get("content");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> inputAudio = (Map<String, Object>) content.get(0).get("input_audio");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parameters = (Map<String, Object>) request.get("parameters");
+        assertEquals("qwen-audio-3.1-asr-flash", request.get("model"));
+        assertEquals("data:audio/mpeg;base64,AQID", inputAudio.get("data"));
+        assertEquals("mp3", parameters.get("format"));
+        assertEquals(List.of("zh"), parameters.get("language_hints"));
     }
 
     @Test

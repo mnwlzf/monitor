@@ -5,13 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.bot.onebot.OneBotClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.client.MultipartBodyBuilder;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -21,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -40,11 +35,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 机器人语音能力：SiliconFlow 语音转文字 + 阿里云百炼 Qwen-Audio-TTS 语音合成。
+ * 机器人语音能力：阿里云百炼 Qwen-Audio-ASR 语音转文字 + Qwen-Audio-TTS 语音合成。
  *
  * <p>语音文件优先使用 OneBot 消息段里的 URL / base64；拿不到时再调用 OneBot 的
- * {@code /get_record} 转成 mp3。识别失败会自动回退到 SenseVoiceSmall。
- * 语音合成使用百炼 WebSocket 实时协议，音频通过 binary 帧返回后拼成 mp3。</p>
+ * {@code /get_record} 转成 mp3。ASR 使用同步 HTTP API 和 Base64 Data URI，
+ * TTS 使用 WebSocket 实时协议，音频通过 binary 帧返回后拼成 mp3。</p>
  */
 @Service
 public class BotSpeechService {
@@ -53,9 +48,29 @@ public class BotSpeechService {
     private static final int CONNECT_TIMEOUT_MS = 10_000;
     private static final String DEFAULT_VOICE = "longanhuan_v3.1";
     private static final Set<String> QWEN_VOICES = Set.of(
-            "longanhuan_v3.1", "longanlingxin_v3.1", "xunanchuan_v3.1", "longanfengyue_v3.1",
+            "longanhuan_v3.1", "longanlingxin_v3.1", "longanfengyue_v3.1", "xunanchuan_v3.1",
             "yuxiaoyun_v3.1", "qiaoxiaojiao_v3.1", "xiaxiaochen_v3.1", "anmingyuan_v3.1",
-            "wenhuaiqing_v3.1", "anxiaolan_v3.1");
+            "wenhuaiqing_v3.1", "anxiaolan_v3.1", "xieshurou_v3.1", "baiqinglan_v3.1",
+            "xuyuyuan_v3.1", "anruorou_v3.1", "wenhuaizhi_v3.1", "xiaoxingzhi_v3.1",
+            "guyunshu_v3.1", "huozhuoshi_v3.1", "yeqinghe_v3.1", "yunhuanhuan_v3.1",
+            "xuxiaoqiao_v3.1", "baianran_v3.1", "xuyanchu_v3.1", "yezhiqing_v3.1",
+            "andi_v3.1", "anyuqing_v3.1", "linxiaoling_v3.1", "longfeifei_v3.1",
+            "longjing_v3.1", "longqiang_v3.1", "longyan_v3.1", "longxiaobai_v3.1",
+            "longyue_v3.1", "longcheng_v3.1", "longlaotie_v3.1", "longshao_v3.1",
+            "longshu_v3.1", "longze_v3.1", "longhao_v3.1", "longjin_v3.1",
+            "longnan_v3.1", "longshuo_v3.1", "longtian_v3.1", "longxiaocheng_v3.1",
+            "longke_v3.1", "loongbella_v3.1", "Emily_v3.1", "Luna_v3.1",
+            "Eric_v3.1", "Luca_v3.1", "Abby_v3.1", "Annie_v3.1",
+            "Ava_v3.1", "Beth_v3.1", "Betty_v3.1", "Cally_v3.1",
+            "Cindy_v3.1", "Donna_v3.1", "Andy_v3.1", "Brian_v3.1",
+            "David_v3.1", "longanyuanfei_v3.1", "longjielidou_v3.1", "longanlingxi_v3.1",
+            "longhuohuo_v3.1", "longyingtao_v3.1", "longanya_v3.1", "longwan_v3.1",
+            "longxing_v3.1", "longhua_v3.1", "longhan_v3.1", "longanzhi_v3.1",
+            "longzhe_v3.1", "longanyang_v3.1", "libai_v3.1", "longling_v3.1",
+            "longniuniu_v3.1", "longshanshan_v3.1", "longpaopao_v3.1", "loongstella_v3.1",
+            "longyuan_v3.1", "longmiao_v3.1", "longsanshu_v3.1", "longanli_v3.1",
+            "longanwen_v3.1", "longanlang_v3.1", "longxiaoxia_v3.1", "longanchong_v3.1"
+    );
     private static final Map<String, String> LEGACY_VOICES = Map.ofEntries(
             Map.entry("alex", "longanhuan_v3.1"),
             Map.entry("benjamin", "xunanchuan_v3.1"),
@@ -68,7 +83,6 @@ public class BotSpeechService {
 
     private final BotSpeechProperties properties;
     private final OneBotClient oneBotClient;
-    private final RestClient restClient;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -76,7 +90,6 @@ public class BotSpeechService {
         this.properties = properties;
         this.oneBotClient = oneBotClient;
         this.objectMapper = objectMapper;
-        this.restClient = buildRestClient(properties);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(java.time.Duration.ofMillis(CONNECT_TIMEOUT_MS))
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -150,8 +163,8 @@ public class BotSpeechService {
     /**
      * 转写一条语音。
      *
-     * <p>先尝试消息里直接给出的文件，再尝试 OneBot 的 get_record；主模型失败后
-     * 用 SenseVoiceSmall 再试一遍。</p>
+     * <p>先尝试消息里直接给出的文件，再尝试 OneBot 的 get_record；音频以
+     * Base64 Data URI 提交给百炼 Qwen-Audio-ASR 同步 HTTP API。</p>
      */
     public Optional<String> transcribe(VoiceInput input) {
         if (!transcriptionAvailable() || input == null || !input.present()) {
@@ -162,13 +175,7 @@ public class BotSpeechService {
             log.warn("语音消息没有可读取的音频文件: file={}, url={}", input.file(), input.url());
             return Optional.empty();
         }
-        Optional<String> text = transcribeWithModel(candidates, properties.getTranscribeModel());
-        if (text.isEmpty() && !blank(properties.getFallbackTranscribeModel())
-                && !properties.getFallbackTranscribeModel().equals(properties.getTranscribeModel())) {
-            log.info("主语音识别模型失败，回退到 {}", properties.getFallbackTranscribeModel());
-            text = transcribeWithModel(candidates, properties.getFallbackTranscribeModel());
-        }
-        return text;
+        return transcribeWithBailian(candidates);
     }
 
     /**
@@ -200,13 +207,24 @@ public class BotSpeechService {
     /** 把旧 MOSS 音色名映射到 Qwen-Audio-TTS 音色；未知音色回退到配置的兜底音色。 */
     public String resolveVoice(String requestedVoice) {
         String value = normalizeVoiceId(blank(requestedVoice) ? properties.getFallbackVoice() : requestedVoice);
-        value = LEGACY_VOICES.getOrDefault(value, value);
-        if (QWEN_VOICES.contains(value)) {
-            return value;
+        value = LEGACY_VOICES.getOrDefault(value.toLowerCase(Locale.ROOT), value);
+        String canonical = canonicalVoice(value);
+        if (canonical != null) {
+            return canonical;
         }
         String fallback = normalizeVoiceId(properties.getFallbackVoice());
-        fallback = LEGACY_VOICES.getOrDefault(fallback, fallback);
-        return QWEN_VOICES.contains(fallback) ? fallback : DEFAULT_VOICE;
+        fallback = LEGACY_VOICES.getOrDefault(fallback.toLowerCase(Locale.ROOT), fallback);
+        String canonicalFallback = canonicalVoice(fallback);
+        return canonicalFallback == null ? DEFAULT_VOICE : canonicalFallback;
+    }
+
+    private static String canonicalVoice(String value) {
+        for (String voice : QWEN_VOICES) {
+            if (voice.equalsIgnoreCase(value)) {
+                return voice;
+            }
+        }
+        return null;
     }
 
     private static String normalizeVoiceId(String value) {
@@ -218,7 +236,7 @@ public class BotSpeechService {
         if (colon >= 0) {
             trimmed = trimmed.substring(colon + 1);
         }
-        return trimmed.toLowerCase(Locale.ROOT);
+        return trimmed;
     }
 
     private byte[] synthesizeWithBailian(String text, String voice) throws Exception {
@@ -347,26 +365,33 @@ public class BotSpeechService {
         return result;
     }
 
-    private Optional<String> transcribeWithModel(List<AudioCandidate> candidates, String model) {
+    private Optional<String> transcribeWithBailian(List<AudioCandidate> candidates) {
+        String model = properties.getTranscribeModel();
         for (AudioCandidate candidate : candidates) {
             try {
-                MultipartBodyBuilder builder = new MultipartBodyBuilder();
-                builder.part("file", new ByteArrayResource(candidate.bytes()) {
-                    @Override
-                    public String getFilename() {
-                        return candidate.filename();
-                    }
-                }).contentType(MediaType.parseMediaType(candidate.contentType()));
-                builder.part("model", model);
-
-                JsonNode response = restClient.post()
-                        .uri("/v1/audio/transcriptions")
-                        .contentType(MediaType.MULTIPART_FORM_DATA)
-                        .headers(this::authorization)
-                        .body(builder.build())
-                        .retrieve()
-                        .body(JsonNode.class);
-                String text = response == null ? "" : response.path("text").asText("").trim();
+                String dataUri = "data:" + candidate.contentType() + ";base64,"
+                        + Base64.getEncoder().encodeToString(candidate.bytes());
+                Map<String, Object> body = transcribeRequest(candidate, dataUri);
+                HttpRequest request = HttpRequest.newBuilder(URI.create(properties.effectiveAsrApiUrl()))
+                        .timeout(properties.getTimeout())
+                        .header("Authorization", "Bearer " + properties.effectiveBailianApiKey())
+                        .header("Content-Type", "application/json")
+                        .header("X-DashScope-SSE", "disable")
+                        .POST(HttpRequest.BodyPublishers.ofString(
+                                objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
+                        .build();
+                HttpResponse<String> response = httpClient.send(
+                        request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    log.warn("语音识别失败: model={}, file={}, status={}",
+                            model, candidate.filename(), response.statusCode());
+                    continue;
+                }
+                JsonNode root = objectMapper.readTree(response.body());
+                String text = root.path("output").path("sentence").path("text").asText("").trim();
+                if (text.isBlank()) {
+                    text = root.path("output").path("text").asText("").trim();
+                }
                 if (!text.isBlank()) {
                     log.info("语音识别成功: model={}, chars={}", model, text.length());
                     return Optional.of(text);
@@ -377,6 +402,46 @@ public class BotSpeechService {
             }
         }
         return Optional.empty();
+    }
+
+    Map<String, Object> transcribeRequest(AudioCandidate candidate, String dataUri) {
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("format", audioFormat(candidate.filename()));
+        if (properties.getAsrSampleRate() > 0) {
+            parameters.put("sample_rate", String.valueOf(properties.getAsrSampleRate()));
+        }
+        if (!blank(properties.getAsrLanguageHint())) {
+            parameters.put("language_hints", List.of(properties.getAsrLanguageHint().trim()));
+        }
+        if (properties.isKeepDialect()) {
+            parameters.put("keep_dialect", true);
+        }
+
+        Map<String, Object> audio = Map.of("data", dataUri);
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("type", "input_audio");
+        content.put("input_audio", audio);
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", "user");
+        message.put("content", List.of(content));
+        Map<String, Object> input = Map.of("messages", List.of(message));
+
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("model", properties.getTranscribeModel());
+        request.put("input", input);
+        request.put("parameters", parameters);
+        return request;
+    }
+
+    private static String audioFormat(String filename) {
+        String lower = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".wav")) return "wav";
+        if (lower.endsWith(".amr")) return "amr";
+        if (lower.endsWith(".ogg") || lower.endsWith(".opus")) return "opus";
+        if (lower.endsWith(".m4a")) return "m4a";
+        if (lower.endsWith(".flac")) return "flac";
+        if (lower.endsWith(".silk")) return "silk";
+        return "mp3";
     }
 
     private List<AudioCandidate> candidates(VoiceInput input) {
@@ -550,26 +615,6 @@ public class BotSpeechService {
         return contentType.split(";")[0].trim();
     }
 
-    private void authorization(HttpHeaders headers) {
-        if (!blank(properties.getApiKey())) {
-            headers.setBearerAuth(properties.getApiKey().trim());
-        }
-    }
-
-    private static RestClient buildRestClient(BotSpeechProperties properties) {
-        String base = properties.getBaseUrl() == null ? "" : properties.getBaseUrl().trim();
-        if (base.endsWith("/v1")) {
-            base = base.substring(0, base.length() - 3);
-        }
-        if (base.isBlank()) {
-            base = "https://api.siliconflow.cn";
-        }
-        int timeout = (int) Math.min(Integer.MAX_VALUE, Math.max(1000, properties.getTimeout().toMillis()));
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Math.min(CONNECT_TIMEOUT_MS, timeout));
-        factory.setReadTimeout(timeout);
-        return RestClient.builder().baseUrl(base.replaceAll("/+$", "")).requestFactory(factory).build();
-    }
 
     private static String text(JsonNode node, String field) {
         String value = node.path(field).asText("");
@@ -711,6 +756,6 @@ public class BotSpeechService {
         }
     }
 
-    private record AudioCandidate(byte[] bytes, String filename, String contentType) {
+    record AudioCandidate(byte[] bytes, String filename, String contentType) {
     }
 }
