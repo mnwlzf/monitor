@@ -62,6 +62,15 @@ public class AccountApiKeyRepository {
     }
 
     /**
+     * 批量查询多个账号的密钥，供初始化聚合接口一次读取。
+     */
+    public List<AccountApiKeyEntity> findByAccounts(Collection<Integer> accountIds, boolean activeOnly) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
+        }
+        return apiKeyMapper.selectKeysByAccounts(accountIds, activeOnly);
+    }
+    /**
      * 按平台与密钥 SHA-256 查询有效的本地密钥主键，供号池账号自动绑定使用。
      */
     public Optional<Long> findActiveKeyIdByHash(Integer platformId, String keyHash) {

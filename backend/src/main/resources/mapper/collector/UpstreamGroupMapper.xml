@@ -93,6 +93,18 @@
         ORDER BY group_name ASC
     </select>
 
+    <select id="selectGroupsByAccounts" resultMap="UpstreamGroupResultMap">
+        SELECT <include refid="UpstreamGroupColumns"/>
+        FROM upstream_groups
+        WHERE account_id IN
+        <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
+            #{accountId}
+        </foreach>
+        <if test="activeOnly">
+            AND is_active = TRUE
+        </if>
+        ORDER BY account_id ASC, group_name ASC
+    </select>
     <select id="selectGroupsByAccountAndPlatformType" resultMap="UpstreamGroupResultMap">
         SELECT <include refid="UpstreamGroupColumns"/>
         FROM upstream_groups

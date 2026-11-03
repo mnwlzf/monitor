@@ -5,6 +5,7 @@ import com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMappe
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -45,6 +46,17 @@ public class UpstreamChangeEventRepository {
     public List<UpstreamChangeEventEntity> findRecent(Integer accountId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 1000));
         return eventMapper.selectRecentEvents(accountId, safeLimit);
+    }
+
+    /**
+     * 批量查询多个账号最近的变更事件，供初始化聚合接口一次读取。
+     */
+    public List<UpstreamChangeEventEntity> findRecentByAccounts(Collection<Integer> accountIds, int limit) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        return eventMapper.selectRecentEventsByAccounts(accountIds, safeLimit);
     }
 
     /**

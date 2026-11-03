@@ -74,6 +74,15 @@ public class UpstreamGroupRepository {
     }
 
     /**
+     * 批量查询多个账号的渠道，供初始化聚合接口一次读取。
+     */
+    public List<UpstreamGroupEntity> findByAccounts(Collection<Integer> accountIds, boolean activeOnly) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
+        }
+        return groupMapper.selectGroupsByAccounts(accountIds, activeOnly);
+    }
+    /**
      * 查询账号指定平台类型下的渠道，可选择只返回有效渠道。
      */
     public List<UpstreamGroupEntity> findByAccountAndPlatformType(Integer accountId,

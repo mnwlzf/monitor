@@ -27,6 +27,9 @@ public interface AccountApiKeyMapper {
     /** 按主键查询密钥。 */
     AccountApiKeyEntity selectKeyById(@Param("id") Long id);
 
+    /** 批量查询多个账号的密钥，供初始化聚合接口一次读取。 */
+    List<AccountApiKeyEntity> selectKeysByAccounts(@Param("accountIds") Collection<Integer> accountIds,
+                                                   @Param("activeOnly") boolean activeOnly);
     /** 查询账号下的密钥，可选择只返回有效密钥。 */
     List<AccountApiKeyEntity> selectKeysByAccount(@Param("accountId") Integer accountId,
                                                   @Param("activeOnly") boolean activeOnly);

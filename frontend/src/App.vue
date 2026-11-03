@@ -44,16 +44,10 @@
         </div>
       </el-header>
 
-      <el-main
-        v-loading="loading && hasLoadedOnce"
-        element-loading-text="正在加载监控数据…"
-        element-loading-custom-class="admin-refresh-loading"
-        element-loading-background="rgba(244, 247, 246, 0.76)"
-        class="admin-main"
-      >
-        <!-- 首次加载展示骨架屏，避免白屏；后续刷新用遮罩 -->
-        <el-skeleton v-if="loading && !hasLoadedOnce" class="admin-main-skeleton" :rows="10" animated />
-        <template v-else>
+      <el-main class="admin-main">
+        <!-- 加载状态不阻塞页面操作：仅显示顶部细进度条，数据到达后原地填充。 -->
+        <div v-if="loading" class="admin-loading-bar" aria-hidden="true"><span></span></div>
+        <template>
         <OverviewView
           v-if="currentPage === 'overview'"
           :accounts="accountList"
@@ -125,7 +119,7 @@ import SettingsView from './views/SettingsView.vue'
 import PoolView from './views/PoolView.vue'
 import OpsView from './views/OpsView.vue'
 import LoginView from './views/LoginView.vue'
-import { collectAccountRecord, listAccountRecords, listApiKeyRecords, listChangeRecords, listGroupRecords, listPlatformRecords, listUsageDashboardRecords } from './api/accounts'
+import { collectAccountRecord, getDashboardRecords } from './api/accounts'
 import { fetchCurrentUser, logout as logoutRequest } from './api/auth'
 import { isUnauthorized } from './api/client'
 import type { Account, ApiKey, ChangeEvent, Channel, CurrentUser, MetricPoint, Platform, UsageDashboard } from './types'
@@ -160,7 +154,6 @@ const usageDashboards = ref<UsageDashboard[]>([])
 const apiKeys = ref<ApiKey[]>([])
 const lastUpdated = ref(formatTime(new Date()))
 const loading = ref(false)
-const hasLoadedOnce = ref(false)
 
 const isAdmin = computed(() => currentUser.value?.admin === true)
 const visibleNavItems = computed(() => navItems.filter(item => !item.adminOnly || isAdmin.value))
@@ -171,10 +164,24 @@ function selectPage(index: string) {
   currentPage.value = index as PageKey
 }
 
+let loadPromise: Promise<boolean> | null = null
+let loadGeneration = 0
+
+function clearDashboardData() {
+  platformList.value = []
+  accountList.value = []
+  channels.value = []
+  changes.value = []
+  metricSeries.value = {}
+  usageDashboards.value = []
+  apiKeys.value = []
+  selectedAccountId.value = 0
+}
+
 async function bootstrap() {
   try {
     currentUser.value = await fetchCurrentUser()
-    await loadRemoteData()
+    if (currentUser.value) void loadRemoteData()
   } catch (error) {
     if (!isUnauthorized(error)) {
       ElMessage.error(error instanceof Error ? error.message : '登录状态校验失败')
@@ -185,9 +192,10 @@ async function bootstrap() {
   }
 }
 
-async function handleLoggedIn(user: CurrentUser) {
+function handleLoggedIn(user: CurrentUser) {
   currentUser.value = user
-  await loadRemoteData()
+  currentPage.value = 'overview'
+  void loadRemoteData()
 }
 
 async function handleLogout() {
@@ -196,64 +204,80 @@ async function handleLogout() {
   } catch {
     // 退出失败也清理本地状态，强制回到登录页
   }
+  loadGeneration += 1
+  loadPromise = null
+  loading.value = false
   currentUser.value = null
-  platformList.value = []
-  accountList.value = []
-  channels.value = []
-  changes.value = []
-  usageDashboards.value = []
-  selectedAccountId.value = 0
+  clearDashboardData()
   ElMessage.success('已退出登录')
 }
 
 async function refresh() {
-  await loadRemoteData()
-  ElMessage.success('数据已刷新')
+  if (loading.value) return
+  if (await loadRemoteData()) {
+    ElMessage.success('数据已刷新')
+  }
 }
 
-async function loadRemoteData() {
+/**
+ * 初始化/刷新共用一次聚合请求。并发调用会复用同一个 Promise，
+ * 失败时保留已有数据，避免刷新失败把工作区清空。
+ */
+async function loadRemoteData(): Promise<boolean> {
+  if (loadPromise) return loadPromise
+
+  const generation = ++loadGeneration
   loading.value = true
-  try {
-    platformList.value = await listPlatformRecords()
-    const accountGroups = await Promise.all(platformList.value.map(platform => listAccountRecords(platform)))
-    accountList.value = accountGroups.flat()
-  const accountCountByPlatform = accountList.value.reduce<Record<number, number>>((acc, account) => {
-    acc[account.platformId] = (acc[account.platformId] ?? 0) + 1
-    return acc
-  }, {})
-  platformList.value = platformList.value.map(platform => ({
-    ...platform,
-    accountCount: accountCountByPlatform[platform.id] ?? 0,
-    lastCollectedAt: accountList.value
-      .filter(account => account.platformId === platform.id && account.lastCollectedAt)
-      .map(account => account.lastCollectedAt as string)
-      .sort()
-      .at(-1) ?? null,
-  }))
-    const accountMap = new Map(accountList.value.map(account => [account.id, account]))
-    const groupGroups = await Promise.all(platformList.value.map(platform => listGroupRecords(platform, accountMap)))
-    channels.value = groupGroups.flat()
-    const changeGroups = await Promise.all(platformList.value.map(platform => listChangeRecords(platform)))
-    changes.value = changeGroups.flat().sort((a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime())
-    const usageGroups = await Promise.all(platformList.value.map(platform => listUsageDashboardRecords(platform)))
-    usageDashboards.value = usageGroups.flat()
-    const apiKeyGroups = await Promise.all(platformList.value.map(platform => listApiKeyRecords(platform)))
-    apiKeys.value = apiKeyGroups.flat()
-    selectedAccountId.value = accountList.value[0]?.id ?? 0
-    lastUpdated.value = formatTime(new Date())
-  } catch (error) {
-    if (isUnauthorized(error)) {
-      currentUser.value = null
-      return
+  const task = (async () => {
+    try {
+      const data = await getDashboardRecords()
+      if (generation !== loadGeneration || !currentUser.value) return false
+
+      const accountCountByPlatform = data.accounts.reduce<Record<number, number>>((acc, account) => {
+        acc[account.platformId] = (acc[account.platformId] ?? 0) + 1
+        return acc
+      }, {})
+      const lastCollectedByPlatform = data.accounts.reduce<Record<number, string>>((acc, account) => {
+        if (!account.lastCollectedAt) return acc
+        const current = acc[account.platformId]
+        if (!current || account.lastCollectedAt > current) acc[account.platformId] = account.lastCollectedAt
+        return acc
+      }, {})
+
+      platformList.value = data.platforms.map(platform => ({
+        ...platform,
+        accountCount: accountCountByPlatform[platform.id] ?? 0,
+        lastCollectedAt: lastCollectedByPlatform[platform.id] ?? null,
+      }))
+      accountList.value = data.accounts
+      channels.value = data.channels
+      changes.value = data.changes
+      usageDashboards.value = data.usageDashboards
+      apiKeys.value = data.apiKeys
+      if (!accountList.value.some(account => account.id === selectedAccountId.value)) {
+        selectedAccountId.value = accountList.value[0]?.id ?? 0
+      }
+      lastUpdated.value = formatTime(new Date())
+      return true
+    } catch (error) {
+      if (generation !== loadGeneration) return false
+      if (isUnauthorized(error)) {
+        currentUser.value = null
+        clearDashboardData()
+        return false
+      }
+      ElMessage.error(error instanceof Error ? error.message : '后端数据加载失败')
+      return false
+    } finally {
+      if (generation === loadGeneration) loading.value = false
     }
-    platformList.value = []
-    accountList.value = []
-    usageDashboards.value = []
-    selectedAccountId.value = 0
-    ElMessage.error(error instanceof Error ? error.message : '后端数据加载失败')
+  })()
+
+  loadPromise = task
+  try {
+    return await task
   } finally {
-    loading.value = false
-    hasLoadedOnce.value = true
+    if (loadPromise === task) loadPromise = null
   }
 }
 

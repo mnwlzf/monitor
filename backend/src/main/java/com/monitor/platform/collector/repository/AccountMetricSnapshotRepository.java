@@ -39,6 +39,16 @@ public class AccountMetricSnapshotRepository {
     }
 
     /**
+     * 批量查询多个账号各自的最新指标快照，避免逐账号查库。
+     */
+    public List<AccountMetricSnapshotEntity> findLatestByAccounts(List<Integer> accountIds) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
+        }
+        return snapshotMapper.selectLatestSnapshotsByAccounts(accountIds);
+    }
+
+    /**
      * 查询账号在时间区间内的指标快照，并限制最大返回数量。
      */
     public List<AccountMetricSnapshotEntity> findByAccount(Integer accountId,

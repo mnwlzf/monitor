@@ -8,6 +8,10 @@ import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEnt
 import com.monitor.platform.common.exception.BusinessException;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * 账号的公共访问规则：归属校验 + 接口响应映射。
  *
@@ -43,6 +47,27 @@ public class UpstreamAccountAccess {
      */
     public AccountResponse toResponse(AccountEntity entity) {
         AccountMetricSnapshotEntity snapshot = metricSnapshotRepository.findLatest(entity.getId()).orElse(null);
+        return toResponse(entity, snapshot);
+    }
+
+    /**
+     * 批量映射账号响应：一次读取所有账号的最新指标快照，避免逐账号 N+1 查询。
+     */
+    public List<AccountResponse> toResponses(List<AccountEntity> entities) {
+        if (entities == null || entities.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> accountIds = entities.stream().map(AccountEntity::getId).toList();
+        Map<Integer, AccountMetricSnapshotEntity> latestSnapshots = new HashMap<>();
+        for (AccountMetricSnapshotEntity snapshot : metricSnapshotRepository.findLatestByAccounts(accountIds)) {
+            latestSnapshots.put(snapshot.getAccountId(), snapshot);
+        }
+        return entities.stream()
+                .map(entity -> toResponse(entity, latestSnapshots.get(entity.getId())))
+                .toList();
+    }
+
+    private AccountResponse toResponse(AccountEntity entity, AccountMetricSnapshotEntity snapshot) {
         return new AccountResponse(
                 entity.getId(),
                 entity.getPlatformId(),

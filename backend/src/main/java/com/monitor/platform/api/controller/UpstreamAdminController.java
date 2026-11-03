@@ -8,10 +8,12 @@ import com.monitor.platform.api.dto.CreateAccountRequest;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
 import com.monitor.platform.api.dto.PlatformResponse;
 import com.monitor.platform.api.dto.UpstreamChangeEventResponse;
+import com.monitor.platform.api.dto.UpstreamDashboardResponse;
 import com.monitor.platform.api.dto.UpstreamGroupResponse;
 import com.monitor.platform.api.dto.UpdateAccountRequest;
 import com.monitor.platform.api.dto.UpdatePlatformRequest;
 import com.monitor.platform.api.service.UpstreamAdminService;
+import com.monitor.platform.api.service.UpstreamDashboardService;
 import com.monitor.platform.api.service.UpstreamUsageService;
 import com.monitor.platform.collector.application.CollectionService;
 import com.monitor.platform.common.response.ApiResponse;
@@ -38,13 +40,16 @@ public class UpstreamAdminController {
 
     private final UpstreamAdminService upstreamAdminService;
     private final UpstreamUsageService upstreamUsageService;
+    private final UpstreamDashboardService dashboardService;
     private final CollectionService collectionService;
 
     public UpstreamAdminController(UpstreamAdminService upstreamAdminService,
                                    UpstreamUsageService upstreamUsageService,
+                                   UpstreamDashboardService dashboardService,
                                    CollectionService collectionService) {
         this.upstreamAdminService = upstreamAdminService;
         this.upstreamUsageService = upstreamUsageService;
+        this.dashboardService = dashboardService;
         this.collectionService = collectionService;
     }
 
@@ -56,6 +61,16 @@ public class UpstreamAdminController {
     @GetMapping("/instances")
     public ApiResponse<List<PlatformResponse>> listInstances() {
         return ApiResponse.of(upstreamAdminService.listPlatforms(), null);
+    }
+
+    /**
+     * 一次性读取登录后初始化所需的全部监控数据。
+     *
+     * @return 平台、账号、渠道、变更、用量和密钥
+     */
+    @GetMapping("/dashboard")
+    public ApiResponse<UpstreamDashboardResponse> dashboard() {
+        return ApiResponse.of(dashboardService.loadDashboard(), null);
     }
 
     /**

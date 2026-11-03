@@ -2,10 +2,12 @@ package com.monitor.platform.api.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.platform.api.dto.AccountMetricPointResponse;
+import com.monitor.platform.api.dto.AccountResponse;
 import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
 import com.monitor.platform.api.dto.PlatformResponse;
 import com.monitor.platform.api.dto.UpdatePlatformRequest;
+import com.monitor.platform.api.dto.UpstreamDashboardResponse;
 import com.monitor.platform.collector.application.AccountCredentialService;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
 import com.monitor.platform.collector.repository.AccountApiKeyRepository;
@@ -295,6 +297,65 @@ class UpstreamAdminServicesTest {
         assertFalse(rows.get(0).metrics().has("today_actual_cost"));
     }
 
+    @Test
+    void shouldAggregateDashboardWithBatchReads() {
+        PlatformEntity platform = platform(1, "云眠", "https://a", "newapi");
+        AccountEntity account = new AccountEntity();
+        account.setId(10);
+        account.setPlatformId(1);
+        account.setDisplayName("account");
+        account.setPlatform("newapi");
+
+        when(platformRepository.findAll()).thenReturn(List.of(platform));
+        when(accountRepository.findAll()).thenReturn(List.of(account));
+        when(metricSnapshotRepository.findLatestByAccounts(List.of(10))).thenReturn(List.of());
+        when(groupRepository.findByAccounts(List.of(10), false)).thenReturn(List.of());
+        when(apiKeyRepository.findByAccounts(List.of(10), false)).thenReturn(List.of());
+        when(changeEventRepository.findRecentByAccounts(List.of(10), 500)).thenReturn(List.of());
+        when(usageDashboardRepository.findLatestByAccounts(List.of(10))).thenReturn(List.of());
+
+        UpstreamDashboardResponse response =
+                new UpstreamDashboardService(service, usageService, accountRepository).loadDashboard();
+
+        assertEquals(1, response.platforms().size());
+        assertEquals(1, response.accounts().size());
+        assertTrue(response.groups().isEmpty());
+        assertTrue(response.changes().isEmpty());
+        assertTrue(response.usageDashboards().isEmpty());
+        assertTrue(response.apiKeys().isEmpty());
+        verify(groupRepository).findByAccounts(List.of(10), false);
+        verify(apiKeyRepository).findByAccounts(List.of(10), false);
+        verify(changeEventRepository).findRecentByAccounts(List.of(10), 500);
+    }
+
+    @Test
+    void shouldBatchLoadLatestAccountMetrics() {
+        AccountEntity first = new AccountEntity();
+        first.setId(10);
+        first.setPlatformId(1);
+        first.setDisplayName("first");
+        AccountEntity second = new AccountEntity();
+        second.setId(11);
+        second.setPlatformId(1);
+        second.setDisplayName("second");
+
+        AccountMetricSnapshotEntity snapshot = new AccountMetricSnapshotEntity();
+        snapshot.setAccountId(10);
+        snapshot.setBalance(new BigDecimal("12.34"));
+
+        when(platformRepository.findById(1))
+                .thenReturn(Optional.of(platform(1, "云眠", "https://a", "newapi")));
+        when(accountRepository.findByPlatformId(1)).thenReturn(List.of(first, second));
+        when(metricSnapshotRepository.findLatestByAccounts(List.of(10, 11)))
+                .thenReturn(List.of(snapshot));
+
+        List<AccountResponse> rows = service.listAccounts(1);
+
+        assertEquals(2, rows.size());
+        assertEquals(new BigDecimal("12.34"), rows.get(0).balance());
+        verify(metricSnapshotRepository).findLatestByAccounts(List.of(10, 11));
+        verify(metricSnapshotRepository, never()).findLatest(ArgumentMatchers.anyInt());
+    }
     @Test
     void shouldRejectDeleteWhenPlatformStillHasAccounts() {
         when(platformRepository.findById(1)).thenReturn(Optional.of(platform(1, "有账号", "https://a", "sub2api")));

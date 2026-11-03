@@ -25,7 +25,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 上游平台与账号管理：平台/账号增删改查、凭证、渠道与密钥的读取。
@@ -303,7 +306,14 @@ public class UpstreamAdminService {
     public List<AccountResponse> listAccounts(Integer platformId) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
-        return accountRepository.findByPlatformId(platformId).stream().map(accounts::toResponse).toList();
+        return accounts.toResponses(accountRepository.findByPlatformId(platformId));
+    }
+
+    /**
+     * 批量映射账号响应，供初始化聚合接口复用。
+     */
+    List<AccountResponse> toAccountResponses(List<AccountEntity> accountEntities) {
+        return accounts.toResponses(accountEntities);
     }
 
     /** 归一化认证类型：只有显式 TOKEN 才按 Token 处理，其余按密码登录。 */
@@ -392,13 +402,19 @@ public class UpstreamAdminService {
     public List<UpstreamGroupResponse> listGroups(Integer platformId) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
-        List<UpstreamGroupResponse> result = new ArrayList<>();
-        for (AccountEntity account : accountRepository.findByPlatformId(platformId)) {
-            for (UpstreamGroupEntity group : groupRepository.findByAccount(account.getId(), false)) {
-                result.add(toGroupResponse(group));
-            }
-        }
-        return result;
+        List<Integer> accountIds = accountRepository.findByPlatformId(platformId).stream()
+                .map(AccountEntity::getId)
+                .toList();
+        return listGroups(accountIds);
+    }
+
+    /**
+     * 批量读取多个账号的渠道，供初始化聚合接口使用。
+     */
+    List<UpstreamGroupResponse> listGroups(Collection<Integer> accountIds) {
+        return groupRepository.findByAccounts(accountIds, false).stream()
+                .map(this::toGroupResponse)
+                .toList();
     }
 
     /**
@@ -412,9 +428,25 @@ public class UpstreamAdminService {
     public List<AccountApiKeyResponse> listApiKeys(Integer platformId) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
+        return listApiKeys(accountRepository.findByPlatformId(platformId));
+    }
+
+    /**
+     * 批量读取多个账号的 API Key，供初始化聚合接口使用。
+     */
+    List<AccountApiKeyResponse> listApiKeys(List<AccountEntity> accountEntities) {
+        if (accountEntities == null || accountEntities.isEmpty()) {
+            return List.of();
+        }
+        Map<Integer, AccountEntity> accountMap = new HashMap<>();
+        for (AccountEntity account : accountEntities) {
+            accountMap.put(account.getId(), account);
+        }
+        List<Integer> accountIds = accountEntities.stream().map(AccountEntity::getId).toList();
         List<AccountApiKeyResponse> result = new ArrayList<>();
-        for (AccountEntity account : accountRepository.findByPlatformId(platformId)) {
-            for (AccountApiKeyEntity apiKey : apiKeyRepository.findByAccount(account.getId(), false)) {
+        for (AccountApiKeyEntity apiKey : apiKeyRepository.findByAccounts(accountIds, false)) {
+            AccountEntity account = accountMap.get(apiKey.getAccountId());
+            if (account != null) {
                 result.add(toApiKeyResponse(account, apiKey));
             }
         }

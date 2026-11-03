@@ -28,6 +28,10 @@ public interface UpstreamGroupMapper  {
     List<UpstreamGroupEntity> selectGroupsByAccount(@Param("accountId") Integer accountId,
                                                     @Param("activeOnly") boolean activeOnly);
 
+    /** 批量查询多个账号的渠道，供初始化聚合接口一次读取。 */
+    List<UpstreamGroupEntity> selectGroupsByAccounts(
+            @Param("accountIds") Collection<Integer> accountIds,
+            @Param("activeOnly") boolean activeOnly);
     /** 查询账号指定平台类型下的渠道，可选择只返回有效渠道。 */
     List<UpstreamGroupEntity> selectGroupsByAccountAndPlatformType(
             @Param("accountId") Integer accountId,

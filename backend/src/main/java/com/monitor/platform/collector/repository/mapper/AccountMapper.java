@@ -27,6 +27,9 @@ public interface AccountMapper {
     /** 查询平台下的账号列表。 */
     List<AccountEntity> selectAccountsByPlatformId(@Param("platformId") Integer platformId);
 
+    /** 查询所有未删除账号，供初始化聚合接口一次读取。 */
+    List<AccountEntity> selectAllAccounts();
+
     /** 软删除账号。 */
     int softDeleteAccount(@Param("id") Integer id, @Param("deletedAt") OffsetDateTime deletedAt);
 

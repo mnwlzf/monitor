@@ -142,6 +142,17 @@
         LIMIT #{limit}
     </select>
 
+    <select id="selectRecentEventsByAccounts" resultMap="UpstreamChangeEventResultMap">
+        SELECT <include refid="UpstreamChangeEventColumns"/>
+        <include refid="UpstreamChangeEventJoin"/>
+        WHERE e.account_id IN
+        <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
+            #{accountId}
+        </foreach>
+        ORDER BY e.detected_at DESC
+        LIMIT #{limit}
+    </select>
+
     <!--
         正在使用密钥的变更：密钥提醒邮件的数据源。
 

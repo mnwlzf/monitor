@@ -3,6 +3,7 @@ package com.monitor.platform.collector.repository.mapper;
 import com.monitor.platform.collector.repository.entity.UpstreamChangeEventEntity;
 import org.apache.ibatis.annotations.Param;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -17,6 +18,10 @@ public interface UpstreamChangeEventMapper  {
     List<UpstreamChangeEventEntity> selectRecentEvents(@Param("accountId") Integer accountId,
                                                        @Param("limit") int limit);
 
+    /** 批量查询多个账号最近的变更事件，供初始化聚合接口一次读取。 */
+    List<UpstreamChangeEventEntity> selectRecentEventsByAccounts(
+            @Param("accountIds") Collection<Integer> accountIds,
+            @Param("limit") int limit);
     /** 查询指定时间之后、涉及正在使用密钥的变更事件，用于邮件提醒。 */
     List<UpstreamChangeEventEntity> selectInUseKeyEventsSince(@Param("since") java.time.OffsetDateTime since,
                                                              @Param("limit") int limit);

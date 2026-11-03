@@ -108,13 +108,29 @@ public class RateChangeImpactService {
             return Map.of();
         }
 
+        Set<Integer> accountIds = new LinkedHashSet<>();
+        for (UpstreamChangeEventEntity event : rateEvents) {
+            if (event.getAccountId() != null) {
+                accountIds.add(event.getAccountId());
+            }
+        }
+
         Map<Long, PoolAccountView> poolByKey = boundPoolAccounts();
         Map<Integer, List<AccountApiKeyEntity>> keysByAccount = new HashMap<>();
+        for (AccountApiKeyEntity key : apiKeyRepository.findByAccounts(accountIds, false)) {
+            keysByAccount.computeIfAbsent(key.getAccountId(), ignored -> new ArrayList<>()).add(key);
+        }
+        Map<String, String> channelPlatforms = new HashMap<>();
+        for (UpstreamGroupEntity group : upstreamGroupRepository.findByAccounts(accountIds, false)) {
+            if (group.getPlatform() != null && !group.getPlatform().isBlank()) {
+                channelPlatforms.putIfAbsent(groupKey(group.getAccountId(), group.getPlatformType(), group.getExternalGroupId()), group.getPlatform());
+            }
+        }
+
         Map<Long, List<AccountApiKeyEntity>> scopedKeys = new HashMap<>();
         Set<Long> externalIds = new LinkedHashSet<>();
         for (UpstreamChangeEventEntity event : rateEvents) {
-            List<AccountApiKeyEntity> keys = keysByAccount.computeIfAbsent(event.getAccountId(),
-                    accountId -> apiKeyRepository.findByAccount(accountId, false));
+            List<AccountApiKeyEntity> keys = keysByAccount.getOrDefault(event.getAccountId(), List.of());
             List<AccountApiKeyEntity> scoped = scopeKeys(keys, channelOf(event));
             scopedKeys.put(event.getId(), scoped);
             for (AccountApiKeyEntity key : scoped) {
@@ -133,7 +149,7 @@ public class RateChangeImpactService {
                     scopedKeys.getOrDefault(event.getId(), List.of()),
                     poolByKey,
                     groups,
-                    channelPlatform(event)));
+                    channelPlatform(event, channelPlatforms)));
         }
         return result;
     }
@@ -167,14 +183,15 @@ public class RateChangeImpactService {
      *
      * @return 取不到时返回 null（此时不按平台过滤，避免漏报）
      */
-    private String channelPlatform(UpstreamChangeEventEntity event) {
+    private String channelPlatform(UpstreamChangeEventEntity event, Map<String, String> channelPlatforms) {
         if (event.getAccountId() == null || event.getEntityKey() == null || event.getEntityKey().isBlank()) {
             return null;
         }
-        return upstreamGroupRepository.findByAccountAndExternalId(event.getAccountId(), event.getPlatformType(), event.getEntityKey())
-                .map(UpstreamGroupEntity::getPlatform)
-                .filter(platform -> platform != null && !platform.isBlank())
-                .orElse(null);
+        return channelPlatforms.get(groupKey(event.getAccountId(), event.getPlatformType(), event.getEntityKey()));
+    }
+
+    private static String groupKey(Integer accountId, String platformType, String externalGroupId) {
+        return accountId + ":" + platformType + ":" + externalGroupId;
     }
 
     /** 分组平台与渠道平台不一致就跳过；任一为空时不过滤（避免漏报）。 */
@@ -348,19 +365,17 @@ public class RateChangeImpactService {
      */
     private Map<Long, PoolAccountView> boundPoolAccounts() {
         Map<Long, PoolAccountView> result = new HashMap<>();
-        for (Integer platformId : poolAccountRepository.findDistinctPlatformIds()) {
-            for (PoolAccountEntity account : poolAccountRepository.findByPlatform(platformId)) {
-                if (account.getBoundKeyId() == null || account.getExternalAccountId() == null) {
-                    continue;
-                }
-                if (!Boolean.TRUE.equals(account.getSchedulable())) {
-                    continue;
-                }
-                String name = account.getName() == null || account.getName().isBlank()
-                        ? "号池账号 " + account.getExternalAccountId()
-                        : account.getName();
-                result.putIfAbsent(account.getBoundKeyId(), new PoolAccountView(name, account.getExternalAccountId()));
+        for (PoolAccountEntity account : poolAccountRepository.findSchedulableBound()) {
+            if (account.getBoundKeyId() == null || account.getExternalAccountId() == null) {
+                continue;
             }
+            if (!Boolean.TRUE.equals(account.getSchedulable())) {
+                continue;
+            }
+            String name = account.getName() == null || account.getName().isBlank()
+                    ? "号池账号 " + account.getExternalAccountId()
+                    : account.getName();
+            result.putIfAbsent(account.getBoundKeyId(), new PoolAccountView(name, account.getExternalAccountId()));
         }
         return result;
     }

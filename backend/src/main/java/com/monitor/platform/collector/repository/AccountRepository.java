@@ -58,6 +58,12 @@ public class AccountRepository {
         return accountMapper.selectAccountsByPlatformId(platformId);
     }
     /**
+     * 查询所有未删除账号，供初始化聚合接口一次读取。
+     */
+    public List<AccountEntity> findAll() {
+        return accountMapper.selectAllAccounts();
+    }
+    /**
      * 软删除账号，保留历史采集和变更数据。
      */
     public void softDelete(Integer id) {

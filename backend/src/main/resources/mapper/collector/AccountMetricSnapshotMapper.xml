@@ -46,6 +46,15 @@
         LIMIT 1
     </select>
 
+    <select id="selectLatestSnapshotsByAccounts" resultMap="AccountMetricSnapshotResultMap">
+        SELECT DISTINCT ON (account_id) <include refid="AccountMetricSnapshotColumns"/>
+        FROM account_metric_snapshots
+        WHERE account_id IN
+        <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
+            #{accountId}
+        </foreach>
+        ORDER BY account_id, collected_at DESC
+    </select>
     <select id="selectSnapshotsByAccountRange" resultMap="AccountMetricSnapshotResultMap">
         SELECT <include refid="AccountMetricSnapshotColumns"/>
         FROM account_metric_snapshots

@@ -17,6 +17,9 @@ public interface AccountMetricSnapshotMapper  {
     /** 查询账号最新指标快照。 */
     AccountMetricSnapshotEntity selectLatestSnapshot(@Param("accountId") Integer accountId);
 
+    /** 批量查询多个账号各自的最新指标快照。 */
+    List<AccountMetricSnapshotEntity> selectLatestSnapshotsByAccounts(@Param("accountIds") List<Integer> accountIds);
+
     /** 查询账号在时间区间内的指标快照。 */
     List<AccountMetricSnapshotEntity> selectSnapshotsByAccountRange(
             @Param("accountId") Integer accountId,

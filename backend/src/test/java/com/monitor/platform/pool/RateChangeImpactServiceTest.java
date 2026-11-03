@@ -12,12 +12,10 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -47,18 +45,19 @@ class RateChangeImpactServiceTest {
         // 上游渠道 Codex-pro-不降 属于 openai 平台
         UpstreamGroupEntity upstreamGroup = new UpstreamGroupEntity();
         upstreamGroup.setAccountId(10);
+        upstreamGroup.setPlatformType("sub2api");
         upstreamGroup.setExternalGroupId("grp-1");
         upstreamGroup.setGroupName("渠道A");
         upstreamGroup.setPlatform("openai");
-        when(upstreamGroupRepository.findByAccountAndExternalId(anyInt(), any(), any()))
-                .thenReturn(Optional.of(upstreamGroup));
+        when(upstreamGroupRepository.findByAccounts(any(), anyBoolean()))
+                .thenReturn(List.of(upstreamGroup));
 
         AccountApiKeyEntity key = new AccountApiKeyEntity();
         key.setId(100L);
         key.setAccountId(10);
         key.setGroupName("渠道A");
         key.setKeyName("star-key-企业级");
-        when(apiKeyRepository.findByAccount(anyInt(), anyBoolean())).thenReturn(List.of(key));
+        when(apiKeyRepository.findByAccounts(any(), anyBoolean())).thenReturn(List.of(key));
 
         PoolAccountEntity pool = new PoolAccountEntity();
         pool.setId(1L);
@@ -67,8 +66,7 @@ class RateChangeImpactServiceTest {
         pool.setName("满血");
         pool.setBoundKeyId(100L);
         pool.setSchedulable(true);
-        when(poolAccountRepository.findDistinctPlatformIds()).thenReturn(List.of(1));
-        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(pool));
+        when(poolAccountRepository.findSchedulableBound()).thenReturn(List.of(pool));
 
         when(groupRateReader.isAvailable()).thenReturn(true);
         when(groupRateReader.groupsByAccount(any())).thenReturn(Map.of(52064L, List.of(
@@ -130,7 +128,7 @@ class RateChangeImpactServiceTest {
         disabled.setName("停用号");
         disabled.setBoundKeyId(100L);
         disabled.setSchedulable(false);
-        when(poolAccountRepository.findByPlatform(1)).thenReturn(List.of(disabled));
+        when(poolAccountRepository.findSchedulableBound()).thenReturn(List.of(disabled));
 
         assertThat(service.impactOf(rateEvent("0.30", "0.37"))).isEmpty();
     }

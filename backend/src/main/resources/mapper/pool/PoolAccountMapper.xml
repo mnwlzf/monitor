@@ -74,6 +74,15 @@
         ORDER BY external_account_id
     </select>
 
+    <select id="selectSchedulableBound" resultMap="PoolAccountResultMap">
+        SELECT <include refid="PoolAccountColumns"/>
+        FROM pool_accounts
+        WHERE bound_key_id IS NOT NULL
+          AND external_account_id IS NOT NULL
+          AND schedulable = TRUE
+        ORDER BY platform_id, external_account_id
+    </select>
+
     <select id="selectByPlatformAndExternalId" resultMap="PoolAccountResultMap">
         SELECT <include refid="PoolAccountColumns"/>
         FROM pool_accounts

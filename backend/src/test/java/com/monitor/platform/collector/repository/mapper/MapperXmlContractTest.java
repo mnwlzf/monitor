@@ -44,6 +44,16 @@ class MapperXmlContractTest {
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountMapper.selectDueAccountsByPlatform"));
         assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.AccountMapper.selectAllAccounts"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.AccountMetricSnapshotMapper.selectLatestSnapshotsByAccounts"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper.selectGroupsByAccounts"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.AccountApiKeyMapper.selectKeysByAccounts"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper.selectRecentEventsByAccounts"));
+        assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountMetricSnapshotMapper.selectLatestSnapshot"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper.insertGroup"));
@@ -67,5 +77,18 @@ class MapperXmlContractTest {
                 "com.monitor.platform.collector.repository.mapper.AccountApiKeyMapper.deactivateMissingKeys"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountApiKeySnapshotMapper.insertSnapshot"));
+
+        Resource poolAccountMapper = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:/mapper/pool/PoolAccountMapper.xml");
+        try (InputStream inputStream = poolAccountMapper.getInputStream()) {
+            new XMLMapperBuilder(
+                    inputStream,
+                    configuration,
+                    poolAccountMapper.getFilename(),
+                    configuration.getSqlFragments()
+            ).parse();
+        }
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.pool.repository.mapper.PoolAccountMapper.selectSchedulableBound"));
     }
 }

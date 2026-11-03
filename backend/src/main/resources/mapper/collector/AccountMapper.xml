@@ -101,6 +101,12 @@
           AND deleted_at IS NULL
         ORDER BY id DESC
     </select>
+    <select id="selectAllAccounts" resultMap="AccountResultMap">
+        SELECT <include refid="AccountColumns"/>
+        FROM accounts
+        WHERE deleted_at IS NULL
+        ORDER BY platform_id ASC, id DESC
+    </select>
     <select id="selectDueAccountsByPlatform" resultMap="AccountResultMap">
         SELECT <include refid="AccountColumns"/>
         FROM accounts

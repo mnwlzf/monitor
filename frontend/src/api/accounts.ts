@@ -552,3 +552,166 @@ export async function listAccountMetricRecords(account: Account, range: MetricRa
     quotaUnit: row.quotaUnit ?? null,
   }))
 }
+
+interface DashboardDto {
+  platforms: InstanceDto[]
+  accounts: AccountDto[]
+  groups: GroupDto[]
+  changes: ChangeEventDto[]
+  usageDashboards: UsageDashboardDto[]
+  apiKeys: ApiKeyDto[]
+}
+
+/** 登录后初始化聚合数据。 */
+export interface DashboardRecords {
+  platforms: Platform[]
+  accounts: Account[]
+  channels: Channel[]
+  changes: ChangeEvent[]
+  usageDashboards: UsageDashboard[]
+  apiKeys: ApiKey[]
+}
+
+/**
+ * 一次读取登录后初始化所需的全部数据。
+ *
+ * 后端使用批量查询，前端不再按平台扇出账号、渠道、变更、用量和密钥请求。
+ */
+export async function getDashboardRecords(): Promise<DashboardRecords> {
+  const data = await apiRequest<DashboardDto>(
+    '/api/v1/upstream/dashboard',
+    {},
+    { timeoutMs: 20_000 },
+  )
+
+  const platforms: Platform[] = data.platforms.map(row => ({
+    id: Number(row.id),
+    name: row.name,
+    type: row.platform as PlatformType,
+    url: row.baseUrl,
+    status: row.status ?? true,
+    accountCount: 0,
+    lastCollectedAt: null,
+    adminKeyConfigured: row.adminKeyConfigured ?? false,
+    poolMonitoringEnabled: row.poolMonitoringEnabled ?? false,
+  }))
+  const platformMap = new Map(platforms.map(platform => [platform.id, platform]))
+
+  const accounts: Account[] = data.accounts.map(row => {
+    const platformId = Number(row.platformId ?? 0)
+    const platform = platformMap.get(platformId)
+    return mapAccount({
+      id: platformId,
+      name: platform?.name ?? '未知平台',
+      baseUrl: platform?.url ?? '',
+      platform: platform?.type ?? 'newapi',
+    }, row, platform?.type ?? 'newapi')
+  })
+  const accountMap = new Map(accounts.map(account => [account.id, account]))
+
+  const channels: Channel[] = data.groups.map(row => {
+    const account = accountMap.get(Number(row.accountId))
+    const platform = account ? platformMap.get(account.platformId) : undefined
+    return {
+      id: String(row.id),
+      name: row.groupName,
+      platformId: platform?.id ?? account?.platformId ?? 0,
+      platformName: platform?.name ?? account?.platformName ?? '未知平台',
+      platformType: platform?.type ?? account?.platformType ?? 'newapi',
+      platform: row.platform || '',
+      ratio: Number(row.currentRatio ?? 0),
+      baseRatio: row.currentBaseRatio == null ? null : Number(row.currentBaseRatio),
+      status: row.status || (row.active ? 'active' : 'inactive'),
+      accountName: account?.displayName || '未知账号',
+    }
+  })
+
+  const changes: ChangeEvent[] = data.changes.map(row => {
+    const account = accountMap.get(Number(row.accountId ?? 0))
+    const platform = account ? platformMap.get(account.platformId) : undefined
+    return {
+      id: String(row.id),
+      type: row.changeType,
+      platformId: platform?.id ?? account?.platformId ?? 0,
+      platformName: platform?.name ?? account?.platformName ?? '未知平台',
+      platformType: platform?.type ?? account?.platformType ?? 'newapi',
+      entityType: row.entityType || '',
+      entity: row.entityKey || '',
+      entityName: row.keyName || row.groupName || row.entityKey || '',
+      accountId: Number(row.accountId ?? 0),
+      accountName: row.accountName || '',
+      keyStatus: row.keyStatus || '',
+      upstreamKeyNames: row.upstreamKeyNames || '',
+      channelKeyNames: row.channelKeyNames ?? null,
+      channelPoolAccounts: row.channelPoolAccounts ?? null,
+      localKeyNames: row.localKeyNames || '',
+      groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
+      groupActive: row.groupActive ?? null,
+      impacts: (row.impacts ?? []).map(toChangeImpact),
+      field: row.fieldName || '',
+      oldValue: row.oldValue || 'null',
+      newValue: row.newValue || 'null',
+      severity: (row.severity === 'WARNING' || row.severity === 'CRITICAL' ? row.severity : 'INFO') as ChangeEvent['severity'],
+      detectedAt: row.detectedAt || new Date().toISOString(),
+      message: row.message || '',
+      inUse: row.inUse === true,
+    }
+  }).sort((a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime())
+
+  const usageDashboards: UsageDashboard[] = data.usageDashboards.map(row => {
+    const account = accountMap.get(Number(row.accountId))
+    const platform = account ? platformMap.get(account.platformId) : undefined
+    return {
+      id: Number(row.id),
+      accountId: Number(row.accountId),
+      platformId: Number(row.platformId ?? account?.platformId ?? 0),
+      displayName: row.displayName || account?.displayName || `账号 ${row.accountId}`,
+      platformType: (row.platformType as PlatformType) || platform?.type || account?.platformType || 'newapi',
+      balance: toNullableNumber(row.balance),
+      frozenBalance: toNullableNumber(row.frozenBalance),
+      totalRequests: toNullableNumber(row.totalRequests),
+      totalTokens: toNullableNumber(row.totalTokens),
+      totalCost: toNullableNumber(row.totalCost),
+      totalActualCost: toNullableNumber(row.totalActualCost),
+      metrics: row.metrics ?? {},
+      platformStats: row.platformStats ?? [],
+      collectedAt: row.collectedAt || null,
+    }
+  })
+
+  const apiKeys: ApiKey[] = data.apiKeys.map(row => {
+    const account = accountMap.get(Number(row.accountId))
+    const platform = account ? platformMap.get(account.platformId) : undefined
+    return {
+      id: Number(row.id),
+      accountId: Number(row.accountId),
+      platformId: Number(row.platformId ?? account?.platformId ?? 0),
+      accountName: row.accountName || account?.displayName || '',
+      platformType: (row.platformType as PlatformType) || platform?.type || account?.platformType || 'newapi',
+      externalKeyId: row.externalKeyId || '',
+      keyName: row.keyName ?? null,
+      keyMasked: row.keyMasked ?? null,
+      status: row.status || 'UNKNOWN',
+      upstreamStatus: row.upstreamStatus ?? null,
+      groupName: row.groupName ?? null,
+      groupPlatform: row.groupPlatform ?? null,
+      unlimitedQuota: row.unlimitedQuota ?? null,
+      remainQuota: toNullableNumber(row.remainQuota),
+      usedQuota: toNullableNumber(row.usedQuota),
+      quotaUnit: row.quotaUnit ?? null,
+      modelLimitsEnabled: row.modelLimitsEnabled ?? null,
+      modelLimits: row.modelLimits ?? null,
+      allowIps: row.allowIps ?? null,
+      expiresAt: row.expiresAt ?? null,
+      upstreamCreatedAt: row.upstreamCreatedAt ?? null,
+      lastUsedAt: row.lastUsedAt ?? null,
+      active: row.active ?? true,
+      firstSeenAt: row.firstSeenAt ?? null,
+      lastSeenAt: row.lastSeenAt ?? null,
+      lastChangedAt: row.lastChangedAt ?? null,
+      metrics: row.metrics ?? {},
+    }
+  })
+
+  return { platforms, accounts, channels, changes, usageDashboards, apiKeys }
+}

@@ -18,6 +18,8 @@ public interface PoolAccountMapper {
     /** 查询指定平台下的全部号池账号。 */
     List<PoolAccountEntity> selectByPlatform(@Param("platformId") Integer platformId);
 
+    /** 查询所有已绑定 Key 且允许调度的号池账号，供影响评估一次读取。 */
+    List<PoolAccountEntity> selectSchedulableBound();
     /** 按平台与外部账号 ID 查询号池账号。 */
     PoolAccountEntity selectByPlatformAndExternalId(@Param("platformId") Integer platformId,
                                                     @Param("externalAccountId") Long externalAccountId);

@@ -35,6 +35,11 @@ public class PoolAccountRepository {
         return poolAccountMapper.selectByPlatform(platformId);
     }
 
+    /** 查询所有已绑定 Key 且允许调度的号池账号，供影响评估一次读取。 */
+    public List<PoolAccountEntity> findSchedulableBound() {
+        return poolAccountMapper.selectSchedulableBound();
+    }
+
     /** 按平台与外部账号 ID 查询号池账号。 */
     public Optional<PoolAccountEntity> findByPlatformAndExternalId(Integer platformId, Long externalAccountId) {
         return Optional.ofNullable(poolAccountMapper.selectByPlatformAndExternalId(platformId, externalAccountId));

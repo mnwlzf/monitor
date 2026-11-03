@@ -25,6 +25,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -88,11 +89,22 @@ public class UpstreamUsageService {
     public List<UpstreamChangeEventResponse> listChanges(Integer platformId, int limit) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
-        int safeLimit = Math.max(1, Math.min(limit, 500));
-        List<UpstreamChangeEventEntity> events = new ArrayList<>();
-        for (AccountEntity account : accountRepository.findByPlatformId(platformId)) {
-            events.addAll(changeEventRepository.findRecent(account.getId(), safeLimit));
+        List<Integer> accountIds = accountRepository.findByPlatformId(platformId).stream()
+                .map(AccountEntity::getId)
+                .toList();
+        return listChanges(accountIds, limit);
+    }
+
+    /**
+     * 批量读取多个账号最近的变更事件，供初始化聚合接口一次查询。
+     */
+    List<UpstreamChangeEventResponse> listChanges(Collection<Integer> accountIds, int limit) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
         }
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        List<UpstreamChangeEventEntity> events =
+                new ArrayList<>(changeEventRepository.findRecentByAccounts(accountIds, safeLimit));
         events.sort(Comparator.comparing(UpstreamChangeEventEntity::getDetectedAt,
                 Comparator.nullsLast(Comparator.reverseOrder())));
         List<UpstreamChangeEventEntity> shown = events.stream().limit(safeLimit).toList();
@@ -113,8 +125,13 @@ public class UpstreamUsageService {
     public List<AccountUsageDashboardResponse> listUsageDashboard(Integer platformId) {
         platformRepository.findById(platformId)
                 .orElseThrow(() -> BusinessException.of("平台不存在: " + platformId));
+        return listUsageDashboard(accountRepository.findByPlatformId(platformId));
+    }
 
-        List<AccountEntity> accounts = accountRepository.findByPlatformId(platformId);
+    /**
+     * 批量映射多个账号的最新用量看板，供初始化聚合接口一次查询。
+     */
+    List<AccountUsageDashboardResponse> listUsageDashboard(List<AccountEntity> accounts) {
         Map<Integer, AccountEntity> accountMap = new HashMap<>();
         for (AccountEntity account : accounts) {
             accountMap.put(account.getId(), account);

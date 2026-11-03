@@ -112,6 +112,18 @@
         ORDER BY key_name ASC
     </select>
 
+    <select id="selectKeysByAccounts" resultMap="AccountApiKeyResultMap">
+        SELECT <include refid="AccountApiKeyColumns"/>
+        FROM account_api_keys
+        WHERE account_id IN
+        <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
+            #{accountId}
+        </foreach>
+        <if test="activeOnly">
+            AND is_active = TRUE
+        </if>
+        ORDER BY account_id ASC, key_name ASC
+    </select>
     <select id="selectKeyById" resultMap="AccountApiKeyResultMap">
         SELECT <include refid="AccountApiKeyColumns"/>
         FROM account_api_keys
