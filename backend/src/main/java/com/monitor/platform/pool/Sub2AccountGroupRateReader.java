@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -32,6 +33,10 @@ public class Sub2AccountGroupRateReader {
 
     private static final Logger log = LoggerFactory.getLogger(Sub2AccountGroupRateReader.class);
 
+    /** 页面增强数据使用短超时，避免外部只读库拖住接口。 */
+    private static final Duration IMPACT_QUERY_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration FAILURE_COOLDOWN = Duration.ofSeconds(60);
+
     private final Sub2ReadOnlyJdbc jdbc;
 
     /** 权限不足只提示一次，避免每轮采集刷日志。 */
@@ -55,7 +60,7 @@ public class Sub2AccountGroupRateReader {
     }
 
     public boolean isAvailable() {
-        return jdbc.hasConnection();
+        return jdbc.hasConnection() && !jdbc.isInCooldown();
     }
 
     /** 每个账号所属的分组（含分组倍率），按倍率从高到低。 */
@@ -83,7 +88,7 @@ public class Sub2AccountGroupRateReader {
 
         Map<Long, List<AccountGroup>> result = new LinkedHashMap<>();
         try {
-            jdbc.template().query(sql, rs -> {
+            jdbc.template(IMPACT_QUERY_TIMEOUT).query(sql, rs -> {
                 long accountId = rs.getLong("account_id");
                 result.computeIfAbsent(accountId, key -> new ArrayList<>())
                         .add(new AccountGroup(
@@ -93,11 +98,13 @@ public class Sub2AccountGroupRateReader {
                                 rs.getString("platform"),
                                 rs.getBigDecimal("group_ratio")));
             }, Arrays.stream(ids).toArray());
+            jdbc.markAvailable();
         } catch (RuntimeException ex) {
+            jdbc.markUnavailable(FAILURE_COOLDOWN);
             if (!permissionWarned) {
                 permissionWarned = true;
-                log.warn("读取 Sub2API 账号分组失败（通常是只读角色缺少 account_groups 的 SELECT 权限）: {}",
-                        ex.getMessage());
+                log.warn("读取 Sub2API 账号分组失败，影响分析暂停 {} 秒（通常是只读角色缺少 account_groups 的 SELECT 权限或连接不可用）: {}",
+                        FAILURE_COOLDOWN.toSeconds(), ex.getMessage());
             }
             return Map.of();
         }

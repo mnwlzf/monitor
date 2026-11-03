@@ -5,11 +5,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.monitor.platform.api.dto.AccountMetricPointResponse;
 import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.UpstreamChangeEventResponse;
+import com.monitor.platform.api.dto.UpstreamChangeImpactResponse;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
 import com.monitor.platform.collector.repository.AccountRepository;
 import com.monitor.platform.collector.repository.AccountUsageDashboardSnapshotRepository;
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
+import com.monitor.platform.collector.repository.entity.AccountCostRangeEntity;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
@@ -92,13 +94,28 @@ public class UpstreamUsageService {
         List<Integer> accountIds = accountRepository.findByPlatformId(platformId).stream()
                 .map(AccountEntity::getId)
                 .toList();
-        return listChanges(accountIds, limit);
+        return loadChanges(accountIds, limit, true);
     }
 
     /**
-     * 批量读取多个账号最近的变更事件，供初始化聚合接口一次查询。
+     * 批量读取多个账号最近的变更事件，并计算渠道倍率影响。
      */
     List<UpstreamChangeEventResponse> listChanges(Collection<Integer> accountIds, int limit) {
+        return loadChanges(accountIds, limit, true);
+    }
+
+    /**
+     * 初始化关键路径使用：只返回变更事件，不访问 Sub2API 只读库计算影响。
+     *
+     * <p>影响分析依赖外部只读库，网络或权限异常时可能长时间不可用，不能阻塞登录初始化。</p>
+     */
+    List<UpstreamChangeEventResponse> listChangesWithoutImpacts(Collection<Integer> accountIds, int limit) {
+        return loadChangesLite(accountIds, limit);
+    }
+
+    private List<UpstreamChangeEventResponse> loadChanges(Collection<Integer> accountIds,
+                                                          int limit,
+                                                          boolean includeImpacts) {
         if (accountIds == null || accountIds.isEmpty()) {
             return List.of();
         }
@@ -108,11 +125,55 @@ public class UpstreamUsageService {
         events.sort(Comparator.comparing(UpstreamChangeEventEntity::getDetectedAt,
                 Comparator.nullsLast(Comparator.reverseOrder())));
         List<UpstreamChangeEventEntity> shown = events.stream().limit(safeLimit).toList();
-        // 渠道倍率事件顺带评估「我平台哪些分组倒挂」；批量做，避免逐条打库
-        Map<Long, List<RateChangeImpactService.ImpactRow>> impacts =
-                rateChangeImpactService.impactsOf(shown);
+        if (shown.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<RateChangeImpactService.ImpactRow>> impacts = includeImpacts
+                ? rateChangeImpactService.impactsOf(shown)
+                : Map.of();
         return shown.stream()
                 .map(event -> toChangeEventResponse(event, impacts.getOrDefault(event.getId(), List.of())))
+                .toList();
+    }
+
+    private List<UpstreamChangeEventResponse> loadChangesLite(Collection<Integer> accountIds, int limit) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        List<UpstreamChangeEventEntity> events =
+                new ArrayList<>(changeEventRepository.findRecentLiteByAccounts(accountIds, safeLimit));
+        events.sort(Comparator.comparing(UpstreamChangeEventEntity::getDetectedAt,
+                Comparator.nullsLast(Comparator.reverseOrder())));
+        return events.stream()
+                .limit(safeLimit)
+                .map(event -> toChangeEventResponse(event, List.of()))
+                .toList();
+    }
+
+    /**
+     * 单独加载最近变更事件的影响分析，供变更页延迟展示。
+     */
+    public List<UpstreamChangeImpactResponse> listChangeImpacts(int limit) {
+        List<Integer> accountIds = accountRepository.findAll().stream()
+                .map(AccountEntity::getId)
+                .toList();
+        if (accountIds.isEmpty()) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        List<UpstreamChangeEventEntity> events = changeEventRepository.findRecentLiteByAccounts(accountIds, safeLimit);
+        if (events.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<RateChangeImpactService.ImpactRow>> impacts = rateChangeImpactService.impactsOf(events);
+        return events.stream()
+                .filter(event -> impacts.containsKey(event.getId()))
+                .map(event -> new UpstreamChangeImpactResponse(
+                        event.getId(),
+                        impacts.getOrDefault(event.getId(), List.of()).stream()
+                                .map(UpstreamUsageService::toChangeImpact)
+                                .toList()))
                 .toList();
     }
 
@@ -188,34 +249,22 @@ public class UpstreamUsageService {
     private Map<Integer, BigDecimal> calculateNewApiTodayCost(List<Integer> accountIds) {
         OffsetDateTime now = OffsetDateTime.now(REPORT_ZONE);
         OffsetDateTime dayStart = LocalDate.now(REPORT_ZONE).atStartOfDay(REPORT_ZONE).toOffsetDateTime();
-        List<AccountUsageDashboardSnapshotEntity> snapshots =
-                usageDashboardRepository.findByAccounts(accountIds, dayStart, now);
-        if (snapshots.isEmpty()) {
+        List<AccountCostRangeEntity> ranges =
+                usageDashboardRepository.findNewApiCostRangeByAccounts(accountIds, dayStart, now);
+        if (ranges.isEmpty()) {
             return Map.of();
         }
 
-        Map<Integer, BigDecimal> first = new HashMap<>();
-        Map<Integer, BigDecimal> last = new HashMap<>();
-        for (AccountUsageDashboardSnapshotEntity snapshot : snapshots) {
-            if (!PLATFORM_NEW_API.equalsIgnoreCase(snapshot.getPlatformType())
-                    || snapshot.getTotalCost() == null) {
-                continue;
-            }
-            first.putIfAbsent(snapshot.getAccountId(), snapshot.getTotalCost());
-            last.put(snapshot.getAccountId(), snapshot.getTotalCost());
-        }
-
         Map<Integer, BigDecimal> result = new HashMap<>();
-        for (Map.Entry<Integer, BigDecimal> entry : last.entrySet()) {
-            BigDecimal firstCost = first.get(entry.getKey());
-            if (firstCost == null) {
+        for (AccountCostRangeEntity range : ranges) {
+            if (range.getFirstCost() == null || range.getLastCost() == null) {
                 continue;
             }
-            BigDecimal delta = entry.getValue().subtract(firstCost);
+            BigDecimal delta = range.getLastCost().subtract(range.getFirstCost());
             if (delta.signum() < 0) {
                 continue;
             }
-            result.put(entry.getKey(), delta);
+            result.put(range.getAccountId(), delta);
         }
         return result;
     }

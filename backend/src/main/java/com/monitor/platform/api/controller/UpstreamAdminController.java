@@ -8,6 +8,8 @@ import com.monitor.platform.api.dto.CreateAccountRequest;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
 import com.monitor.platform.api.dto.PlatformResponse;
 import com.monitor.platform.api.dto.UpstreamChangeEventResponse;
+import com.monitor.platform.api.dto.UpstreamChangeImpactResponse;
+import com.monitor.platform.api.dto.UpstreamDashboardDetailsResponse;
 import com.monitor.platform.api.dto.UpstreamDashboardResponse;
 import com.monitor.platform.api.dto.UpstreamGroupResponse;
 import com.monitor.platform.api.dto.UpdateAccountRequest;
@@ -73,6 +75,13 @@ public class UpstreamAdminController {
         return ApiResponse.of(dashboardService.loadDashboard(), null);
     }
 
+    /**
+     * 后台补齐初始化明细，避免渠道、API Key 和完整变更阻塞首屏。
+     */
+    @GetMapping("/dashboard/details")
+    public ApiResponse<UpstreamDashboardDetailsResponse> dashboardDetails() {
+        return ApiResponse.of(dashboardService.loadDashboardDetails(), null);
+    }
     /**
      * 新建上游平台。
      *
@@ -213,6 +222,17 @@ public class UpstreamAdminController {
         return ApiResponse.of(upstreamUsageService.listUsageDashboard(instanceId), null);
     }
 
+    /**
+     * 单独加载最近变更事件的影响分析，避免阻塞登录初始化。
+     *
+     * @param limit 最大返回条数
+     * @return 事件 ID 及其影响行
+     */
+    @GetMapping("/change-impacts")
+    public ApiResponse<List<UpstreamChangeImpactResponse>> listChangeImpacts(
+            @RequestParam(defaultValue = "200") int limit) {
+        return ApiResponse.of(upstreamUsageService.listChangeImpacts(limit), null);
+    }
     /**
      * 查询平台下最近的渠道变更事件。
      *

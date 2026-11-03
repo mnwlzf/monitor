@@ -22,6 +22,10 @@ public interface UpstreamChangeEventMapper  {
     List<UpstreamChangeEventEntity> selectRecentEventsByAccounts(
             @Param("accountIds") Collection<Integer> accountIds,
             @Param("limit") int limit);
+    /** 批量查询轻量变更事件，供初始化与页面首屏使用。 */
+    List<UpstreamChangeEventEntity> selectRecentEventsByAccountsLite(
+            @Param("accountIds") Collection<Integer> accountIds,
+            @Param("limit") int limit);
     /** 查询指定时间之后、涉及正在使用密钥的变更事件，用于邮件提醒。 */
     List<UpstreamChangeEventEntity> selectInUseKeyEventsSince(@Param("since") java.time.OffsetDateTime since,
                                                              @Param("limit") int limit);

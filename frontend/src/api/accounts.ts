@@ -715,3 +715,139 @@ export async function getDashboardRecords(): Promise<DashboardRecords> {
 
   return { platforms, accounts, channels, changes, usageDashboards, apiKeys }
 }
+
+interface ChangeImpactResponseDto {
+  eventId: string | number
+  impacts?: ChangeImpactDto[]
+}
+
+/**
+ * 延迟加载最近变更事件的影响分析。
+ *
+ * 该接口依赖外部 Sub2API 只读库，不参与登录初始化关键路径；失败时页面仍可展示变更列表。
+ */
+export async function getChangeImpacts(): Promise<Map<number, ChangeImpact[]>> {
+  const rows = await apiRequest<ChangeImpactResponseDto[]>(
+    '/api/v1/upstream/change-impacts?limit=200',
+    {},
+    { timeoutMs: 12_000 },
+  )
+  return new Map(rows.map(row => [
+    Number(row.eventId),
+    (row.impacts ?? []).map(toChangeImpact),
+  ]))
+}
+
+interface DashboardDetailsDto {
+  groups: GroupDto[]
+  changes: ChangeEventDto[]
+  apiKeys: ApiKeyDto[]
+}
+
+/** 初始化后台明细数据。 */
+export interface DashboardDetailsRecords {
+  channels: Channel[]
+  changes: ChangeEvent[]
+  apiKeys: ApiKey[]
+}
+
+/**
+ * 后台补加载渠道、完整变更和 API Key，不阻塞登录首屏。
+ */
+export async function getDashboardDetails(
+  platforms: Platform[],
+  accounts: Account[],
+): Promise<DashboardDetailsRecords> {
+  const data = await apiRequest<DashboardDetailsDto>(
+    '/api/v1/upstream/dashboard/details',
+    {},
+    { timeoutMs: 20_000 },
+  )
+  const platformMap = new Map(platforms.map(platform => [platform.id, platform]))
+  const accountMap = new Map(accounts.map(account => [account.id, account]))
+
+  const channels: Channel[] = data.groups.map(row => {
+    const account = accountMap.get(Number(row.accountId))
+    const platform = account ? platformMap.get(account.platformId) : undefined
+    return {
+      id: String(row.id),
+      name: row.groupName,
+      platformId: platform?.id ?? account?.platformId ?? 0,
+      platformName: platform?.name ?? account?.platformName ?? '未知平台',
+      platformType: platform?.type ?? account?.platformType ?? 'newapi',
+      platform: row.platform || '',
+      ratio: Number(row.currentRatio ?? 0),
+      baseRatio: row.currentBaseRatio == null ? null : Number(row.currentBaseRatio),
+      status: row.status || (row.active ? 'active' : 'inactive'),
+      accountName: account?.displayName || '未知账号',
+    }
+  })
+
+  const changes: ChangeEvent[] = data.changes.map(row => {
+    const account = accountMap.get(Number(row.accountId ?? 0))
+    const platform = account ? platformMap.get(account.platformId) : undefined
+    return {
+      id: String(row.id),
+      type: row.changeType,
+      platformId: platform?.id ?? account?.platformId ?? 0,
+      platformName: platform?.name ?? account?.platformName ?? '未知平台',
+      platformType: platform?.type ?? account?.platformType ?? 'newapi',
+      entityType: row.entityType || '',
+      entity: row.entityKey || '',
+      entityName: row.keyName || row.groupName || row.entityKey || '',
+      accountId: Number(row.accountId ?? 0),
+      accountName: row.accountName || '',
+      keyStatus: row.keyStatus || '',
+      upstreamKeyNames: row.upstreamKeyNames || '',
+      channelKeyNames: row.channelKeyNames ?? null,
+      channelPoolAccounts: row.channelPoolAccounts ?? null,
+      localKeyNames: row.localKeyNames || '',
+      groupRatio: row.groupRatio == null ? null : Number(row.groupRatio),
+      groupActive: row.groupActive ?? null,
+      impacts: (row.impacts ?? []).map(toChangeImpact),
+      field: row.fieldName || '',
+      oldValue: row.oldValue || 'null',
+      newValue: row.newValue || 'null',
+      severity: (row.severity === 'WARNING' || row.severity === 'CRITICAL' ? row.severity : 'INFO') as ChangeEvent['severity'],
+      detectedAt: row.detectedAt || new Date().toISOString(),
+      message: row.message || '',
+      inUse: row.inUse === true,
+    }
+  }).sort((a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime())
+
+  const apiKeys: ApiKey[] = data.apiKeys.map(row => {
+    const account = accountMap.get(Number(row.accountId))
+    const platform = account ? platformMap.get(account.platformId) : undefined
+    return {
+      id: Number(row.id),
+      accountId: Number(row.accountId),
+      platformId: Number(row.platformId ?? account?.platformId ?? 0),
+      accountName: row.accountName || account?.displayName || '',
+      platformType: (row.platformType as PlatformType) || platform?.type || account?.platformType || 'newapi',
+      externalKeyId: row.externalKeyId || '',
+      keyName: row.keyName ?? null,
+      keyMasked: row.keyMasked ?? null,
+      status: row.status || 'UNKNOWN',
+      upstreamStatus: row.upstreamStatus ?? null,
+      groupName: row.groupName ?? null,
+      groupPlatform: row.groupPlatform ?? null,
+      unlimitedQuota: row.unlimitedQuota ?? null,
+      remainQuota: toNullableNumber(row.remainQuota),
+      usedQuota: toNullableNumber(row.usedQuota),
+      quotaUnit: row.quotaUnit ?? null,
+      modelLimitsEnabled: row.modelLimitsEnabled ?? null,
+      modelLimits: row.modelLimits ?? null,
+      allowIps: row.allowIps ?? null,
+      expiresAt: row.expiresAt ?? null,
+      upstreamCreatedAt: row.upstreamCreatedAt ?? null,
+      lastUsedAt: row.lastUsedAt ?? null,
+      active: row.active ?? true,
+      firstSeenAt: row.firstSeenAt ?? null,
+      lastSeenAt: row.lastSeenAt ?? null,
+      lastChangedAt: row.lastChangedAt ?? null,
+      metrics: row.metrics ?? {},
+    }
+  })
+
+  return { channels, changes, apiKeys }
+}

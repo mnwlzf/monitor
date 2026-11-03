@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 /**
  * Sub2API 只读库的共享访问入口。
  *
@@ -33,6 +34,9 @@ public class Sub2ReadOnlyJdbc {
     /** 只读连接池，懒初始化。 */
     private volatile HikariDataSource dataSource;
 
+    /** 外部库失败后的快速失败窗口，避免每次页面请求都等待连接超时。 */
+    private volatile long unavailableUntilNanos;
+
     public Sub2ReadOnlyJdbc(PoolIngestProperties properties) {
         this.properties = properties;
     }
@@ -42,6 +46,26 @@ public class Sub2ReadOnlyJdbc {
         return properties.hasConnection();
     }
 
+    /** 当前是否处于外部库失败后的冷却窗口。 */
+    public boolean isInCooldown() {
+        return System.nanoTime() < unavailableUntilNanos;
+    }
+
+    /** 标记外部库暂时不可用，冷却期内调用方直接降级。 */
+    public void markUnavailable(Duration cooldown) {
+        Duration safeCooldown = cooldown == null || cooldown.isNegative() || cooldown.isZero()
+                ? Duration.ofSeconds(30)
+                : cooldown;
+        long until = System.nanoTime() + safeCooldown.toNanos();
+        if (until > unavailableUntilNanos) {
+            unavailableUntilNanos = until;
+        }
+    }
+
+    /** 外部库恢复后清除冷却状态。 */
+    public void markAvailable() {
+        unavailableUntilNanos = 0;
+    }
     /** 是否已启用直连只读库增量采集（enabled 且连接信息完整）。 */
     public boolean isConfigured() {
         return properties.isConfigured();
@@ -49,7 +73,14 @@ public class Sub2ReadOnlyJdbc {
 
     /** 默认查询模板：只设查询超时。 */
     public JdbcTemplate template() {
-        return template(0);
+        return template(0, properties.getQueryTimeout());
+    }
+
+    /**
+     * 查询模板，使用调用方指定的短超时；适合页面请求中的可选增强数据。
+     */
+    public JdbcTemplate template(Duration queryTimeout) {
+        return template(0, queryTimeout);
     }
 
     /**
@@ -58,8 +89,15 @@ public class Sub2ReadOnlyJdbc {
      * @param fetchSize 单次抓取条数；{@code <= 0} 表示不设置（走驱动默认值）
      */
     public JdbcTemplate template(int fetchSize) {
+        return template(fetchSize, properties.getQueryTimeout());
+    }
+
+    private JdbcTemplate template(int fetchSize, Duration queryTimeout) {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource());
-        jdbcTemplate.setQueryTimeout(Math.max(1, (int) properties.getQueryTimeout().toSeconds()));
+        Duration safeTimeout = queryTimeout == null || queryTimeout.isNegative() || queryTimeout.isZero()
+                ? Duration.ofSeconds(1)
+                : queryTimeout;
+        jdbcTemplate.setQueryTimeout(Math.max(1, (int) safeTimeout.toSeconds()));
         if (fetchSize > 0) {
             jdbcTemplate.setFetchSize(fetchSize);
         }

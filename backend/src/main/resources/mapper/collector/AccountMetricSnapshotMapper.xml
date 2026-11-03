@@ -47,13 +47,23 @@
     </select>
 
     <select id="selectLatestSnapshotsByAccounts" resultMap="AccountMetricSnapshotResultMap">
-        SELECT DISTINCT ON (account_id) <include refid="AccountMetricSnapshotColumns"/>
-        FROM account_metric_snapshots
-        WHERE account_id IN
-        <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
-            #{accountId}
+        SELECT s.id, s.account_id, s.collection_run_id, s.platform_type, s.balance, s.frozen_balance,
+               s.quota, s.used_quota, s.aff_quota, s.aff_history_quota, s.request_count, s.quota_unit,
+               s.content_hash, s.collected_at
+          FROM (VALUES
+        <foreach collection="accountIds" item="accountId" separator=",">
+            (#{accountId})
         </foreach>
-        ORDER BY account_id, collected_at DESC
+        ) AS a(account_id)
+          CROSS JOIN LATERAL (
+              SELECT m.id, m.account_id, m.collection_run_id, m.platform_type, m.balance, m.frozen_balance,
+                     m.quota, m.used_quota, m.aff_quota, m.aff_history_quota, m.request_count, m.quota_unit,
+                     m.content_hash, m.collected_at
+                FROM account_metric_snapshots m
+               WHERE m.account_id = a.account_id
+               ORDER BY m.collected_at DESC
+               LIMIT 1
+          ) s
     </select>
     <select id="selectSnapshotsByAccountRange" resultMap="AccountMetricSnapshotResultMap">
         SELECT <include refid="AccountMetricSnapshotColumns"/>

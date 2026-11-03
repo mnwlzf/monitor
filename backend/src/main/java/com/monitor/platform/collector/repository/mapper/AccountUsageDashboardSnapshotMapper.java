@@ -1,5 +1,6 @@
 package com.monitor.platform.collector.repository.mapper;
 
+import com.monitor.platform.collector.repository.entity.AccountCostRangeEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import org.apache.ibatis.annotations.Param;
 
@@ -27,6 +28,12 @@ public interface AccountUsageDashboardSnapshotMapper {
             @Param("from") OffsetDateTime from,
             @Param("to") OffsetDateTime to,
             @Param("limit") int limit);
+
+    /** 只查询 New API 当天首末累计成本，避免读取大字段。 */
+    List<AccountCostRangeEntity> selectNewApiCostRangeByAccounts(
+            @Param("accountIds") List<Integer> accountIds,
+            @Param("from") OffsetDateTime from,
+            @Param("to") OffsetDateTime to);
 
     /**
      * 批量查询多个账号在时间区间内的快照，按账号与采集时间升序返回。

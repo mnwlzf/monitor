@@ -105,6 +105,7 @@ button, select, input { font: inherit; }
 .admin-loading-bar { position: sticky; top: 0; z-index: 20; height: 3px; overflow: hidden; background: rgba(63, 181, 159, .14); pointer-events: none; }
 .admin-loading-bar span { display: block; width: 35%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #3fb59f, #7bd7c2); animation: admin-loading-slide 1.1s ease-in-out infinite; }
 @keyframes admin-loading-slide { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+.admin-init-error { min-height: 55vh; display: grid; place-items: center; padding: 28px; }
 .admin-page { padding: 26px 28px 40px; }
 /* 表格分页：右对齐 */
 .admin-pagination {

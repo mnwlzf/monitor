@@ -1,5 +1,6 @@
 package com.monitor.platform.collector.repository;
 
+import com.monitor.platform.collector.repository.entity.AccountCostRangeEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
 import com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper;
 import org.springframework.stereotype.Repository;
@@ -70,6 +71,18 @@ public class AccountUsageDashboardSnapshotRepository {
                                                                    int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 10000));
         return snapshotMapper.selectSnapshotsByAccountRange(accountId, from, to, safeLimit);
+    }
+
+    /**
+     * 只查询 New API 当天首末累计成本，避免读取快照大字段。
+     */
+    public List<AccountCostRangeEntity> findNewApiCostRangeByAccounts(List<Integer> accountIds,
+                                                                      OffsetDateTime from,
+                                                                      OffsetDateTime to) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
+        }
+        return snapshotMapper.selectNewApiCostRangeByAccounts(accountIds, from, to);
     }
 
     /**

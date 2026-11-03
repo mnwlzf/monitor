@@ -46,8 +46,15 @@
 
       <el-main class="admin-main">
         <!-- 加载状态不阻塞页面操作：仅显示顶部细进度条，数据到达后原地填充。 -->
-        <div v-if="loading" class="admin-loading-bar" aria-hidden="true"><span></span></div>
-        <template>
+        <div v-if="loading || detailsLoading" class="admin-loading-bar" aria-hidden="true"><span></span></div>
+        <div v-if="loadError && !hasDashboardData" class="admin-init-error">
+          <el-result icon="error" title="监控数据加载失败" :sub-title="loadError">
+            <template #extra>
+              <el-button type="primary" :loading="loading" @click="refresh">重新加载</el-button>
+            </template>
+          </el-result>
+        </div>
+        <template v-else>
         <OverviewView
           v-if="currentPage === 'overview'"
           :accounts="accountList"
@@ -119,7 +126,7 @@ import SettingsView from './views/SettingsView.vue'
 import PoolView from './views/PoolView.vue'
 import OpsView from './views/OpsView.vue'
 import LoginView from './views/LoginView.vue'
-import { collectAccountRecord, getDashboardRecords } from './api/accounts'
+import { collectAccountRecord, getChangeImpacts, getDashboardDetails, getDashboardRecords } from './api/accounts'
 import { fetchCurrentUser, logout as logoutRequest } from './api/auth'
 import { isUnauthorized } from './api/client'
 import type { Account, ApiKey, ChangeEvent, Channel, CurrentUser, MetricPoint, Platform, UsageDashboard } from './types'
@@ -154,18 +161,32 @@ const usageDashboards = ref<UsageDashboard[]>([])
 const apiKeys = ref<ApiKey[]>([])
 const lastUpdated = ref(formatTime(new Date()))
 const loading = ref(false)
+const loadError = ref('')
+const impactsLoading = ref(false)
+const impactsLoaded = ref(false)
+const detailsLoading = ref(false)
+const detailsLoaded = ref(false)
+const detailsFailed = ref(false)
 
 const isAdmin = computed(() => currentUser.value?.admin === true)
 const visibleNavItems = computed(() => navItems.filter(item => !item.adminOnly || isAdmin.value))
 const activeNav = computed(() => navItems.find(item => item.id === currentPage.value) ?? navItems[0])
 const selectedSeries = computed(() => metricSeries.value[selectedAccountId.value] ?? [])
+const hasDashboardData = computed(() => platformList.value.length > 0 || accountList.value.length > 0 || usageDashboards.value.length > 0)
 
 function selectPage(index: string) {
   currentPage.value = index as PageKey
+  if (index === 'accounts' || index === 'channels') void loadDashboardDetails()
+  if (index === 'changes') {
+    void loadDashboardDetails()
+    void loadChangeImpacts()
+  }
 }
 
 let loadPromise: Promise<boolean> | null = null
 let loadGeneration = 0
+let detailsPromise: Promise<boolean> | null = null
+let detailsRequestGeneration = -1
 
 function clearDashboardData() {
   platformList.value = []
@@ -176,6 +197,11 @@ function clearDashboardData() {
   usageDashboards.value = []
   apiKeys.value = []
   selectedAccountId.value = 0
+  impactsLoaded.value = false
+  impactsLoading.value = false
+  detailsLoaded.value = false
+  detailsFailed.value = false
+  detailsLoading.value = false
 }
 
 async function bootstrap() {
@@ -206,7 +232,10 @@ async function handleLogout() {
   }
   loadGeneration += 1
   loadPromise = null
+  detailsPromise = null
+  detailsRequestGeneration = -1
   loading.value = false
+  loadError.value = ''
   currentUser.value = null
   clearDashboardData()
   ElMessage.success('已退出登录')
@@ -258,15 +287,26 @@ async function loadRemoteData(): Promise<boolean> {
         selectedAccountId.value = accountList.value[0]?.id ?? 0
       }
       lastUpdated.value = formatTime(new Date())
+      loadError.value = ''
+      impactsLoaded.value = false
+      detailsLoaded.value = false
+      detailsFailed.value = false
+      if (currentPage.value === 'accounts' || currentPage.value === 'channels') void loadDashboardDetails()
+      if (currentPage.value === 'changes') {
+        void loadDashboardDetails()
+        void loadChangeImpacts()
+      }
       return true
     } catch (error) {
       if (generation !== loadGeneration) return false
       if (isUnauthorized(error)) {
         currentUser.value = null
+        loadError.value = ''
         clearDashboardData()
         return false
       }
-      ElMessage.error(error instanceof Error ? error.message : '后端数据加载失败')
+      loadError.value = error instanceof Error ? error.message : '后端数据加载失败'
+      ElMessage.error(loadError.value)
       return false
     } finally {
       if (generation === loadGeneration) loading.value = false
@@ -281,6 +321,75 @@ async function loadRemoteData(): Promise<boolean> {
   }
 }
 
+/**
+ * 后台补加载渠道、完整变更和 API Key；失败不影响首屏核心数据。
+ */
+async function loadDashboardDetails(): Promise<boolean> {
+  const generation = loadGeneration
+  if (detailsPromise && detailsRequestGeneration === generation) return detailsPromise
+
+  detailsLoading.value = true
+  const task = (async () => {
+    try {
+      const details = await getDashboardDetails(platformList.value, accountList.value)
+      if (generation !== loadGeneration || !currentUser.value) return false
+      channels.value = details.channels
+      changes.value = details.changes
+      apiKeys.value = details.apiKeys
+      detailsLoaded.value = true
+      detailsFailed.value = false
+      impactsLoaded.value = false
+      if (currentPage.value === 'changes') void loadChangeImpacts()
+      return true
+    } catch (error) {
+      if (generation !== loadGeneration) return false
+      if (isUnauthorized(error)) {
+        currentUser.value = null
+        loadError.value = ''
+        clearDashboardData()
+        return false
+      }
+      detailsFailed.value = true
+      return false
+    } finally {
+      if (generation === loadGeneration) detailsLoading.value = false
+    }
+  })()
+
+  detailsRequestGeneration = generation
+  detailsPromise = task
+  try {
+    return await task
+  } finally {
+    if (detailsPromise === task) detailsPromise = null
+  }
+}
+
+/**
+ * 变更列表先快速展示；影响分析依赖外部只读库，进入变更页后再补齐。
+ */
+async function loadChangeImpacts() {
+  if (impactsLoading.value || impactsLoaded.value || changes.value.length === 0) return
+  impactsLoading.value = true
+  try {
+    const impactMap = await getChangeImpacts()
+    changes.value = changes.value.map(change => {
+      const impacts = impactMap.get(Number(change.id))
+      return impacts ? { ...change, impacts } : change
+    })
+    impactsLoaded.value = true
+  } catch (error) {
+    if (isUnauthorized(error)) {
+      currentUser.value = null
+      loadError.value = ''
+      clearDashboardData()
+      return
+    }
+    ElMessage.warning('影响分析加载失败，变更列表仍可正常使用')
+  } finally {
+    impactsLoading.value = false
+  }
+}
 function handlePlatformSaved(platform: Platform) {
   // 提示文案由平台管理页统一给出，这里只同步本地状态，避免重复弹窗。
   platformList.value = [...platformList.value, platform]

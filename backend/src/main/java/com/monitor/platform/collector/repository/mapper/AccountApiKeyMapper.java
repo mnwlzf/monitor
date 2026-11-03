@@ -24,6 +24,9 @@ public interface AccountApiKeyMapper {
             @Param("platformType") String platformType,
             @Param("externalKeyId") String externalKeyId);
 
+    /** 批量查询页面展示所需字段，不读取密文和原始数据。 */
+    List<AccountApiKeyEntity> selectKeysByAccountsLite(@Param("accountIds") Collection<Integer> accountIds,
+                                                       @Param("activeOnly") boolean activeOnly);
     /** 按主键查询密钥。 */
     AccountApiKeyEntity selectKeyById(@Param("id") Long id);
 

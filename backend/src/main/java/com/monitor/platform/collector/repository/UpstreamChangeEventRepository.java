@@ -60,6 +60,16 @@ public class UpstreamChangeEventRepository {
     }
 
     /**
+     * 批量查询轻量变更事件，供初始化与页面首屏使用。
+     */
+    public List<UpstreamChangeEventEntity> findRecentLiteByAccounts(Collection<Integer> accountIds, int limit) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        return eventMapper.selectRecentEventsByAccountsLite(accountIds, safeLimit);
+    }
+    /**
      * 查询指定时间之后、涉及正在使用密钥的变更事件。
      *
      * <p>供密钥变更邮件提醒使用：只返回 in_use 标记为真的 API_KEY 事件，

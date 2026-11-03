@@ -54,6 +54,8 @@ class MapperXmlContractTest {
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper.selectRecentEventsByAccounts"));
         assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.UpstreamChangeEventMapper.selectRecentEventsByAccountsLite"));
+        assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountMetricSnapshotMapper.selectLatestSnapshot"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.UpstreamGroupMapper.insertGroup"));
@@ -73,6 +75,8 @@ class MapperXmlContractTest {
                 "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectLatestSnapshotsByAccounts"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectSnapshotsByAccountsRange"));
+        assertTrue(configuration.hasStatement(
+                "com.monitor.platform.collector.repository.mapper.AccountUsageDashboardSnapshotMapper.selectNewApiCostRangeByAccounts"));
         assertTrue(configuration.hasStatement(
                 "com.monitor.platform.collector.repository.mapper.AccountApiKeyMapper.deactivateMissingKeys"));
         assertTrue(configuration.hasStatement(

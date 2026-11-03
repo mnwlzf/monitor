@@ -19,6 +19,11 @@
         <result column="collected_at" property="collectedAt"/>
     </resultMap>
 
+    <resultMap id="AccountCostRangeResultMap" type="com.monitor.platform.collector.repository.entity.AccountCostRangeEntity">
+        <result column="account_id" property="accountId"/>
+        <result column="first_cost" property="firstCost"/>
+        <result column="last_cost" property="lastCost"/>
+    </resultMap>
     <sql id="UsageDashboardColumns">
         id, account_id, collection_run_id, platform_type, balance, frozen_balance,
         total_requests, total_tokens, total_cost, total_actual_cost,
@@ -49,15 +54,48 @@
     </select>
 
     <select id="selectLatestSnapshotsByAccounts" resultMap="UsageDashboardResultMap">
-        SELECT DISTINCT ON (account_id) <include refid="UsageDashboardColumns"/>
-        FROM account_usage_dashboard_snapshots
-        WHERE account_id IN
-        <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
-            #{accountId}
+        SELECT s.id, s.account_id, s.collection_run_id, s.platform_type, s.balance, s.frozen_balance,
+               s.total_requests, s.total_tokens, s.total_cost, s.total_actual_cost,
+               s.metrics, s.platform_stats, s.collected_at
+          FROM (VALUES
+        <foreach collection="accountIds" item="accountId" separator=",">
+            (#{accountId})
         </foreach>
-        ORDER BY account_id, collected_at DESC
+        ) AS a(account_id)
+          CROSS JOIN LATERAL (
+              SELECT m.id, m.account_id, m.collection_run_id, m.platform_type, m.balance, m.frozen_balance,
+                     m.total_requests, m.total_tokens, m.total_cost, m.total_actual_cost,
+                     m.metrics, m.platform_stats, m.collected_at
+                FROM account_usage_dashboard_snapshots m
+               WHERE m.account_id = a.account_id
+               ORDER BY m.collected_at DESC
+               LIMIT 1
+          ) s
     </select>
 
+    <select id="selectNewApiCostRangeByAccounts" resultMap="AccountCostRangeResultMap">
+        WITH ranked AS (
+            SELECT account_id,
+                   total_cost,
+                   row_number() OVER (PARTITION BY account_id ORDER BY collected_at ASC) AS first_rank,
+                   row_number() OVER (PARTITION BY account_id ORDER BY collected_at DESC) AS last_rank
+              FROM account_usage_dashboard_snapshots
+             WHERE account_id IN
+            <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
+                #{accountId}
+            </foreach>
+               AND lower(platform_type) = 'newapi'
+               AND total_cost IS NOT NULL
+               AND collected_at &gt;= #{from}
+               AND collected_at &lt;= #{to}
+        )
+        SELECT account_id,
+               max(total_cost) FILTER (WHERE first_rank = 1) AS first_cost,
+               max(total_cost) FILTER (WHERE last_rank = 1) AS last_cost
+          FROM ranked
+         WHERE first_rank = 1 OR last_rank = 1
+         GROUP BY account_id
+    </select>
     <select id="selectSnapshotsByAccountRange" resultMap="UsageDashboardResultMap">
         SELECT <include refid="UsageDashboardColumns"/>
         FROM account_usage_dashboard_snapshots

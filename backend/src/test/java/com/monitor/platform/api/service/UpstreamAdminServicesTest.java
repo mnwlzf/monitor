@@ -7,6 +7,7 @@ import com.monitor.platform.api.dto.AccountUsageDashboardResponse;
 import com.monitor.platform.api.dto.CreatePlatformRequest;
 import com.monitor.platform.api.dto.PlatformResponse;
 import com.monitor.platform.api.dto.UpdatePlatformRequest;
+import com.monitor.platform.api.dto.UpstreamDashboardDetailsResponse;
 import com.monitor.platform.api.dto.UpstreamDashboardResponse;
 import com.monitor.platform.collector.application.AccountCredentialService;
 import com.monitor.platform.collector.repository.AccountMetricSnapshotRepository;
@@ -16,6 +17,7 @@ import com.monitor.platform.collector.repository.AccountUsageDashboardSnapshotRe
 import com.monitor.platform.collector.repository.PlatformRepository;
 import com.monitor.platform.collector.repository.UpstreamChangeEventRepository;
 import com.monitor.platform.collector.repository.UpstreamGroupRepository;
+import com.monitor.platform.collector.repository.entity.AccountCostRangeEntity;
 import com.monitor.platform.collector.repository.entity.AccountEntity;
 import com.monitor.platform.collector.repository.entity.AccountMetricSnapshotEntity;
 import com.monitor.platform.collector.repository.entity.AccountUsageDashboardSnapshotEntity;
@@ -240,6 +242,13 @@ class UpstreamAdminServicesTest {
         return entity;
     }
 
+    private AccountCostRangeEntity costRange(int accountId, String firstCost, String lastCost) {
+        AccountCostRangeEntity entity = new AccountCostRangeEntity();
+        entity.setAccountId(accountId);
+        entity.setFirstCost(new BigDecimal(firstCost));
+        entity.setLastCost(new BigDecimal(lastCost));
+        return entity;
+    }
     @Test
     void shouldDeriveNewApiTodayCostFromDailyAccumulatedUsageDelta() {
         AccountEntity account = new AccountEntity();
@@ -257,10 +266,9 @@ class UpstreamAdminServicesTest {
         when(usageDashboardRepository.findLatestByAccounts(ArgumentMatchers.anyList()))
                 .thenReturn(List.of(latest));
         // 当天首末两条累计消耗：300.00 -> 300.80，差值为今日消耗 0.80。
-        when(usageDashboardRepository.findByAccounts(ArgumentMatchers.anyList(),
-                ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(List.of(
-                usageSnapshot(10, "newapi", new BigDecimal("300.00"), now.minusHours(6)),
-                usageSnapshot(10, "newapi", new BigDecimal("300.80"), now.minusHours(1))));
+        when(usageDashboardRepository.findNewApiCostRangeByAccounts(ArgumentMatchers.anyList(),
+                ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(List.of(costRange(10, "300.00", "300.80")));
 
         List<AccountUsageDashboardResponse> rows = usageService.listUsageDashboard(1);
 
@@ -286,10 +294,9 @@ class UpstreamAdminServicesTest {
         when(usageDashboardRepository.findLatestByAccounts(ArgumentMatchers.anyList()))
                 .thenReturn(List.of(usageSnapshot(10, "newapi", new BigDecimal("10.00"), now)));
         // 额度被重置导致累计值下降时不展示，避免负的今日消耗。
-        when(usageDashboardRepository.findByAccounts(ArgumentMatchers.anyList(),
-                ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(List.of(
-                usageSnapshot(10, "newapi", new BigDecimal("300.00"), now.minusHours(6)),
-                usageSnapshot(10, "newapi", new BigDecimal("10.00"), now.minusHours(1))));
+        when(usageDashboardRepository.findNewApiCostRangeByAccounts(ArgumentMatchers.anyList(),
+                ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(List.of(costRange(10, "300.00", "10.00")));
 
         List<AccountUsageDashboardResponse> rows = usageService.listUsageDashboard(1);
 
@@ -309,9 +316,7 @@ class UpstreamAdminServicesTest {
         when(platformRepository.findAll()).thenReturn(List.of(platform));
         when(accountRepository.findAll()).thenReturn(List.of(account));
         when(metricSnapshotRepository.findLatestByAccounts(List.of(10))).thenReturn(List.of());
-        when(groupRepository.findByAccounts(List.of(10), false)).thenReturn(List.of());
-        when(apiKeyRepository.findByAccounts(List.of(10), false)).thenReturn(List.of());
-        when(changeEventRepository.findRecentByAccounts(List.of(10), 500)).thenReturn(List.of());
+        when(changeEventRepository.findRecentLiteByAccounts(List.of(10), 20)).thenReturn(List.of());
         when(usageDashboardRepository.findLatestByAccounts(List.of(10))).thenReturn(List.of());
 
         UpstreamDashboardResponse response =
@@ -323,11 +328,32 @@ class UpstreamAdminServicesTest {
         assertTrue(response.changes().isEmpty());
         assertTrue(response.usageDashboards().isEmpty());
         assertTrue(response.apiKeys().isEmpty());
-        verify(groupRepository).findByAccounts(List.of(10), false);
-        verify(apiKeyRepository).findByAccounts(List.of(10), false);
-        verify(changeEventRepository).findRecentByAccounts(List.of(10), 500);
+        verify(changeEventRepository).findRecentLiteByAccounts(List.of(10), 20);
     }
 
+    @Test
+    void shouldLoadDashboardDetailsInBackground() {
+        AccountEntity account = new AccountEntity();
+        account.setId(10);
+        account.setPlatformId(1);
+        account.setDisplayName("account");
+        account.setPlatform("newapi");
+
+        when(accountRepository.findAll()).thenReturn(List.of(account));
+        when(groupRepository.findByAccounts(List.of(10), false)).thenReturn(List.of());
+        when(apiKeyRepository.findByAccounts(List.of(10), false)).thenReturn(List.of());
+        when(changeEventRepository.findRecentLiteByAccounts(List.of(10), 200)).thenReturn(List.of());
+
+        UpstreamDashboardDetailsResponse response =
+                new UpstreamDashboardService(service, usageService, accountRepository).loadDashboardDetails();
+
+        assertTrue(response.groups().isEmpty());
+        assertTrue(response.changes().isEmpty());
+        assertTrue(response.apiKeys().isEmpty());
+        verify(groupRepository).findByAccounts(List.of(10), false);
+        verify(apiKeyRepository).findByAccounts(List.of(10), false);
+        verify(changeEventRepository).findRecentLiteByAccounts(List.of(10), 200);
+    }
     @Test
     void shouldBatchLoadLatestAccountMetrics() {
         AccountEntity first = new AccountEntity();

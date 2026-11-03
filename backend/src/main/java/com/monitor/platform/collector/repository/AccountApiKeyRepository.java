@@ -68,7 +68,7 @@ public class AccountApiKeyRepository {
         if (accountIds == null || accountIds.isEmpty()) {
             return List.of();
         }
-        return apiKeyMapper.selectKeysByAccounts(accountIds, activeOnly);
+        return apiKeyMapper.selectKeysByAccountsLite(accountIds, activeOnly);
     }
     /**
      * 按平台与密钥 SHA-256 查询有效的本地密钥主键，供号池账号自动绑定使用。
