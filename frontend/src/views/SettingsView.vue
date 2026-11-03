@@ -727,7 +727,7 @@
                     <span class="group-policy-field-label">策略参数</span>
                     <template v-if="policy.strategy === 'RANDOM'">
                       <div class="group-policy-inline">
-                        <el-input-number v-model="policy.randomPercent" :min="1" :max="100" :step="5" />
+                        <el-input-number v-model="policy.randomPercent" class="group-policy-percent" :min="1" :max="100" :step="5" controls-position="right" />
                         <span class="admin-form-hint">% 概率回复</span>
                       </div>
                     </template>
@@ -744,6 +744,7 @@
                     >
                       <el-option v-for="keyword in policy.keywords" :key="keyword" :label="keyword" :value="keyword" />
                     </el-select>
+                    <span v-else-if="policy.strategy === 'AI_DECIDE'" class="admin-form-hint">由大模型判断是否接话，并生成拟人化回复</span>
                     <span v-else class="admin-form-hint">{{ policy.strategy === 'PROACTIVE' ? '每条消息都会触发' : '只响应 @机器人' }}</span>
                   </div>
                 </div>
@@ -1390,6 +1391,7 @@ const groupReplyStrategyOptions: Array<{
   { value: 'PROACTIVE', label: '主动回复', hint: '群里的每条消息都会触发回复' },
   { value: 'RANDOM', label: '随机回复', hint: '按设定概率随机回复群消息' },
   { value: 'KEYWORD', label: '关键词唤醒', hint: '消息包含任一关键词时回复' },
+  { value: 'AI_DECIDE', label: '拟人化自主回复', hint: '由大模型判断是否接话，并像真人一样自然回复' },
 ]
 
 function groupStrategyHint(strategy: BotGroupReplyStrategy) {
@@ -2276,7 +2278,12 @@ onMounted(() => {
 .group-policy-inline {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+.group-policy-percent {
+  width: 150px;
+  flex: 0 0 150px;
 }
 
 .group-policy-keywords {

@@ -90,6 +90,10 @@ public class BotMessageService {
      */
     private static final Pattern HEATMAP_MARKER = Pattern.compile("\\[\\[HEATMAP:([A-Za-z0-9]+)]]");
 
+    /** 拟人化自主回复策略的判定结果。 */
+    private static final Pattern AI_DECISION_PATTERN =
+            Pattern.compile("\"reply\"\\s*:\\s*(true|false)", Pattern.CASE_INSENSITIVE);
+
     /**
      * 生图开始时的开场提示。
      *
@@ -228,20 +232,21 @@ public class BotMessageService {
             runtimeStatus.dropped(channel, event.groupId(), event.userId(), "不在白名单（群号 / QQ）");
             return;
         }
+        BotGroupReplyPolicy groupPolicy = group ? settings.groupPolicy(event.groupId()) : null;
+        boolean mentioned = group && parser.mentioned(event);
         if (group && !adminForbiddenWordCommand) {
-            boolean mentioned = parser.mentioned(event);
             double randomValue = ThreadLocalRandom.current().nextDouble();
             if (!settings.shouldRespondInGroup(event.groupId(), mentioned, text, randomValue)) {
-                BotGroupReplyPolicy policy = settings.groupPolicy(event.groupId());
                 // 刻意不计入「未回复」：普通群聊和随机/关键词策略未命中都是预期行为，
                 // 计进去会让统计被正常群聊刷满，反而看不出真正被拦下的消息。
                 log.debug("群聊策略未命中，忽略消息: group={}, strategy={}, mentioned={}",
-                        event.groupId(), policy == null ? "DEFAULT" : policy.strategy(),
+                        event.groupId(), groupPolicy == null ? "DEFAULT" : groupPolicy.strategy(),
                         mentioned);
                 return;
             }
         }
-
+        boolean aiDecisionRequired = group && !adminForbiddenWordCommand && !mentioned
+                && groupPolicy != null && groupPolicy.strategy() == BotGroupReplyStrategy.AI_DECIDE;
         // 到这里才说明机器人被真正触发。只有已触发消息才需要解析语音和引用内容，
         // 避免普通群聊触发额外查询。
         BotSpeechService.VoiceInput voiceInput = BotSpeechService.extract(event.message(), event.rawMessage());
@@ -332,6 +337,13 @@ public class BotMessageService {
                     }
                 }
 
+                // 拟人化自主回复：先由独立的大模型判断是否接话，命中后再走完整回答链路。
+                if (aiDecisionRequired && !shouldReplyWithAi(event, effectiveText, quoted.text(),
+                        persona, settings)) {
+                    runtimeStatus.dropped(channel, event.groupId(), event.userId(), "AI 判断暂不接话");
+                    runtimeStatus.finishTurn(turnId, "AI 判断暂不接话");
+                    return;
+                }
                 // 下载图片放在后台线程里做，不占用回调线程；自己发的与被引用的分开下，存档时能说清来源
                 List<BotImageFetcher.FetchedImage> ownImages = imageFetcher.fetch(ownImageRefs);
                 List<BotImageFetcher.FetchedImage> quotedImages = imageFetcher.fetch(quotedImageRefs);
@@ -537,6 +549,72 @@ public class BotMessageService {
                 openAiStatusAllowed, channel, images, generated, voiceReply);
     }
 
+    /**
+     * 拟人化自主回复的接话判断。显式命令和纯媒体消息不拦截，避免影响命令与图片处理。
+     */
+    private boolean shouldReplyWithAi(OneBotEvent event, String text, String quotedText,
+                                      BotPersonaSnapshot persona, BotSettings settings) {
+        String plainText = text == null ? "" : text.strip();
+        if (plainText.isBlank()) {
+            return true;
+        }
+        String prefix = settings.commandPrefix();
+        if (prefix != null && !prefix.isBlank() && plainText.startsWith(prefix)) {
+            return true;
+        }
+
+        ChatClient decisionClient = chatClients.getDecisionClient();
+        if (decisionClient == null) {
+            decisionClient = chatClients.getFallbackDecisionClient();
+        }
+        if (decisionClient == null) {
+            log.debug("未配置大模型，拟人化自主回复不接话: group={}", event.groupId());
+            return false;
+        }
+        String prompt = """
+                机器人人设：%s
+                表达风格：%s
+                当前群消息：
+                %s
+                %s
+                """.formatted(
+                persona.name(),
+                persona.stylePrompt() == null ? "" : persona.stylePrompt(),
+                plainText,
+                quotedText == null || quotedText.isBlank() ? "" : "引用内容：\n" + quotedText);
+        try {
+            return parseAiDecision(decisionClient.prompt().user(prompt).call().content(), event);
+        } catch (RuntimeException primaryError) {
+            if (!chatClients.shouldFallback(primaryError)) {
+                log.warn("拟人化接话判断失败，按不回复处理: group={}, reason={}",
+                        event.groupId(), SecretMasker.safeMessage(primaryError));
+                return false;
+            }
+            ChatClient fallback = chatClients.getFallbackDecisionClient();
+            if (fallback == null) {
+                log.warn("拟人化接话判断失败且无备用模型，按不回复处理: group={}, reason={}",
+                        event.groupId(), SecretMasker.safeMessage(primaryError));
+                return false;
+            }
+            try {
+                return parseAiDecision(fallback.prompt().user(prompt).call().content(), event);
+            } catch (RuntimeException fallbackError) {
+                fallbackError.addSuppressed(primaryError);
+                log.warn("拟人化接话判断主备模型均失败，按不回复处理: group={}, reason={}",
+                        event.groupId(), SecretMasker.safeMessage(fallbackError));
+                return false;
+            }
+        }
+    }
+
+    private static boolean parseAiDecision(String answer, OneBotEvent event) {
+        Matcher matcher = AI_DECISION_PATTERN.matcher(answer == null ? "" : answer);
+        if (!matcher.find()) {
+            log.warn("拟人化接话判断返回格式无效，按不回复处理: group={}", event.groupId());
+            return false;
+        }
+        return Boolean.parseBoolean(matcher.group(1).toLowerCase(Locale.ROOT));
+    }
     private static boolean isLotteryIntent(String text) {
         String normalized = text == null ? "" : text.replaceAll("[。！!？?\\s]+$", "");
         return switch (normalized) {
@@ -577,6 +655,12 @@ public class BotMessageService {
             return text(message);
         }
         String promptText = parser.buildPrompt(text, quoted.text(), !images.isEmpty(), quotedHasImages);
+        BotGroupReplyPolicy activePolicy = channel.hasGroupContext()
+                ? settings.groupPolicy(event.groupId()) : null;
+        if (activePolicy != null && activePolicy.strategy() == BotGroupReplyStrategy.AI_DECIDE) {
+            promptText = "（这是群聊里的自然接话场景。请像真人一样简短、自然地回应；"
+                    + "不要客服腔，不要解释你是否应该接话，也不要刻意每句都反问。）\n" + promptText;
+        }
         if (voiceReply != null && voiceReply.requested()) {
             String style = voiceReply.style() == null || voiceReply.style().isBlank()
                     ? settings.defaultVoiceStyle() : voiceReply.style();

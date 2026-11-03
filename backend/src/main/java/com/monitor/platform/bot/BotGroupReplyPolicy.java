@@ -62,6 +62,8 @@ public record BotGroupReplyPolicy(
             case PROACTIVE -> true;
             case RANDOM -> randomValue < randomPercent / 100.0;
             case KEYWORD -> containsKeyword(text);
+            // 是否接话需要异步调用大模型，不能在这里同步决定；先放行，后续由消息服务判定。
+            case AI_DECIDE -> true;
         };
     }
 

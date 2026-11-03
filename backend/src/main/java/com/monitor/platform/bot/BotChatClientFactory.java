@@ -134,6 +134,16 @@ public class BotChatClientFactory {
             6. 用简体中文，口语化、简短，不要输出 Markdown 表格或代码块。
             """;
 
+    /**
+     * 群聊接话判断器提示词。不携带记忆、人设工具或业务工具，只输出 JSON。
+     */
+    private static final String DECISION_PROMPT = """
+            你是 QQ 群聊中的机器人接话判断器。根据当前消息和引用内容，判断机器人是否应该主动接话。
+            倾向：有人提问、求助、需要事实或建议、话题与机器人能力相关、或能自然补充时接话；
+            不倾向：纯表情、短促附和、两个人之间的私人对话、广告刷屏、与你无关的闲聊。
+            不要每条都接，不要抢话。只输出一行 JSON，不要代码块：
+            {"reply":true或false,"reason":"不超过20字"}
+            """;
     private final MonitorChatTools tools;
     private final BotErrorTools errorTools;
     private final BotOrderTools orderTools;
@@ -151,6 +161,10 @@ public class BotChatClientFactory {
     private volatile boolean unavailable;
     private volatile boolean fallbackUnavailable;
     private volatile ChatClient.Builder fallbackBuilder;
+    private volatile ChatClient decisionClient;
+    private volatile ChatClient fallbackDecisionClient;
+    private volatile boolean decisionUnavailable;
+    private volatile boolean fallbackDecisionUnavailable;
 
     public BotChatClientFactory(MonitorChatTools tools,
                                 BotErrorTools errorTools,
@@ -227,6 +241,49 @@ public class BotChatClientFactory {
         return getFallback(capability, persona, settings, admin);
     }
 
+    /**
+     * 构建无记忆、无工具的群聊接话判断客户端。
+     */
+    public ChatClient getDecisionClient() {
+        return getDecisionClient(false);
+    }
+
+    /** 获取备用模型的接话判断客户端。 */
+    public ChatClient getFallbackDecisionClient() {
+        return getDecisionClient(true);
+    }
+
+    private ChatClient getDecisionClient(boolean fallback) {
+        ChatClient current = fallback ? fallbackDecisionClient : decisionClient;
+        if (current != null) {
+            return current;
+        }
+        if (fallback ? fallbackDecisionUnavailable : decisionUnavailable) {
+            return null;
+        }
+        synchronized (this) {
+            current = fallback ? fallbackDecisionClient : decisionClient;
+            if (current != null) {
+                return current;
+            }
+            ChatClient.Builder builder = fallback ? createFallbackBuilder() : chatClientBuilder.getIfAvailable();
+            if (builder == null) {
+                if (fallback) {
+                    fallbackDecisionUnavailable = true;
+                } else {
+                    decisionUnavailable = true;
+                }
+                return null;
+            }
+            ChatClient built = builder.defaultSystem(DECISION_PROMPT).build();
+            if (fallback) {
+                fallbackDecisionClient = built;
+            } else {
+                decisionClient = built;
+            }
+            return built;
+        }
+    }
     /** 兼容旧调用方：使用内置默认人设。 */
     public ChatClient get(CapabilityProfile capability, BotSettings settings, boolean admin) {
         return get(capability, BotPersonaSnapshot.BUILTIN, settings, admin);
@@ -315,32 +372,40 @@ public class BotChatClientFactory {
             if (fallbackBuilder != null) {
                 return fallbackBuilder;
             }
-            try {
-                OpenAiApi api = OpenAiApi.builder()
-                        .baseUrl(fallbackProperties.getBaseUrl().trim())
-                        .apiKey(fallbackProperties.getApiKey().trim())
-                        .build();
-                OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
-                        .model(fallbackProperties.getModel().trim());
-                if (fallbackProperties.getTemperature() != null) {
-                    options.temperature(fallbackProperties.getTemperature());
-                }
-                OpenAiChatModel model = OpenAiChatModel.builder()
-                        .openAiApi(api)
-                        .defaultOptions(options.build())
-                        .toolCallingManager(ToolCallingManager.builder().build())
-                        .retryTemplate(RetryUtils.DEFAULT_RETRY_TEMPLATE)
-                        .observationRegistry(ObservationRegistry.NOOP)
-                        .build();
-                fallbackBuilder = ChatClient.builder(model);
-                log.info("备用大模型已配置: baseUrl={}, model={}",
-                        fallbackProperties.getBaseUrl(), fallbackProperties.getModel());
-                return fallbackBuilder;
-            } catch (RuntimeException ex) {
-                fallbackUnavailable = true;
-                log.warn("备用大模型初始化失败: {}", SecretMasker.safeMessage(ex));
-                return null;
+            fallbackBuilder = createFallbackBuilder();
+            return fallbackBuilder;
+        }
+    }
+
+    /** 每次创建全新的备用 Builder，避免接话判断客户端继承普通客户端的记忆/工具配置。 */
+    private ChatClient.Builder createFallbackBuilder() {
+        if (!fallbackProperties.isConfigured() || fallbackUnavailable) {
+            return null;
+        }
+        try {
+            OpenAiApi api = OpenAiApi.builder()
+                    .baseUrl(fallbackProperties.getBaseUrl().trim())
+                    .apiKey(fallbackProperties.getApiKey().trim())
+                    .build();
+            OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
+                    .model(fallbackProperties.getModel().trim());
+            if (fallbackProperties.getTemperature() != null) {
+                options.temperature(fallbackProperties.getTemperature());
             }
+            OpenAiChatModel model = OpenAiChatModel.builder()
+                    .openAiApi(api)
+                    .defaultOptions(options.build())
+                    .toolCallingManager(ToolCallingManager.builder().build())
+                    .retryTemplate(RetryUtils.DEFAULT_RETRY_TEMPLATE)
+                    .observationRegistry(ObservationRegistry.NOOP)
+                    .build();
+            log.info("备用大模型已配置: baseUrl={}, model={}",
+                    fallbackProperties.getBaseUrl(), fallbackProperties.getModel());
+            return ChatClient.builder(model);
+        } catch (RuntimeException ex) {
+            fallbackUnavailable = true;
+            log.warn("备用大模型初始化失败: {}", SecretMasker.safeMessage(ex));
+            return null;
         }
     }
 

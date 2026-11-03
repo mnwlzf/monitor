@@ -458,7 +458,7 @@ export interface BotSettings {
 }
 
 /** 单个群聊的回复触发策略。 */
-export type BotGroupReplyStrategy = 'INHERIT' | 'MENTION' | 'PROACTIVE' | 'RANDOM' | 'KEYWORD'
+export type BotGroupReplyStrategy = 'INHERIT' | 'MENTION' | 'PROACTIVE' | 'RANDOM' | 'KEYWORD' | 'AI_DECIDE'
 
 /** 按群定制的回复策略；@机器人 始终会触发回复。 */
 export interface BotGroupReplyPolicy {

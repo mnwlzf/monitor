@@ -30,6 +30,14 @@ class BotGroupReplyPolicyTest {
     }
 
     @Test
+    void aiDecideStrategyShouldDeferToAsyncModelDecision() {
+        BotGroupReplyPolicy policy = new BotGroupReplyPolicy(
+                "111", BotGroupReplyStrategy.AI_DECIDE, 10, List.of());
+
+        assertTrue(policy.shouldTrigger("你们怎么看这个方案？", 0.99));
+    }
+
+    @Test
     void inheritStrategyShouldFollowGlobalMentionSetting() {
         BotGroupReplyPolicy policy = new BotGroupReplyPolicy(
                 "111", BotGroupReplyStrategy.INHERIT, 10, List.of());

@@ -20,5 +20,8 @@ public enum BotGroupReplyStrategy {
     RANDOM,
 
     /** 关键词唤醒：消息包含任一关键词时响应。 */
-    KEYWORD
+    KEYWORD,
+
+    /** 拟人化自主回复：由大模型判断是否接话，再决定具体回复内容。 */
+    AI_DECIDE
 }
