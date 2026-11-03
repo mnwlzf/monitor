@@ -127,9 +127,9 @@ docker compose up -d postgres redis
 | --- | --- | --- |
 | 应用 | `TZ` `APP_PORT` `JAVA_OPTS` | 时区、对外端口、JVM 参数 |
 | 数据库 | `POSTGRES_*` `DB_URL` `DB_USERNAME` `DB_PASSWORD` | 内置容器初始化用 `POSTGRES_*`；应用实际连接用 `DB_*` |
-| Redis | `REDIS_HOST` `REDIS_PORT` `REDIS_PASSWORD` | 用于缓存上游登录凭证 |
+| Redis | `REDIS_HOST` `REDIS_PORT` `REDIS_PASSWORD` | 用于缓存上游登录凭证并持久化登录会话 |
 | 凭证加密 | `UPSTREAM_CREDENTIAL_KEY` | Base64 编码的 32 字节密钥，`openssl rand -base64 32` 生成，**务必妥善保存** |
-| 登录鉴权 | `MONITOR_ADMIN_USERNAME` `MONITOR_ADMIN_PASSWORD` `MONITOR_SECURITY_ENABLED` `MONITOR_SESSION_*` | 管理员账号与会话配置 |
+| 登录鉴权 | `MONITOR_ADMIN_USERNAME` `MONITOR_ADMIN_PASSWORD` `MONITOR_SECURITY_ENABLED` `MONITOR_SESSION_*` | 管理员账号与会话配置；会话保存在 Redis |
 | 号池增量采集 | `SUB2API_DB_*` | 可选，直连自建 Sub2API 只读库，建议用仅 `SELECT` 权限的账号 |
 | QQ 机器人 | `MONITOR_BOT_*` | 可选，默认关闭；长回复（渠道状态、账户余额等）会自动渲染成图片 |
 | 机器人语音 | `MONITOR_BOT_SPEECH_*` | 可选；阿里云百炼 ASR 模型 `qwen-audio-3.1-asr-flash` + TTS 模型 `qwen-audio-3.1-tts-flash`，页面配置默认音色/风格 |

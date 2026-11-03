@@ -48,6 +48,13 @@ spring:
       port: ${REDIS_PORT:6379}
       username: ${REDIS_USERNAME:}
       password: ${REDIS_PASSWORD}
+  session:
+    # 会话统一持久化到 Redis，应用重启后已有登录状态仍然有效。
+    store-type: redis
+    timeout: ${MONITOR_SESSION_TIMEOUT:8h}
+    redis:
+      namespace: ${MONITOR_SESSION_REDIS_NAMESPACE:monitor:session}
+      flush-mode: on_save
   flyway:
     enabled: true
 
