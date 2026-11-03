@@ -1,5 +1,5 @@
 <template>
-  <section class="admin-page">
+  <section class="admin-page settings-page">
     <div class="admin-page-heading">
       <div>
         <p class="admin-eyebrow">SYSTEM SETTINGS</p>
@@ -709,7 +709,7 @@
                   <div class="group-policy-voice">
                     <span class="group-policy-field-label">语音音色：怎么发声</span>
                     <el-select
-                      :model-value="policy.voice ?? ''"
+                      :model-value="policy.voice ?? inheritVoiceValue"
                       filterable
                       allow-create
                       default-first-option
@@ -717,7 +717,7 @@
                       placeholder="选择或输入音色"
                       @update:model-value="setPolicyVoice(policy, $event)"
                     >
-                      <el-option :value="''" :label="`跟随默认音色：${botForm.defaultVoice}`" />
+                      <el-option :value="inheritVoiceValue" :label="`跟随默认音色：${voiceDisplayName(botForm.defaultVoice)}`" />
                       <el-option v-for="voice in qwenVoices" :key="voice.value" :label="voice.label" :value="voice.value" />
                     </el-select>
                     <small>{{ policy.voice ? '只影响该群的语音回复' : '未绑定，默认音色变化时跟随' }}</small>
@@ -752,7 +752,7 @@
                   <span>群：{{ groupDisplayName(policy.groupId, policy.groupName, policy.groupAlias) }}（{{ policy.groupId || '未填写' }}）</span>
                   <span>触发：{{ groupStrategyHint(policy.strategy) }}</span>
                   <span>表达：{{ personaName(policy.personaId) }}</span>
-                  <span>音色：{{ policy.voice || `跟随默认（${botForm.defaultVoice}）` }}</span>
+                  <span>音色：{{ policy.voice ? voiceDisplayName(policy.voice) : `跟随默认（${voiceDisplayName(botForm.defaultVoice)}）` }}</span>
                   <span>权限：仍按发送者身份判断，此配置不会提权</span>
                 </div>
               </div>
@@ -1293,6 +1293,8 @@ loongstella_v3.1|loongstella_v3.1
   return { label, value }
 })
 
+const inheritVoiceValue = '__inherit_voice__'
+
 const botLoading = ref(false)
 const botSaving = ref(false)
 const botUpdatedAt = ref('')
@@ -1418,7 +1420,12 @@ function setPolicyPersona(policy: BotGroupReplyPolicy, value: unknown) {
 
 function setPolicyVoice(policy: BotGroupReplyPolicy, value: unknown) {
   const voice = value == null ? '' : String(value).trim()
-  policy.voice = voice || null
+  policy.voice = !voice || voice === inheritVoiceValue ? null : voice
+}
+
+function voiceDisplayName(value: string | null | undefined) {
+  const voice = value == null ? '' : String(value).trim()
+  return qwenVoices.find((item) => item.value === voice)?.label ?? voice
 }
 
 function onGroupPolicyStrategyChange(policy: BotGroupReplyPolicy) {
@@ -1975,6 +1982,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.settings-page {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
 .settings-tabs {
   margin-top: 4px;
 }
