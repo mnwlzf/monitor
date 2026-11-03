@@ -144,6 +144,16 @@ public class BotChatClientFactory {
             不要每条都接，不要抢话。只输出一行 JSON，不要代码块：
             {"reply":true或false,"reason":"不超过20字"}
             """;
+
+    /**
+     * 群聊上下文摘要器。只负责压缩历史，不挂任何工具，也不写入普通会话记忆。
+     */
+    private static final String SUMMARY_PROMPT = """
+            你负责把 QQ 群聊的旧摘要与新增对话合并成一段新的中文摘要。
+            必须保留：参与者昵称和 QQ 号、未完成的话题、已经做出的承诺、偏好与禁忌、关键事实和结论。
+            可以省略：寒暄、重复、无意义的表情和与后续无关的闲聊。
+            不要编造，不要输出标题、Markdown 或过程说明；只输出 200-500 字的纯文本摘要。
+            """;
     private final MonitorChatTools tools;
     private final BotErrorTools errorTools;
     private final BotOrderTools orderTools;
@@ -165,6 +175,10 @@ public class BotChatClientFactory {
     private volatile ChatClient fallbackDecisionClient;
     private volatile boolean decisionUnavailable;
     private volatile boolean fallbackDecisionUnavailable;
+    private volatile ChatClient summaryClient;
+    private volatile ChatClient fallbackSummaryClient;
+    private volatile boolean summaryUnavailable;
+    private volatile boolean fallbackSummaryUnavailable;
 
     public BotChatClientFactory(MonitorChatTools tools,
                                 BotErrorTools errorTools,
@@ -280,6 +294,47 @@ public class BotChatClientFactory {
                 fallbackDecisionClient = built;
             } else {
                 decisionClient = built;
+            }
+            return built;
+        }
+    }
+    /** 群聊自动摘要客户端。 */
+    public ChatClient getSummaryClient() {
+        return getSummaryClient(false);
+    }
+
+    /** 获取备用模型的群聊摘要客户端。 */
+    public ChatClient getFallbackSummaryClient() {
+        return getSummaryClient(true);
+    }
+
+    private ChatClient getSummaryClient(boolean fallback) {
+        ChatClient current = fallback ? fallbackSummaryClient : summaryClient;
+        if (current != null) {
+            return current;
+        }
+        if (fallback ? fallbackSummaryUnavailable : summaryUnavailable) {
+            return null;
+        }
+        synchronized (this) {
+            current = fallback ? fallbackSummaryClient : summaryClient;
+            if (current != null) {
+                return current;
+            }
+            ChatClient.Builder builder = fallback ? createFallbackBuilder() : chatClientBuilder.getIfAvailable();
+            if (builder == null) {
+                if (fallback) {
+                    fallbackSummaryUnavailable = true;
+                } else {
+                    summaryUnavailable = true;
+                }
+                return null;
+            }
+            ChatClient built = builder.defaultSystem(SUMMARY_PROMPT).build();
+            if (fallback) {
+                fallbackSummaryClient = built;
+            } else {
+                summaryClient = built;
             }
             return built;
         }

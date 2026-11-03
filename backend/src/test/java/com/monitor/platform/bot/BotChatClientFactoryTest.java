@@ -158,6 +158,19 @@ class BotChatClientFactoryTest {
     }
 
     @Test
+    void summaryClientUsesDedicatedSummarizationPrompt() {
+        ChatClient.Builder builder = fluentBuilder();
+
+        ChatClient summaryClient = factory(builder).getSummaryClient();
+
+        assertThat(summaryClient).isNotNull();
+        var promptCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(builder).defaultSystem(promptCaptor.capture());
+        assertThat(promptCaptor.getValue())
+                .contains("旧摘要", "参与者昵称和 QQ 号", "200-500");
+    }
+
+    @Test
     void reportsUnavailableAndReturnsNullWhenNoBuilderConfigured() {
         BotChatClientFactory factory = factory(null);
 

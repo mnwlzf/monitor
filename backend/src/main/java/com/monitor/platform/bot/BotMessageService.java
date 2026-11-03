@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
@@ -128,6 +129,7 @@ public class BotMessageService {
     private final BotForbiddenWordService forbiddenWordService;
     private final BotEmailBindingService emailBindingService;
     private final BotLotteryService lotteryService;
+    private final BotGroupContextService groupContext;
 
     static final String FORBIDDEN_WORD_REPLY = "你的消息触发了违禁词，当前无法回答。请修改后重试。";
 
@@ -136,6 +138,8 @@ public class BotMessageService {
         thread.setDaemon(true);
         return thread;
     });
+    /** 同一会话的模型调用串行执行，避免多成员同时发言时记忆写入顺序错乱。 */
+    private final Map<String, Object> conversationLocks = new ConcurrentHashMap<>();
 
     public BotMessageService(BotSettingsService settingsService,
                              OneBotClient client,
@@ -163,7 +167,8 @@ public class BotMessageService {
                              BotGroupRedactor groupRedactor,
                              BotForbiddenWordService forbiddenWordService,
                              BotEmailBindingService emailBindingService,
-                             BotLotteryService lotteryService) {
+                             BotLotteryService lotteryService,
+                             BotGroupContextService groupContext) {
         this.settingsService = settingsService;
         this.client = client;
         this.parser = parser;
@@ -191,6 +196,7 @@ public class BotMessageService {
         this.forbiddenWordService = forbiddenWordService;
         this.emailBindingService = emailBindingService;
         this.lotteryService = lotteryService;
+        this.groupContext = groupContext;
     }
 
     /** 入口：OneBot 反向 HTTP 推过来的一条事件。 */
@@ -305,6 +311,9 @@ public class BotMessageService {
                         BotAccessPolicy.platformFeatureAllowed(identity, channel, contextGroup, settings);
                 boolean openAiStatusAllowed =
                         BotAccessPolicy.openAiStatusAllowed(identity, channel, contextGroup, settings);
+                BotChatClientFactory.CapabilityProfile capability = capabilityOf(identity, platformFeature);
+                String groupContextId = channel == BotChannel.GROUP && event.groupId() != null
+                        ? conversationId(event, capability, persona, channel, identity.admin()) : null;
                 if (channel == BotChannel.TEMP_SESSION) {
                     // 临时会话探针：确认 OneBot 实现是否带了发起群号（拿不到就按「不在指定群」处理）
                     log.info("收到群临时会话: user={}, 发起群={}, 平台数据={}, OpenAI状态={}",
@@ -339,7 +348,7 @@ public class BotMessageService {
 
                 // 拟人化自主回复：先由独立的大模型判断是否接话，命中后再走完整回答链路。
                 if (aiDecisionRequired && !shouldReplyWithAi(event, effectiveText, quoted.text(),
-                        persona, settings)) {
+                        persona, settings, groupContextId)) {
                     runtimeStatus.dropped(channel, event.groupId(), event.userId(), "AI 判断暂不接话");
                     runtimeStatus.finishTurn(turnId, "AI 判断暂不接话");
                     return;
@@ -397,6 +406,9 @@ public class BotMessageService {
                 // 再存档机器人回复：人设也记下来，便于日后解释「当时为什么这么答」
                 archive.recordOutbound(event, outcome.content(), outcome.kind(), identity,
                         persona.archiveLabel(), correlationId);
+                if (groupContextId != null) {
+                    groupContext.recordTurn(groupContextId, speakerLabel(event), archiveText, outcome.content());
+                }
             } catch (Exception uncaught) {
                 // submit() 返回的 Future 没人接收，任务里未捕获的异常会被静默吞掉：
                 // 没有日志、没有回复、连存档都没有 —— 线上表现就是「调用失败但用户什么都没收到」。
@@ -553,7 +565,8 @@ public class BotMessageService {
      * 拟人化自主回复的接话判断。显式命令和纯媒体消息不拦截，避免影响命令与图片处理。
      */
     private boolean shouldReplyWithAi(OneBotEvent event, String text, String quotedText,
-                                      BotPersonaSnapshot persona, BotSettings settings) {
+                                      BotPersonaSnapshot persona, BotSettings settings,
+                                      String groupContextId) {
         String plainText = text == null ? "" : text.strip();
         if (plainText.isBlank()) {
             return true;
@@ -571,15 +584,22 @@ public class BotMessageService {
             log.debug("未配置大模型，拟人化自主回复不接话: group={}", event.groupId());
             return false;
         }
+        String groupSummary = groupContextId == null ? "" : groupContext.summary(groupContextId);
         String prompt = """
                 机器人人设：%s
                 表达风格：%s
+                群聊上下文说明：消息前缀「昵称(QQ号)：」表示不同群成员；只回应当前消息的发送者，不要混淆成员身份。
+                群聊前情摘要：
+                %s
                 当前群消息：
+                %s：
                 %s
                 %s
                 """.formatted(
                 persona.name(),
                 persona.stylePrompt() == null ? "" : persona.stylePrompt(),
+                groupSummary.isBlank() ? "（暂无）" : groupSummary,
+                speakerLabel(event),
                 plainText,
                 quotedText == null || quotedText.isBlank() ? "" : "引用内容：\n" + quotedText);
         try {
@@ -615,6 +635,8 @@ public class BotMessageService {
         }
         return Boolean.parseBoolean(matcher.group(1).toLowerCase(Locale.ROOT));
     }
+
+
     private static boolean isLotteryIntent(String text) {
         String normalized = text == null ? "" : text.replaceAll("[。！!？?\\s]+$", "");
         return switch (normalized) {
@@ -655,6 +677,18 @@ public class BotMessageService {
             return text(message);
         }
         String promptText = parser.buildPrompt(text, quoted.text(), !images.isEmpty(), quotedHasImages);
+        if (channel == BotChannel.GROUP && event.groupId() != null) {
+            String contextId = conversationId(event, capability, persona, channel, identity.admin());
+            String groupSummary = groupContext.summary(contextId);
+            StringBuilder contextualPrompt = new StringBuilder();
+            contextualPrompt.append("【群聊上下文说明】历史消息以「昵称(QQ号)：」标记不同成员的发言，")
+                    .append("引用或指代时不要混淆说话人。\n\n");
+            if (!groupSummary.isBlank()) {
+                contextualPrompt.append("【群聊前情摘要】\n").append(groupSummary).append("\n\n");
+            }
+            contextualPrompt.append("【当前群消息】\n").append(speakerLabel(event)).append("：\n").append(promptText);
+            promptText = contextualPrompt.toString();
+        }
         BotGroupReplyPolicy activePolicy = channel.hasGroupContext()
                 ? settings.groupPolicy(event.groupId()) : null;
         if (activePolicy != null && activePolicy.strategy() == BotGroupReplyStrategy.AI_DECIDE) {
@@ -752,20 +786,22 @@ public class BotMessageService {
         // ToolContext 必须非空；即使事件缺少 userId 也放入空字符串，工具侧会按未知用户处理。
         request = request.toolContext(Map.of("qqUserId",
                 event.userId() == null ? "" : event.userId()));
+        String conversationId = conversationId(event, capability, persona, channel, identity.admin());
         ChatClient.ChatClientRequestSpec finalRequest = request
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID,
-                        conversationId(event, capability, persona, channel)));
-        try {
-            return finalRequest.call().content();
-        } catch (RuntimeException ex) {
-            if (!isSseConversionError(ex)) {
-                throw ex;
+                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId));
+        synchronized (conversationLocks.computeIfAbsent(conversationId, ignored -> new Object())) {
+            try {
+                return finalRequest.call().content();
+            } catch (RuntimeException ex) {
+                if (!isSseConversionError(ex)) {
+                    throw ex;
+                }
+                log.warn("大模型接口返回 SSE 而当前请求为非流式，自动降级为流式聚合并继续处理: user={}", event.userId());
+                java.util.List<String> chunks = finalRequest.stream().content()
+                        .collectList()
+                        .block(java.time.Duration.ofMinutes(2));
+                return chunks == null ? "" : String.join("", chunks);
             }
-            log.warn("大模型接口返回 SSE 而当前请求为非流式，自动降级为流式聚合并继续处理: user={}", event.userId());
-            java.util.List<String> chunks = finalRequest.stream().content()
-                    .collectList()
-                    .block(java.time.Duration.ofMinutes(2));
-            return chunks == null ? "" : String.join("", chunks);
         }
     }
 
@@ -802,6 +838,28 @@ public class BotMessageService {
     }
 
     /**
+     * 群聊共享记忆中的说话人标签：昵称 + QQ 号，避免多成员上下文归因错误。
+     */
+    static String speakerLabel(OneBotEvent event) {
+        String name = "";
+        if (event.sender() != null) {
+            name = event.sender().path("card").asText("");
+            if (name.isBlank()) {
+                name = event.sender().path("nickname").asText("");
+            }
+        }
+        name = name.replaceAll("\\s+", " ").trim();
+        if (name.isBlank()) {
+            name = "群成员";
+        }
+        if (name.length() > 40) {
+            name = name.substring(0, 40) + "…";
+        }
+        String userId = event.userId() == null ? "未知" : String.valueOf(event.userId());
+        return name + "(" + userId + ")";
+    }
+
+    /**
      * 群聊/群临时会话按群绑定解析人设；好友私聊使用默认人设。
      *
      * <p>人设只影响表达，不参与 {@link BotAccessPolicy} 的权限判断。</p>
@@ -829,33 +887,30 @@ public class BotMessageService {
     }
 
     /**
-     * 会话记忆按「人设 + 通道 + <strong>说话的人</strong>」隔离。
+     * 会话记忆按「人设 + 通道 + 权限」隔离；群聊在同一权限层内按群共享。
      *
-     * <p><strong>群聊也必须带上 userId</strong>：Spring AI 的 {@code MessageWindowChatMemory}
-     * 存的是一串没有署名的 user / assistant 消息，模型分不清哪句是谁说的。如果整个群共用一段记忆，
-     * 甲说过的话就会出现在乙的上下文里，看起来就像「把别人的聊天内容加到了另外的人身上」。</p>
+     * <p>群聊共享最近对话，让多成员连续接话和指代不断开；每条用户消息都带
+     * 「昵称(QQ号)」说话人标签，避免共享后被误认为同一人。管理员与普通用户
+     * 使用不同能力档案，因此不会互相读到对方带有权限信息的上下文。</p>
      *
-     * <p>临时会话与好友私聊都是 private 通道，只按 userId 分组还会把「指定群里问过的内容」
-     * 漏到好友私聊里，所以临时会话单独一个作用域。</p>
-     *
-     * <p>代价：群里不再有跨用户的共享上下文（「他刚才说的那个」这类指代会失效）。
-     * 要恢复共享又不串人，得让每一轮都带上说话人标签，那是另一套记忆实现。</p>
+     * <p>临时会话与好友私聊仍按用户隔离，避免把指定群里的内容漏到好友私聊。</p>
      */
     private String conversationId(OneBotEvent event, BotChatClientFactory.CapabilityProfile capability,
-                                  BotPersonaSnapshot persona, BotChannel channel) {
-        return capability.name().toLowerCase(Locale.ROOT) + "-persona-" + persona.id() + "-v" + persona.version()
+                                  BotPersonaSnapshot persona, BotChannel channel, boolean admin) {
+        return capability.name().toLowerCase(Locale.ROOT) + (admin ? "-admin" : "-user")
+                + "-persona-" + persona.id() + "-v" + persona.version()
                 + "-" + memoryScope(channel, event.groupId(), event.userId());
     }
 
     /**
      * 会话记忆的作用域（不含人设）。
      *
-     * <p>抽成包级静态方法是为了能在单测里直接验证隔离性 —— 这是踩过一次的坑：
-     * 群聊漏掉 userId 会让不同的人共用一段记忆。</p>
+     * <p>抽成包级静态方法是为了能在单测里直接验证隔离性。群聊刻意不再带 userId，
+     * 由消息中的说话人标签负责区分成员。</p>
      */
     static String memoryScope(BotChannel channel, Long groupId, long userId) {
         return switch (channel) {
-            case GROUP -> "qq-group-" + groupId + "-" + userId;
+            case GROUP -> "qq-group-" + groupId;
             case TEMP_SESSION -> "qq-temp-" + groupId + "-" + userId;
             case PRIVATE -> "qq-user-" + userId;
         };

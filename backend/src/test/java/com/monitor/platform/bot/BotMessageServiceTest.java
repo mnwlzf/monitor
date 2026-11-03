@@ -148,10 +148,12 @@ class BotMessageServiceTest {
         BotChatClientFactory chatClients = new BotChatClientFactory(tools, errorTools, orderTools, usageTools, weatherTools,
                 mock(WebSearchTools.class), mock(Sub2KeyTools.class), mock(OpsMonitoringTools.class),
                 new WebSearchProperties(), provider, new BotModelFallbackProperties());
+        BotGroupContextService groupContext = mock(BotGroupContextService.class);
+        when(groupContext.summary(any())).thenReturn("");
         BotCommandRouter commandRouter = new BotCommandRouter(
                 tools, orderTools, usageTools, channelStatusService, errorService, instanceErrorService, errorQueryGuard, errorQueryAuditService, botUserService, weatherTools, userCache, imageGenService, openAiStatusService, forbiddenWordService, emailBindingService, lotteryService, incidentService, monitoringService);
         service = new BotMessageService(
-                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, mock(BotPersonaService.class), reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService);
+                settingsService, client, new BotMessageParser(client), tools, channelStatusService, errorService, errorQueryGuard, errorQueryAuditService, imageGenService, runtimeStatus, botUserService, mock(BotBalanceService.class), mock(BotKeyUsageService.class), archive, imageFetcher, visionProperties, speechService, identityResolver, mock(BotPersonaService.class), reportRenderer, chatClients, commandRouter, openAiStatusService, groupRedactor, forbiddenWordService, emailBindingService, lotteryService, groupContext);
     }
 
     @Test
@@ -1394,19 +1396,38 @@ class BotMessageServiceTest {
         verify(client, timeout(3000)).sendPrivateMessage(eq(999L), reply.capture());
         assertEquals("这个命令我用不了，发送 /help 看看能做什么。", reply.getValue());
         verifyNoInteractions(channelStatusService);
-    }    // ============================================================ 会话记忆隔离
+    }
+
+    // ============================================================ 会话记忆隔离
 
     /**
-     * 同一个群里，不同的人绝不能共用一段记忆。
-     *
-     * <p>线上踩过：群聊作用域只带 groupId，A 说过的话进了 B 的上下文，
-     * 看起来就是「把别人的聊天内容加到了另外的人身上」。</p>
+     * 同一个群里的多成员共享同一段会话记忆，但每条消息都会带说话人标签。
      */
     @Test
-    void shouldIsolateMemoryPerUserInGroup() {
-        assertNotEquals(
+    void shouldShareMemoryAcrossMembersInSameGroup() {
+        assertEquals(
                 BotMessageService.memoryScope(BotChannel.GROUP, 222L, 10001L),
                 BotMessageService.memoryScope(BotChannel.GROUP, 222L, 10002L));
+    }
+
+    @Test
+    void shouldTagGroupSpeakerWithNicknameAndQq() throws Exception {
+        OneBotEvent event = event("""
+                {"post_type":"message","message_type":"group","group_id":222,"user_id":10001,
+                 "sender":{"card":" 群 名片 ","nickname":"备用昵称"}}
+                """);
+
+        assertEquals("群 名片(10001)", BotMessageService.speakerLabel(event));
+    }
+
+    @Test
+    void shouldFallBackToNicknameWhenGroupCardIsBlank() throws Exception {
+        OneBotEvent event = event("""
+                {"post_type":"message","message_type":"group","group_id":222,"user_id":10002,
+                 "sender":{"card":"","nickname":"普通昵称"}}
+                """);
+
+        assertEquals("普通昵称(10002)", BotMessageService.speakerLabel(event));
     }
 
     /** 同一个人：换群、私聊、临时会话都要各自独立，避免上下文串台。 */
