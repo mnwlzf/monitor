@@ -762,6 +762,10 @@
           </div>
         </el-form-item>
 
+        <el-form-item>
+          <el-button type="primary" :loading="botSaving" @click="saveBotSettingsForm">保存</el-button>
+          <span v-if="botUpdatedAt" class="admin-form-hint" style="margin-left: 12px">上次保存：{{ botUpdatedAt }}</span>
+        </el-form-item>
       </el-form>
     </el-card>
       </el-tab-pane>
